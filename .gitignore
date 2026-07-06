@@ -1,0 +1,57 @@
+# 环境变量文件
+.env
+.env.local
+.env.production
+
+# Node模块
+node_modules/
+
+# 日志文件
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pm2-*.log
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 上传文件
+uploads/
+backend/uploads/
+
+# 数据库文件
+*.sql
+*.db
+*.sqlite
+*.sqlite3
+MySQL_Data/
+mysql_local/
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 敏感数据文件
+login_data.json
+*.key
+*.pem
+*.cert
+
+# 构建文件
+dist/
+build/
+
+# PM2文件
+.pm2/

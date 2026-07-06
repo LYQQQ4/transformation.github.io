@@ -1,0 +1,57 @@
+# MySQL 数据库服务
+services:
+  db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword123}
+      MYSQL_DATABASE: order_system
+      TZ: Asia/Shanghai
+    # DB 不默认映射到宿主端口，避免与宿主 MySQL 冲突.
+    # 如果需要在宿主机上访问数据库，请创建或使用 `docker-compose.host.yml`。
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # 应用服务
+  app:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword123}
+      DB_NAME: order_system
+      USER_DB_HOST: db
+      USER_DB_PORT: 3306
+      USER_DB_USER: root
+      USER_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword123}
+      USER_DB_NAME: user_system
+      CORS_ORIGIN: "*"
+      DB_CONNECTION_LIMIT: 10
+      DB_QUEUE_LIMIT: 0
+      DB_CONNECT_TIMEOUT: 60000
+      DB_SSL: "false"
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./backend/uploads:/app/backend/uploads
+    command: sh -c "chmod +x docker-start.sh 2>/dev/null || true && node wait-for-db.js && node setup_db_docker.js && node backend/server.js"
+
+volumes:
+  mysql_data:

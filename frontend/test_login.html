@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录测试</title>
+</head>
+<body>
+    <h1>登录测试页面</h1>
+
+    <div>
+        <h2>测试登录</h2>
+        <input type="text" id="username" placeholder="用户名" value="林彦琦"><br><br>
+        <input type="password" id="password" placeholder="密码" value="123456"><br><br>
+        <button onclick="testLogin()">测试登录</button>
+    </div>
+
+    <div id="result"></div>
+
+    <script>
+        async function testLogin() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('http://localhost:3000/api/users/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const result = document.getElementById('result');
+                result.innerHTML = `<h3>响应状态: ${response.status}</h3>`;
+
+                if (response.ok) {
+                    const data = await response.json();
+                    result.innerHTML += `<pre>成功: ${JSON.stringify(data, null, 2)}</pre>`;
+                    result.innerHTML += '<p style="color: green;">✅ 登录API工作正常！</p>';
+                } else {
+                    const error = await response.json();
+                    result.innerHTML += `<pre>错误: ${JSON.stringify(error, null, 2)}</pre>`;
+                    result.innerHTML += `<p style="color: red;">❌ ${error.error}</p>`;
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `<p style="color: red;">网络错误: ${error.message}</p>`;
+            }
+        }
+
+        // 页面加载时自动测试
+        window.onload = function() {
+            // 可以在这里添加自动测试
+        };
+    </script>
+</body>
+</html>

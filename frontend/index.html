@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>运输订单管理系统</title>
+    <style>
+        /* 引入思源黑体和Inter字体 */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+        /* 全局样式 */
+        body {
+            font-family: 'Source Han Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #F8FAFC;
+            color: #374151;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        /* 整体布局 */
+        .app-container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* 左侧菜单栏 */
+        .sidebar {
+            width: 250px;
+            background-color: #1F2937;
+            color: white;
+            padding: 20px 0;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-content {
+            flex: 1;
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            padding-top: 12px;
+            padding-bottom: 24px;
+        }
+
+        .sidebar-footer a {
+            display: block;
+            padding: 12px 20px;
+            color: #D1D5DB;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .sidebar-footer a:hover {
+            background-color: #374151;
+            color: white;
+            border-left-color: #F59E0B;
+        }
+
+        .sidebar h1 {
+            font-size: 18px;
+            margin: 0 20px 20px 20px;
+            color: #F59E0B;
+            font-weight: 600;
+        }
+
+        .sidebar h2 {
+            font-size: 14px;
+            margin: 20px 20px 10px 20px;
+            color: #9CA3AF;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .sidebar ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .sidebar li {
+            margin: 0;
+        }
+
+        .sidebar a {
+            display: block;
+            padding: 12px 20px;
+            color: #D1D5DB;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .sidebar a:hover {
+            background-color: #374151;
+            color: white;
+            border-left-color: #F59E0B;
+        }
+
+        .sidebar a.active {
+            background-color: #374151;
+            color: white;
+            border-left-color: #F59E0B;
+        }
+
+        /* 主内容区域 */
+        .main-content {
+            flex: 1;
+            margin-left: 250px;
+            padding: 20px;
+            background-color: #F8FAFC;
+        }
+
+        h1, h2 {
+            color: #111827;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        h1 { font-size: 24px; }
+        h2 { font-size: 18px; }
+
+        /* 订单管理标题特殊样式 */
+        .section h2:first-child {
+            margin-top: -8px;
+            margin-bottom: 20px;
+        }
+
+        /* 表格样式 */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 20px;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        th, td {
+            border: 1px solid #E5E7EB;
+            padding: 12px;
+            text-align: left;
+            font-size: 14px;
+        }
+
+        th {
+            background-color: #F9FAFB;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        tbody tr:hover {
+            background-color: #F9FAFB;
+        }
+
+        /* 订单表格业务类型列不换行 */
+        #ordersTable td:nth-child(4) {
+            white-space: nowrap;
+        }
+
+        /* 按钮样式 */
+        button {
+            padding: 8px 16px;
+            margin: 2px;
+            cursor: pointer;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            font-family: 'Source Han Sans SC', 'Inter', sans-serif;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 主要按钮（琥珀色功能色） */
+        button[type="button"], button:not([type]) {
+            background-color: #F59E0B;
+            color: #ffffff;
+        }
+
+        button[type="button"]:hover, button:not([type]):hover {
+            background-color: #D97706;
+        }
+
+        /* 表单样式 */
+        .form-group {
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+        }
+
+        label {
+            display: inline-block;
+            width: 120px;
+            font-weight: 500;
+            color: #374151;
+            margin-right: 12px;
+        }
+
+        input[type="text"], input[type="email"], input[type="password"], input[type="date"], select, textarea {
+            width: 200px;
+            padding: 8px 12px;
+            border: 1px solid #D1D5DB;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'Source Han Sans SC', 'Inter', sans-serif;
+            background-color: #ffffff;
+            color: #374151;
+            transition: border-color 0.2s ease;
+        }
+
+        input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus, input[type="date"]:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #F59E0B;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+        }
+
+        .date-input-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .date-input-group .date-input {
+            width: 100%;
+            text-align: center;
+        }
+
+        .date-input-group .date-separator {
+            color: #6B7280;
+            font-weight: 600;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        /* 区块样式 */
+        .section {
+            margin-bottom: 32px;
+            background-color: #ffffff;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 消息样式 */
+        .success { color: #059669; }
+        .error { color: #DC2626; }
+        .info { color: #6B7280; }
+
+        .button-group {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        /* 认证区块 */
+        #authSection {
+            max-width: 400px;
+            margin: 50px auto;
+            padding: 32px;
+            background-color: #ffffff;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 弹窗样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(17, 24, 39, 0.6);
+            backdrop-filter: blur(2px);
+        }
+
+        .modal-content {
+            background-color: #ffffff;
+            margin: 5% auto;
+            padding: 24px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #E5E7EB;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #111827;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #6B7280;
+            padding: 4px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .modal-close:hover {
+            color: #374151;
+            background-color: #F3F4F6;
+        }
+
+        /* 导入区块样式 */
+        .import-section {
+            margin-bottom: 24px;
+            padding: 16px;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            background-color: #F9FAFB;
+        }
+
+        .import-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            background-color: #ffffff;
+            margin-bottom: 16px;
+        }
+
+        .import-controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .link-button {
+            background: none;
+            border: none;
+            padding: 0;
+            color: #374151;
+            cursor: pointer;
+            text-decoration: underline;
+            font: inherit;
+            box-shadow: none;
+        }
+
+        .link-button:hover {
+            color: #2563EB;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+            font-size: 14px;
+            color: #374151;
+        }
+
+        .import-section h4 {
+            margin: 0 0 12px 0;
+            color: #374151;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .import-section input[type="file"] {
+            margin-right: 12px;
+            padding: 6px;
+            border: 1px solid #D1D5DB;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        /* 导入消息样式 */
+        #importMessage {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-top: 12px;
+            font-size: 14px;
+            line-height: 1.4;
+            font-weight: 500;
+        }
+
+        #importMessage.success {
+            background-color: #ECFDF5;
+            color: #065F46;
+            border: 1px solid #A7F3D0;
+        }
+
+        #importMessage.error {
+            background-color: #FEF2F2;
+            color: #991B1B;
+            border: 1px solid #FECACA;
+        }
+
+        #importMessage.info {
+            background-color: #EFF6FF;
+            color: #1E40AF;
+            border: 1px solid #BFDBFE;
+        }
+
+        /* 导入结果样式 */
+        #importResults h5 {
+            margin: 0 0 12px 0;
+            color: #374151;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        #importSummary {
+            margin-bottom: 12px;
+        }
+
+        #importSummary p {
+            margin: 4px 0;
+            font-size: 14px;
+            color: #4B5563;
+        }
+
+        #importErrors {
+            border: 1px solid #E5E7EB;
+            border-radius: 4px;
+            padding: 12px;
+            background-color: #F9FAFB;
+            font-family: 'Source Han Sans SC', 'Inter', monospace;
+            font-size: 12px;
+        }
+
+        #importErrors h6 {
+            margin: 0 0 8px 0;
+            color: #DC2626;
+            font-weight: 600;
+        }
+
+        #importErrors ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+
+        #importErrors li {
+            margin: 4px 0;
+            color: #7F1D1D;
+        }
+    </style>
+</head>
+<body>
+    <!-- 认证页面 -->
+    <div id="authSection">
+        <h1>运输订单管理系统</h1>
+
+        <!-- 登录表单 -->
+        <div id="loginForm">
+            <h2>用户登录</h2>
+            <div class="form-group">
+                <label>用户名:</label>
+                <input type="text" id="loginUsername" placeholder="输入用户名" required>
+            </div>
+            <div class="form-group">
+                <label>密码:</label>
+                <input type="password" id="loginPassword" placeholder="输入密码" required>
+            </div>
+            <div class="button-group">
+                <button onclick="login()">登录</button>
+                <button onclick="showRegisterForm()">注册新用户</button>
+            </div>
+            <div id="loginMessage"></div>
+        </div>
+
+        <!-- 注册表单 -->
+        <div id="registerForm" style="display:none;">
+            <h2>用户注册</h2>
+            <div class="form-group">
+                <label>用户名:</label>
+                <input type="text" id="registerUsername" placeholder="输入用户名" required>
+            </div>
+            <div class="form-group">
+                <label>密码:</label>
+                <input type="password" id="registerPassword" placeholder="输入密码" required>
+            </div>
+            <div class="form-group">
+                <label>确认密码:</label>
+                <input type="password" id="registerConfirmPassword" placeholder="确认密码" required>
+            </div>
+            <div class="button-group">
+                <button onclick="register()">注册</button>
+                <button onclick="showLoginForm()">返回登录</button>
+            </div>
+        </div>
+        <div id="authMessage"></div>
+    </div>
+
+    <!-- 主应用界面 -->
+    <div id="mainApp" style="display:none;">
+        <div class="app-container">
+            <!-- 左侧菜单栏 -->
+            <div class="sidebar">
+                <h1>运输订单管理系统</h1>
+                <div class="sidebar-content">
+                    <h2>发货管理</h2>
+                    <ul>
+                        <li><a href="#" id="viewOrdersLink" class="active" onclick="showPage('viewOrders')">　　查看货物订单</a></li>
+                        <li><a href="#" id="packagingLink" onclick="showPage('packaging')">　　包装信息维护</a></li>
+                        <li><a href="#" id="pickupTrackingLink" onclick="showPage('pickupTracking')">　　提货运输跟踪</a></li>
+                        <li><a href="#" id="customsLink" onclick="showPage('customs')">　　报关信息维护跟踪</a></li>
+                        <li><a href="#" id="logisticsLink" onclick="showPage('logistics')">　　送货运输跟踪</a></li>
+                        <li><a href="#" id="billingLink" onclick="showPage('billing')">　　账单信息维护</a></li>
+                    </ul>
+
+                    <h2>系统管理</h2>
+                    <ul>
+                        <li><a href="#" id="senderDBLink" onclick="showPage('senderDB')">　　发件人信息库</a></li>
+                        <li><a href="#" id="customerDBLink" onclick="showPage('customerDB')">　　客户信息库</a></li>
+                        <li><a href="#" id="productDBLink" onclick="showPage('productDB')">　　产品信息库</a></li>
+                        <li><a href="#" id="packagingDBLink" onclick="showPage('packagingDB')">　　包装信息库</a></li>
+                        <li><a href="#" id="userManagementLink" onclick="showPage('userManagement')">　　用户管理</a></li>
+                    </ul>
+                </div>
+
+                <div class="sidebar-footer">
+                    <a href="#" onclick="logout()">退出登录</a>
+                </div>
+            </div>
+
+            <!-- 主内容区域 -->
+            <div class="main-content">
+                <!-- 导入与批量导入模块 -->
+                <div id="ordersImportBar" class="import-bar">
+                    <div class="import-controls">
+                        <input type="file" id="excelFile" accept=".xlsx,.xls">
+                        <button type="button" onclick="importExcelBatch()">批量导入</button>
+                    </div>
+                    <div id="importMessage"></div>
+                </div>
+                <div id="importResults" class="import-section" style="display: none;">
+                    <h5>导入结果</h5>
+                    <div id="importSummary"></div>
+                    <div id="importErrors"></div>
+                </div>
+
+                <!-- 查看货物订单页面 -->
+                <div id="viewOrdersPage" class="page">
+                    <div class="section">
+                        <h2>查看货物订单</h2>
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <button onclick="showOrderForm()">新增货物订单</button>
+                            <button onclick="loadOrders()">加载订单</button>
+                            <button onclick="showFilterForm()">筛选</button>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" id="searchInput" placeholder="搜索订单..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 200px;">
+                                <button onclick="searchOrders()">搜索</button>
+                            </div>
+                        </div>
+                        <table id="ordersTable">
+                            <thead>
+                                <tr>
+                                    <th>流水号</th>
+                                    <th>公司名称</th>
+                                    <th>指令人</th>
+                                    <th>业务类型</th>
+                                    <th>客户ID</th>
+                                    <th>发件人ID</th>
+                                    <th>接收指令日期</th>
+                                    <th>始发地</th>
+                                    <th>目的地</th>
+                                    <th>贸易术语</th>
+                                    <th>货物品名</th>
+                                    <th>备注1</th>
+                                    <th>备注2</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 订单详情页面 -->
+                <div id="orderDetailPage" class="page" style="display:none;">
+                    <div class="section">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h2 style="margin: 0;">订单详情</h2>
+                            <button type="button" onclick="showPage('viewOrders')">返回查看货物订单</button>
+                        </div>
+                        <div id="orderDetailContent"></div>
+                        <div id="orderPackageSection" style="margin-top: 24px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <h3 style="margin: 0;">包装信息维护</h3>
+                                <button type="button" onclick="openPackageFormFromOrderDetail()">修改包装信息</button>
+                            </div>
+                            <div id="orderPackageContent"></div>
+                        </div>
+                        <div id="orderPickupTrackingSection" style="margin-top: 24px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <h3 style="margin: 0;">提货运输跟踪</h3>
+                                <button type="button" onclick="openPickupTrackingFormFromOrderDetail()">修改提货运输跟踪</button>
+                            </div>
+                            <div id="orderPickupTrackingContent"></div>
+                        </div>
+                        <div id="orderDeliveryTrackingSection" style="margin-top: 24px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <h3 style="margin: 0;">送货运输跟踪</h3>
+                                <button type="button" onclick="openTransferFormFromOrderDetail()">修改送货运输跟踪</button>
+                            </div>
+                            <div id="orderDeliveryTrackingContent"></div>
+                        </div>
+                        <div id="orderCustomsClearanceSection" style="margin-top: 24px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <h3 style="margin: 0;">报关信息维护跟踪</h3>
+                                <button type="button" onclick="openCustomsFormFromOrderDetail()">修改报关信息</button>
+                            </div>
+                            <div id="orderCustomsClearanceContent"></div>
+                        </div>
+                        <div id="orderLogisticsSection" style="margin-top: 24px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <h3 style="margin: 0;">物流信息维护</h3>
+                                <button type="button" onclick="openTransferFormFromOrderDetail()">修改物流信息</button>
+                            </div>
+                            <div id="orderLogisticsContent"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 包装信息维护页面 -->
+                <div id="packagingPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>包装信息维护</h2>
+
+                        <!-- 批量导入Excel文件区块 -->
+                        <div class="import-section" style="margin-bottom: 24px;">
+                            <h4>批量导入Excel文件</h4>
+                            <input type="file" id="packageExcelFile" accept=".xlsx,.xls">
+                            <button type="button" onclick="previewPackageExcel()">预览数据</button>
+                            <button type="button" onclick="importPackageExcelBatch()" style="margin-left: 8px;">批量导入</button>
+                            <div id="packageImportMessage"></div>
+                            <div id="packageImportResults" style="display: none;">
+                                <h5>导入结果</h5>
+                                <div id="packageImportSummary"></div>
+                                <div id="packageImportErrors"></div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <button onclick="loadPackages()">加载包装信息</button>
+                            <button onclick="showPackageForm()">修改包装信息</button>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" id="packageSearchInput" placeholder="搜索流水号或品名..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 220px;">
+                                <button onclick="searchPackages()">搜索</button>
+                            </div>
+                        </div>
+                        <table id="packagesTable">
+                            <thead>
+                                <tr>
+                                    <th>流水号</th>
+                                    <th>件数</th>
+                                    <th>长</th>
+                                    <th>宽</th>
+                                    <th>高</th>
+                                    <th>体积</th>
+                                    <th>计费重量</th>
+                                    <th>包装种类</th>
+                                    <th>货物品名</th>
+                                    <th>备注1</th>
+                                    <th>备注2</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 提货运输跟踪页面 -->
+                <div id="pickupTrackingPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>提货运输跟踪</h2>
+
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <button onclick="loadPickupTrackings()">加载提货运输跟踪</button>
+                            <button onclick="showPickupTrackingForm()">修改提货运输跟踪</button>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" id="pickupTrackingSearchInput" placeholder="搜索流水号、运单号或供应商..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 220px;">
+                                <button onclick="searchPickupTrackings()">搜索</button>
+                            </div>
+                        </div>
+                        <table id="pickupTrackingsTable">
+                            <thead>
+                                <tr>
+                                    <th>流水号</th>
+                                    <th>运输方式</th>
+                                    <th>运单号</th>
+                                    <th>始发地</th>
+                                    <th>目的地</th>
+                                    <th>报关口岸</th>
+                                    <th>提货日期</th>
+                                    <th>到货时间</th>
+                                    <th>运输供应商</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 报关信息维护跟踪页面 -->
+                <div id="customsPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>报关信息维护跟踪</h2>
+
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <button onclick="loadCustomsClearance()">加载报关信息</button>
+                            <button onclick="showCustomsForm()">修改报关信息</button>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" id="customsSearchInput" placeholder="搜索流水号或报关单号..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 220px;">
+                                <button onclick="searchCustomsClearance()">搜索</button>
+                            </div>
+                        </div>
+                        <table id="customsTable">
+                            <thead>
+                                <tr>
+                                    <th>流水号</th>
+                                    <th>开始报关时间</th>
+                                    <th>付税时间</th>
+                                    <th>放行时间</th>
+                                    <th>报关单号</th>
+                                    <th>报关供应商</th>
+                                    <th>备注1</th>
+                                    <th>备注2</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 送货运输跟踪页面 -->
+                <div id="logisticsPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>送货运输跟踪</h2>
+
+                        <!-- 批量导入Excel文件区块 -->
+                        <div class="import-section" style="margin-bottom: 24px;">
+                            <h4>批量导入Excel文件</h4>
+                            <input type="file" id="transferExcelFile" accept=".xlsx,.xls">
+                            <button type="button" onclick="previewTransferExcel()">预览数据</button>
+                            <button type="button" onclick="importTransferExcelBatch()" style="margin-left: 8px;">批量导入</button>
+                            <div id="transferImportMessage"></div>
+                            <div id="transferImportResults" style="display: none;">
+                                <h5>导入结果</h5>
+                                <div id="transferImportSummary"></div>
+                                <div id="transferImportErrors"></div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <button onclick="loadTransfers()">加载送货运输跟踪</button>
+                            <button onclick="showTransferForm()">修改送货运输跟踪</button>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" id="transferSearchInput" placeholder="搜索流水号、运单号或供应商..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 200px;">
+                                <button onclick="searchTransfers()">搜索</button>
+                            </div>
+                        </div>
+                        <table id="transfersTable">
+                            <thead>
+                                <tr>
+                                    <th>流水号</th>
+                                    <th>运输方式</th>
+                                    <th>运单号</th>
+                                    <th>提货日期</th>
+                                    <th>到货时间</th>
+                                    <th>运输供应商</th>
+                                    <th>货物流转信息</th>
+                                    <th>增值服务备注</th>
+                                    <th>完整单据回复时间</th>
+                                    <th>备注1</th>
+                                    <th>备注2</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 账单信息维护页面 -->
+                <div id="billingPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>账单信息维护</h2>
+                        <p>账单信息维护功能正在开发中...</p>
+                    </div>
+                </div>
+
+                <!-- 发件人信息库页面 -->
+                <div id="senderDBPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>发件人信息库</h2>
+
+                        <div class="import-section" style="margin-bottom: 24px;">
+                            <h4>批量导入Excel文件</h4>
+                            <input type="file" id="senderExcelFile" accept=".xlsx,.xls">
+                            <button type="button" onclick="previewSenderExcel()">预览数据</button>
+                            <button type="button" onclick="importSenderExcelBatch()" style="margin-left: 8px;">批量导入</button>
+                            <div id="senderImportMessage"></div>
+                            <div id="senderImportResults" style="display: none;">
+                                <h5>导入结果</h5>
+                                <div id="senderImportSummary"></div>
+                                <div id="senderImportErrors"></div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <button onclick="loadSenders()">加载发件人信息</button>
+                            <button onclick="showSenderForm()">新增发件人</button>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" id="senderSearchInput" placeholder="搜索发件人ID/发件人/电话..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 240px;">
+                                <button onclick="searchSenders()">搜索</button>
+                            </div>
+                        </div>
+
+                        <div id="senderForm" style="display:none; margin-top: 16px; padding: 16px; background-color: #F9FAFB; border-radius: 6px; border: 1px solid #E5E7EB;">
+                            <h3 style="margin: 0 0 16px 0; color: #111827; font-size: 16px; font-weight: 600;">发件人表单</h3>
+                            <form id="senderFormData">
+                                <div class="form-group">
+                                    <label>发件人ID:</label>
+                                    <input type="text" id="senderInfoId" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>发货地址:</label>
+                                    <textarea id="senderInfoAddress"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>发件人:</label>
+                                    <input type="text" id="senderInfoName">
+                                </div>
+                                <div class="form-group">
+                                    <label>发件人电话:</label>
+                                    <input type="text" id="senderInfoPhone">
+                                </div>
+                                <div class="button-group" style="text-align: left; margin-top: 16px;">
+                                    <button type="button" onclick="saveSender()">保存</button>
+                                    <button type="button" onclick="hideSenderForm()">取消</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <table id="sendersTable">
+                            <thead>
+                                <tr>
+                                    <th>发件人ID</th>
+                                    <th>发货地址</th>
+                                    <th>发件人</th>
+                                    <th>发件人电话</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 客户信息库页面 -->
+                <div id="customerDBPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>客户信息库</h2>
+
+                        <!-- 批量导入Excel文件区块 -->
+                        <div class="import-section" style="margin-bottom: 24px;">
+                            <h4>批量导入Excel文件</h4>
+                            <input type="file" id="customerExcelFile" accept=".xlsx,.xls">
+                            <button type="button" onclick="previewCustomerExcel()">预览数据</button>
+                            <button type="button" onclick="importCustomerExcelBatch()" style="margin-left: 8px;">批量导入</button>
+                            <div id="customerImportMessage"></div>
+                            <div id="customerImportResults" style="display: none;">
+                                <h5>导入结果</h5>
+                                <div id="customerImportSummary"></div>
+                                <div id="customerImportErrors"></div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <button onclick="loadCustomers()">加载客户信息</button>
+                            <button onclick="showCustomerForm()">新增客户</button>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" id="customerSearchInput" placeholder="搜索客户ID/收件人/电话..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 220px;">
+                                <button onclick="searchCustomers()">搜索</button>
+                            </div>
+                        </div>
+
+                        <div id="customerForm" style="display:none; margin-top: 16px; padding: 16px; background-color: #F9FAFB; border-radius: 6px; border: 1px solid #E5E7EB;">
+                            <h3 style="margin: 0 0 16px 0; color: #111827; font-size: 16px; font-weight: 600;">客户表单</h3>
+                            <form id="customerFormData">
+                                <div class="form-group">
+                                    <label>客户ID:</label>
+                                    <input type="text" id="customerInfoId" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>收货地址:</label>
+                                    <textarea id="customerInfoAddress"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>收件人:</label>
+                                    <input type="text" id="customerInfoReceiver">
+                                </div>
+                                <div class="form-group">
+                                    <label>收件人电话:</label>
+                                    <input type="text" id="customerInfoPhone">
+                                </div>
+                                <div class="button-group" style="text-align: left; margin-top: 16px;">
+                                    <button type="button" onclick="saveCustomer()">保存</button>
+                                    <button type="button" onclick="hideCustomerForm()">取消</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <table id="customersTable">
+                            <thead>
+                                <tr>
+                                    <th>客户ID</th>
+                                    <th>收货地址</th>
+                                    <th>收件人</th>
+                                    <th>收件人电话</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 产品信息库页面 -->
+                <div id="productDBPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>产品信息库</h2>
+
+                        <div style="display:flex; gap:12px; align-items:center; margin-bottom:16px;">
+                            <button onclick="loadProducts()">加载产品</button>
+                            <button onclick="showProductForm()">新增产品</button>
+                            <div style="flex:1"></div>
+                        </div>
+
+                        <div id="productForm" style="display:none; margin-top:16px; padding:16px; background-color:#F9FAFB; border-radius:6px; border:1px solid #E5E7EB;">
+                            <h3 style="margin:0 0 12px 0; color:#111827; font-size:16px; font-weight:600;">产品表单</h3>
+                            <form id="productFormData">
+                                <div class="form-group">
+                                    <label>产品ID:</label>
+                                    <input type="text" id="productIdField" readonly>
+                                </div>
+                                <div class="form-group">
+                                    <label>品名:</label>
+                                    <input type="text" id="productNameCn">
+                                </div>
+                                <div class="form-group">
+                                    <label>英文描述:</label>
+                                    <input type="text" id="productDescriptionEn">
+                                </div>
+                                <div class="form-group">
+                                    <label>HS CODE:</label>
+                                    <input type="text" id="productHsCode">
+                                </div>
+                                <div class="form-group">
+                                    <label>申报要素:</label>
+                                    <textarea id="productDeclaration"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>产地:</label>
+                                    <input type="text" id="productOrigin">
+                                </div>
+                                <div class="form-group">
+                                    <label>备注:</label>
+                                    <textarea id="productRemark"></textarea>
+                                </div>
+                                <div class="button-group" style="text-align:left; margin-top:12px;">
+                                    <button type="button" onclick="saveProduct()">保存</button>
+                                    <button type="button" onclick="hideProductForm()">取消</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <table id="productsTable">
+                            <thead>
+                                <tr>
+                                    <th>产品ID</th>
+                                    <th>品名</th>
+                                    <th>英文描述</th>
+                                    <th>HS CODE</th>
+                                    <th>产地</th>
+                                    <th>申报要素</th>
+                                    <th>备注</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 包装信息库页面 -->
+                <div id="packagingDBPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>包装信息库</h2>
+                        <p>包装信息库功能正在开发中...</p>
+                    </div>
+                </div>
+
+                <!-- 用户管理页面 -->
+                <div id="userManagementPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>用户管理</h2>
+                        <button onclick="loadUsers()">加载用户</button>
+                        <button onclick="showUserForm()">新增用户</button>
+                        <div id="userForm" style="display:none; margin-top: 16px; padding: 16px; background-color: #F9FAFB; border-radius: 6px; border: 1px solid #E5E7EB;">
+                            <h3 style="margin: 0 0 16px 0; color: #111827; font-size: 16px; font-weight: 600;">用户表单</h3>
+                            <form id="userFormData">
+                                <div class="form-group">
+                                    <label>用户名:</label>
+                                    <input type="text" id="username" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>密码:</label>
+                                    <input type="password" id="password" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>角色:</label>
+                                    <select id="userRole">
+                                        <option value="user">用户</option>
+                                        <option value="admin">管理员</option>
+                                    </select>
+                                </div>
+                                <div class="button-group" style="text-align: left; margin-top: 16px;">
+                                    <button type="button" onclick="saveUser()">保存</button>
+                                    <button type="button" onclick="hideUserForm()">取消</button>
+                                </div>
+                            </form>
+                        </div>
+                        <table id="usersTable">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>用户名</th>
+                                    <th>角色</th>
+                                    <th>创建时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="message"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 筛选弹窗 -->
+    <div id="filterModal" class="modal" onclick="if(event.target === this) hideFilterForm()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>筛选订单</h3>
+                <button class="modal-close" onclick="hideFilterForm()">&times;</button>
+            </div>
+            <form id="filterFormData">
+                <div class="form-group">
+                    <label>公司名称:</label>
+                    <input type="text" id="filterCompanyName">
+                </div>
+                <div class="form-group">
+                    <label>指令人:</label>
+                    <input type="text" id="filterOrderer">
+                </div>
+                <div class="form-group">
+                    <label>业务类型:</label>
+                    <input type="text" id="filterBusinessType">
+                </div>
+                <div class="form-group">
+                    <label>客户ID:</label>
+                    <input type="text" id="filterCustomerId">
+                </div>
+                <div class="form-group">
+                    <label>始发地:</label>
+                    <input type="text" id="filterOrigin">
+                </div>
+                <div class="form-group">
+                    <label>目的地:</label>
+                    <input type="text" id="filterDestination">
+                </div>
+                <div class="form-group">
+                    <label>开始日期:</label>
+                    <input type="date" id="filterStartDate">
+                </div>
+                <div class="form-group">
+                    <label>结束日期:</label>
+                    <input type="date" id="filterEndDate">
+                </div>
+                <div class="button-group">
+                    <button type="button" onclick="applyFilters()">应用筛选</button>
+                    <button type="button" onclick="clearFilters()">清除筛选</button>
+                    <button type="button" onclick="hideFilterForm()">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 订单弹窗 -->
+    <div id="orderModal" class="modal" onclick="if(event.target === this) hideOrderForm()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="orderModalTitle">新增订单</h3>
+                <button class="modal-close" onclick="hideOrderForm()">&times;</button>
+            </div>
+            <form id="orderFormData">
+                <div class="form-group">
+                    <label>公司抬头:</label>
+                    <input type="text" id="companyName" required>
+                </div>
+                <div class="form-group">
+                    <label>指令人:</label>
+                    <input type="text" id="orderer" required>
+                </div>
+                <div class="form-group">
+                    <label>接收指令日期:</label>
+                    <div class="date-input-group">
+                        <input type="text" id="receiveDateYear" class="date-input" placeholder="YYYY" inputmode="numeric" maxlength="4" required>
+                        <span class="date-separator">/</span>
+                        <input type="text" id="receiveDateMonth" class="date-input" placeholder="MM" inputmode="numeric" maxlength="2" required>
+                        <span class="date-separator">/</span>
+                        <input type="text" id="receiveDateDay" class="date-input" placeholder="DD" inputmode="numeric" maxlength="2" required>
+                        <input type="hidden" id="receiveDate">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>业务类型:</label>
+                    <input type="text" id="businessType" required>
+                </div>
+                <div class="form-group">
+                    <label>客户ID:</label>
+                    <input type="text" id="customerId" required>
+                </div>
+                <div class="form-group">
+                    <label>发件人ID:</label>
+                    <input type="text" id="senderId">
+                </div>
+                <div class="form-group">
+                    <label>发货地址:</label>
+                    <textarea id="shippingAddress" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>发件人:</label>
+                    <input type="text" id="senderName" required>
+                </div>
+                <div class="form-group">
+                    <label>发件人电话:</label>
+                    <input type="text" id="senderPhone" required>
+                </div>
+                <div class="form-group">
+                    <label>收货地址:</label>
+                    <textarea id="deliveryAddress" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>收件人:</label>
+                    <input type="text" id="receiverName" required>
+                </div>
+                <div class="form-group">
+                    <label>收件人电话:</label>
+                    <input type="text" id="receiverPhone" required>
+                </div>
+                <div class="form-group">
+                    <label>始发地:</label>
+                    <input type="text" id="origin" required>
+                </div>
+                <div class="form-group">
+                    <label>目的地:</label>
+                    <input type="text" id="destination" required>
+                </div>
+                <div class="form-group">
+                    <label>贸易术语:</label>
+                    <input type="text" id="tradeTerm">
+                </div>
+                <div class="form-group">
+                    <label>货物品名:</label>
+                    <input type="text" id="productName">
+                </div>
+                <div class="form-group">
+                    <label>备注1:</label>
+                    <textarea id="orderRemark1"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>备注2:</label>
+                    <textarea id="orderRemark2"></textarea>
+                </div>
+                <div class="button-group">
+                    <button type="button" onclick="saveOrder()">保存</button>
+                    <button type="button" onclick="hideOrderForm()">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+    <script src="app.js" defer></script>
+</body>
+</html>
