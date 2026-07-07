@@ -106,6 +106,8 @@ async function setupDatabase() {
       CREATE TABLE IF NOT EXISTS package (
         id INT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
         serial_number VARCHAR(100) NOT NULL COMMENT '订单序列号',
+        package_label VARCHAR(50) DEFAULT NULL COMMENT '包装标签',
+        package_order INT DEFAULT 1 COMMENT '包装排序',
         product_name VARCHAR(200) DEFAULT NULL COMMENT '品名',
         product_code VARCHAR(100) DEFAULT NULL COMMENT '商品编号',
         pieces INT DEFAULT NULL COMMENT '件数',
@@ -122,8 +124,8 @@ async function setupDatabase() {
         remark2 VARCHAR(1000) DEFAULT NULL COMMENT '备注2',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-        UNIQUE KEY unique_serial_number (serial_number),
-        INDEX idx_serial_number (serial_number)
+        INDEX idx_serial_number (serial_number),
+        INDEX idx_serial_package_order (serial_number, package_order)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='包裹信息表'
     `);
     console.log('    ✓ package 表已创建');

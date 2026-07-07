@@ -121,8 +121,8 @@ module.exports = (db) => {
           const [result] = await connection.execute(sql, [company_name, orderer, receive_date, business_type, customer_id, sender_id || null, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term || null, product_name || null, remark1 || null, remark2 || null, serialNumber]);
 
           // 同时在package表中插入记录，使用相同的serial_number，只填入serial_number，其他字段为空
-          const packageSql = "INSERT INTO \`package\` (serial_number) VALUES (?)";
-          await connection.execute(packageSql, [serialNumber]);
+          const packageSql = "INSERT INTO \`package\` (serial_number, package_label, package_order) VALUES (?, ?, ?)";
+          await connection.execute(packageSql, [serialNumber, "包装1", 1]);
 
           // transfer.tracking_number 有唯一约束，创建订单时需写入唯一运单号避免重复键冲突。
           const transferSql = "INSERT INTO transfer (serial_number, tracking_number) VALUES (?, ?)";
@@ -367,8 +367,8 @@ module.exports = (db) => {
               const [insertResult] = await rowConnection.execute(sql, [company_name, orderer, receive_date, business_type, customer_id, sender_id || null, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term || null, product_name || null, remark1 || null, remark2 || null, serialNumber]);
 
               // 同时在package表中插入记录，使用相同的serial_number
-              const packageSql = "INSERT INTO \`package\` (serial_number) VALUES (?)";
-              await rowConnection.execute(packageSql, [serialNumber]);
+              const packageSql = "INSERT INTO \`package\` (serial_number, package_label, package_order) VALUES (?, ?, ?)";
+              await rowConnection.execute(packageSql, [serialNumber, "包装1", 1]);
 
               // 同时在transfer表中插入记录，使用相同的serial_number
               const transferSql = "INSERT INTO transfer (serial_number, tracking_number) VALUES (?, ?)";

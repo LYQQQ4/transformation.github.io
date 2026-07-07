@@ -271,6 +271,8 @@ function updateReceiveDateHidden(form) {
     } else {
         hiddenInput.value = "";
     }
+
+    syncSplitDatePickerValue("receiveDate", form);
 }
 
 function setReceiveDateValue(value, form = getVisibleOrderForm()) {
@@ -315,6 +317,7 @@ function resetReceiveDateInputs(form) {
     if (monthInput) monthInput.value = "";
     if (dayInput) dayInput.value = "";
     if (hiddenInput) hiddenInput.value = "";
+    syncSplitDatePickerValue("receiveDate", form);
 }
 
 function setupReceiveDateInputs(form) {
@@ -348,6 +351,8 @@ function setupReceiveDateInputs(form) {
         dayInput.value = sanitize(dayInput.value, 2);
         updateReceiveDateHidden(form);
     });
+
+    setupSplitDatePicker("receiveDate", form, updateReceiveDateHidden);
 }
 
 function initReceiveDateInputs() {
@@ -397,6 +402,8 @@ function updateTransferDateHidden(prefix, form) {
     } else {
         hiddenInput.value = "";
     }
+
+    syncSplitDatePickerValue(prefix, form);
 }
 
 function updateTransferDateTimeHidden(prefix, form) {
@@ -420,6 +427,8 @@ function updateTransferDateTimeHidden(prefix, form) {
     } else {
         hiddenInput.value = "";
     }
+
+    syncSplitDatePickerValue(prefix, form);
 }
 
 function setTransferDateValue(prefix, value, form) {
@@ -495,6 +504,76 @@ function setupTransferDateInput(prefix, form, updateFn) {
         dayInput.value = sanitize(dayInput.value, 2);
         updateFn(prefix, form);
     });
+
+    setupSplitDatePicker(prefix, form, updateFn);
+}
+
+function runSplitDateUpdate(updateFn, prefix, form) {
+    if (typeof updateFn !== "function") {
+        return;
+    }
+
+    if (updateFn.length >= 2) {
+        updateFn(prefix, form);
+    } else {
+        updateFn(form);
+    }
+}
+
+function getCurrentDatePickerValue() {
+    const now = new Date();
+    const year = String(now.getFullYear());
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
+function syncSplitDatePickerValue(prefix, form) {
+    if (!form) {
+        return;
+    }
+
+    const pickerInput = form.querySelector(`#${prefix}Picker`);
+    const yearInput = form.querySelector(`#${prefix}Year`);
+    const monthInput = form.querySelector(`#${prefix}Month`);
+    const dayInput = form.querySelector(`#${prefix}Day`);
+
+    if (!pickerInput || !yearInput || !monthInput || !dayInput) {
+        return;
+    }
+
+    if (yearInput.value.length === 4 && monthInput.value.length === 2 && dayInput.value.length === 2) {
+        pickerInput.value = `${yearInput.value}-${monthInput.value}-${dayInput.value}`;
+    } else {
+        pickerInput.value = getCurrentDatePickerValue();
+    }
+}
+
+function setupSplitDatePicker(prefix, form, updateFn) {
+    if (!form) {
+        return;
+    }
+
+    const pickerInput = form.querySelector(`#${prefix}Picker`);
+    const yearInput = form.querySelector(`#${prefix}Year`);
+    const monthInput = form.querySelector(`#${prefix}Month`);
+    const dayInput = form.querySelector(`#${prefix}Day`);
+
+    if (!pickerInput || !yearInput || !monthInput || !dayInput || pickerInput.dataset.bound === "true") {
+        return;
+    }
+
+    pickerInput.addEventListener("change", () => {
+        const parts = parseReceiveDateParts(pickerInput.value);
+        yearInput.value = parts.year;
+        monthInput.value = parts.month;
+        dayInput.value = parts.day;
+        runSplitDateUpdate(updateFn, prefix, form);
+        syncSplitDatePickerValue(prefix, form);
+    });
+
+    pickerInput.dataset.bound = "true";
+    syncSplitDatePickerValue(prefix, form);
 }
 
 function setupTransferDateTimeInput(prefix, form) {
@@ -665,15 +744,141 @@ function buildEmptyOrderForSerial(serialNumber) {
     };
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function createEmptyPackageItem(order = 1) {
+    return {
+        package_label: `包装${order}`,
+        package_order: order,
+        product_name: "",
+        pieces: "",
+        length: "",
+        width: "",
+        height: "",
+        volume: "",
+        charge_weight: "",
+        package_type: "",
+        remark1: "",
+        remark2: ""
+    };
+}
+
+function normalizePackageItems(packageData) {
+    const rawItems = Array.isArray(packageData)
+        ? packageData
+        : Array.isArray(packageData?.packages)
+            ? packageData.packages
+            : packageData
+                ? [packageData]
+                : [];
+
+    if (rawItems.length === 0) {
+        return [createEmptyPackageItem(1)];
+    }
+
+    return rawItems.map((item, index) => {
+        const order = Number.parseInt(item.package_order, 10) || index + 1;
+        return {
+            ...createEmptyPackageItem(order),
+            ...item,
+            package_order: order,
+            package_label: item.package_label || `包装${order}`
+        };
+    });
+}
+
+function packageItemHasContent(item) {
+    return [
+        item.product_name,
+        item.pieces,
+        item.length,
+        item.width,
+        item.height,
+        item.volume,
+        item.charge_weight,
+        item.package_type,
+        item.remark1,
+        item.remark2
+    ].some(value => value !== undefined && value !== null && String(value).trim() !== "");
+}
+
+function calculatePackageVolume(item) {
+    const pieces = parseFloat(item.pieces) || 1;
+    const length = parseFloat(item.length);
+    const width = parseFloat(item.width);
+    const height = parseFloat(item.height);
+
+    if (Number.isNaN(length) || Number.isNaN(width) || Number.isNaN(height)) {
+        return "";
+    }
+
+    const volume = length * width * height * pieces;
+    return Number.isFinite(volume) ? volume.toFixed(4) : "";
+}
+
+function calculatePackageChargeWeightTotal(items) {
+    const total = items.reduce((sum, item) => sum + (parseFloat(item.charge_weight) || 0), 0);
+    return total > 0 ? total.toFixed(2) : "";
+}
+
+function formatPackageItemSummary(items, field) {
+    const values = items
+        .filter(packageItemHasContent)
+        .map(item => {
+            const value = item[field];
+            if (value === undefined || value === null || String(value).trim() === "") {
+                return "";
+            }
+            return `${escapeHtml(item.package_label)}: ${escapeHtml(value)}`;
+        })
+        .filter(Boolean);
+
+    return values.join("<br>") || "";
+}
+
+function groupPackagesBySerial(packages) {
+    const grouped = new Map();
+
+    (packages || []).forEach(pkg => {
+        const serialNumber = pkg.serial_number || "";
+        if (!grouped.has(serialNumber)) {
+            grouped.set(serialNumber, {
+                serial_number: serialNumber,
+                company_name: pkg.company_name || "",
+                orderer: pkg.orderer || "",
+                business_type: pkg.business_type || "",
+                customer_id: pkg.customer_id || "",
+                packages: []
+            });
+        }
+        grouped.get(serialNumber).packages.push(pkg);
+    });
+
+    return Array.from(grouped.values()).map(group => ({
+        ...group,
+        packages: normalizePackageItems(group.packages)
+    }));
+}
+
 function renderOrderPackageContent(serialNumber, packageData) {
     const packageContent = document.getElementById("orderPackageContent");
     if (!packageContent) {
         return;
     }
 
-    currentOrderPackageData = packageData ? { ...packageData, serial_number: serialNumber } : null;
-    const hasPackage = Boolean(packageData);
-    const packageInfo = packageData || {};
+    const packageItems = normalizePackageItems(packageData);
+    const meaningfulItems = packageItems.filter(packageItemHasContent);
+    const visiblePackageItems = meaningfulItems.length > 0 ? packageItems : [];
+    currentOrderPackageData = packageItems.map(item => ({ ...item, serial_number: serialNumber }));
+    const hasPackage = meaningfulItems.length > 0;
+    const packageInfo = packageItems[0] || {};
 
     packageContent.innerHTML = `
         ${hasPackage ? "" : "<div style=\"margin-bottom: 8px; color: #9CA3AF;\">暂无包装信息</div>"}
@@ -690,6 +895,32 @@ function renderOrderPackageContent(serialNumber, packageData) {
             <div><strong>备注1:</strong> ${packageInfo.remark1 || ""}</div>
             <div><strong>备注2:</strong> ${packageInfo.remark2 || ""}</div>
         </div>
+    `;
+
+    packageContent.innerHTML = `
+        ${meaningfulItems.length === 0 ? "<div style=\"margin-bottom: 8px; color: #9CA3AF;\">暂无包装信息</div>" : ""}
+        <div class="detail-grid" style="margin-bottom: 16px;">
+            <div><strong>流水号:</strong> ${serialNumber || ""}</div>
+            <div><strong>包装数量:</strong> ${meaningfulItems.length || 1}</div>
+            <div><strong>计费重量合计:</strong> ${calculatePackageChargeWeightTotal(packageItems)}</div>
+        </div>
+        ${visiblePackageItems.map(item => `
+            <div style="border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+                <div style="font-weight: 600; margin-bottom: 12px;">${item.package_label}</div>
+                <div class="detail-grid">
+                    <div><strong>件数:</strong> ${item.pieces || ""}</div>
+                    <div><strong>长:</strong> ${item.length || ""}</div>
+                    <div><strong>宽:</strong> ${item.width || ""}</div>
+                    <div><strong>高:</strong> ${item.height || ""}</div>
+                    <div><strong>体积:</strong> ${item.volume || calculatePackageVolume(item)}</div>
+                    <div><strong>计费重量:</strong> ${item.charge_weight || ""}</div>
+                    <div><strong>包装种类:</strong> ${item.package_type || ""}</div>
+                    <div><strong>货物品名:</strong> ${item.product_name || ""}</div>
+                    <div><strong>备注1:</strong> ${item.remark1 || ""}</div>
+                    <div><strong>备注2:</strong> ${item.remark2 || ""}</div>
+                </div>
+            </div>
+        `).join("")}
     `;
 }
 
@@ -718,7 +949,7 @@ async function loadOrderPackageDetails(serialNumber) {
             return;
         }
         const data = await response.json();
-        renderOrderPackageContent(serialNumber, data.package || null);
+        renderOrderPackageContent(serialNumber, data.packages || data.package || null);
     } catch (error) {
         showMessage("加载包装信息失败: " + error.message, "error");
         renderOrderPackageContent(serialNumber, null);
@@ -731,12 +962,18 @@ function openPackageFormFromOrderDetail() {
         return;
     }
 
-    if (currentOrderPackageData) {
-        showPackageForm(currentOrderPackageData);
+    if (currentOrderPackageData && currentOrderPackageData.length > 0) {
+        showPackageForm({
+            serial_number: currentOrderDetailSerial,
+            packages: currentOrderPackageData
+        });
         return;
     }
 
-    showPackageForm({ serial_number: currentOrderDetailSerial });
+    showPackageForm({
+        serial_number: currentOrderDetailSerial,
+        packages: [createEmptyPackageItem(1)]
+    });
 }
 
 function renderOrderPickupTrackingContent(serialNumber, trackingData) {
@@ -1943,6 +2180,376 @@ async function loadAndFilterPackages() {
     }
 }
 
+function buildPackageFormItemHtml(item, index) {
+    const order = index + 1;
+    const normalizedItem = {
+        ...createEmptyPackageItem(order),
+        ...item,
+        package_order: order,
+        package_label: `包装${order}`
+    };
+
+    return `
+        <div class="package-item-card" data-package-index="${order}" style="border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div style="font-weight: 600;">${normalizedItem.package_label}</div>
+                ${order === 1 ? "" : `<button type="button" class="remove-package-item" data-package-index="${order}">删除</button>`}
+            </div>
+            <div class="form-group">
+                <label>件数:</label>
+                <input type="number" step="1" min="0" data-field="pieces" value="${escapeHtml(normalizedItem.pieces)}">
+            </div>
+            <div class="form-group">
+                <label>长:</label>
+                <input type="number" step="0.01" min="0" data-field="length" value="${escapeHtml(normalizedItem.length)}">
+            </div>
+            <div class="form-group">
+                <label>宽:</label>
+                <input type="number" step="0.01" min="0" data-field="width" value="${escapeHtml(normalizedItem.width)}">
+            </div>
+            <div class="form-group">
+                <label>高:</label>
+                <input type="number" step="0.01" min="0" data-field="height" value="${escapeHtml(normalizedItem.height)}">
+            </div>
+            <div class="form-group">
+                <label>体积:</label>
+                <input type="number" step="0.0001" data-field="volume" value="${escapeHtml(normalizedItem.volume || calculatePackageVolume(normalizedItem))}" readonly>
+            </div>
+            <div class="form-group">
+                <label>包装种类:</label>
+                <input type="text" data-field="package_type" value="${escapeHtml(normalizedItem.package_type)}">
+            </div>
+            <div class="form-group">
+                <label>计费重量:</label>
+                <input type="number" step="0.01" data-field="charge_weight" value="${escapeHtml(normalizedItem.charge_weight)}">
+            </div>
+            <div class="form-group">
+                <label>货物品名:</label>
+                <input type="text" data-field="product_name" value="${escapeHtml(normalizedItem.product_name)}">
+            </div>
+            <div class="form-group">
+                <label>备注1:</label>
+                <textarea data-field="remark1">${escapeHtml(normalizedItem.remark1)}</textarea>
+            </div>
+            <div class="form-group">
+                <label>备注2:</label>
+                <textarea data-field="remark2">${escapeHtml(normalizedItem.remark2)}</textarea>
+            </div>
+        </div>
+    `;
+}
+
+function serializePackageFormItems(form) {
+    return Array.from(form.querySelectorAll(".package-item-card")).map((card, index) => {
+        const order = index + 1;
+        const item = createEmptyPackageItem(order);
+        card.querySelectorAll("[data-field]").forEach(field => {
+            item[field.dataset.field] = field.value;
+        });
+        item.package_order = order;
+        item.package_label = `包装${order}`;
+        item.volume = item.volume || calculatePackageVolume(item);
+        return item;
+    });
+}
+
+function updatePackageCardVolume(card) {
+    if (!card) {
+        return;
+    }
+
+    const item = {
+        pieces: card.querySelector('[data-field="pieces"]')?.value || "",
+        length: card.querySelector('[data-field="length"]')?.value || "",
+        width: card.querySelector('[data-field="width"]')?.value || "",
+        height: card.querySelector('[data-field="height"]')?.value || ""
+    };
+    const volumeInput = card.querySelector('[data-field="volume"]');
+    if (volumeInput) {
+        volumeInput.value = calculatePackageVolume(item);
+    }
+}
+
+function updatePackageFormTotal(form) {
+    const totalInput = form.querySelector("#packageChargeWeightTotal");
+    if (!totalInput) {
+        return;
+    }
+    totalInput.value = calculatePackageChargeWeightTotal(serializePackageFormItems(form));
+}
+
+function displayPackages(packages) {
+    const tbody = document.querySelector("#packagesTable tbody");
+    if (!tbody) {
+        return;
+    }
+
+    const groupedPackages = Array.isArray(packages?.[0]?.packages) ? packages : groupPackagesBySerial(packages);
+    tbody.innerHTML = "";
+
+    groupedPackages.forEach(group => {
+        const row = tbody.insertRow();
+        row.innerHTML = `
+            <td>${group.serial_number || ""}</td>
+            <td>${formatPackageItemSummary(group.packages, "pieces")}</td>
+            <td>${formatPackageItemSummary(group.packages, "length")}</td>
+            <td>${formatPackageItemSummary(group.packages, "width")}</td>
+            <td>${formatPackageItemSummary(group.packages, "height")}</td>
+            <td>${formatPackageItemSummary(group.packages, "volume")}</td>
+            <td>${calculatePackageChargeWeightTotal(group.packages)}</td>
+            <td>${formatPackageItemSummary(group.packages, "package_type")}</td>
+            <td>${formatPackageItemSummary(group.packages, "product_name")}</td>
+            <td>${formatPackageItemSummary(group.packages, "remark1")}</td>
+            <td>${formatPackageItemSummary(group.packages, "remark2")}</td>
+            <td>
+                <button onclick="editPackage('${group.serial_number}')">编辑</button>
+            </td>
+        `;
+    });
+}
+
+async function editPackage(serialNumber) {
+    try {
+        const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
+        const data = await response.json();
+        showPackageForm({
+            serial_number: serialNumber,
+            packages: data.packages || data.package || null
+        });
+    } catch (error) {
+        showMessage("加载包装信息失败: " + error.message, "error");
+    }
+}
+
+function showPackageForm(packageData = null) {
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.id = "packageModal";
+    modal.onclick = function(event) {
+        if (event.target === modal) hidePackageForm();
+    };
+
+    const serialReadOnly = packageData && packageData.serial_number ? "readonly" : "";
+
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>修改包装信息</h3>
+                <button class="modal-close" onclick="hidePackageForm()">&times;</button>
+            </div>
+            <form id="packageFormData">
+                <div class="form-group">
+                    <label>流水号:</label>
+                    <input type="text" id="packageSerialNumber" required ${serialReadOnly}>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <div style="font-weight: 600;">包装明细</div>
+                    <button type="button" id="addPackageItemButton">添加</button>
+                </div>
+                <div id="packageItemsContainer"></div>
+                <div class="form-group">
+                    <label>计费重量合计:</label>
+                    <input type="number" step="0.01" id="packageChargeWeightTotal" readonly>
+                </div>
+                <div class="button-group">
+                    <button type="button" onclick="savePackage()">保存</button>
+                    <button type="button" onclick="hidePackageForm()">取消</button>
+                </div>
+            </form>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const form = modal.querySelector("#packageFormData");
+    const serialInput = form.querySelector("#packageSerialNumber");
+    const itemsContainer = form.querySelector("#packageItemsContainer");
+    const addButton = form.querySelector("#addPackageItemButton");
+
+    const renderPackageItems = (items) => {
+        const normalizedItems = (items && items.length > 0 ? items : [createEmptyPackageItem(1)])
+            .map((item, index) => ({
+                ...createEmptyPackageItem(index + 1),
+                ...item,
+                package_order: index + 1,
+                package_label: `包装${index + 1}`,
+                volume: item.volume || calculatePackageVolume(item)
+            }));
+
+        itemsContainer.innerHTML = normalizedItems.map((item, index) => buildPackageFormItemHtml(item, index)).join("");
+        updatePackageFormTotal(form);
+    };
+
+    const getCurrentItems = () => serializePackageFormItems(form);
+
+    const fillPackageFormFields = (data) => {
+        renderPackageItems(normalizePackageItems(data));
+    };
+
+    const clearPackageFormFields = () => {
+        renderPackageItems([createEmptyPackageItem(1)]);
+    };
+
+    if (packageData) {
+        serialInput.value = packageData.serial_number || "";
+        fillPackageFormFields(packageData.packages || packageData);
+    } else {
+        clearPackageFormFields();
+    }
+
+    let packageSerialTimer = null;
+    let lastPackageSerial = serialInput.value.trim();
+
+    const loadPackageBySerial = async () => {
+        const serial = serialInput.value.trim();
+        if (!serial) {
+            clearPackageFormFields();
+            return;
+        }
+        if (serial === lastPackageSerial) {
+            return;
+        }
+        lastPackageSerial = serial;
+        try {
+            const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serial)}`);
+            if (!response.ok) {
+                showMessage("未找到该流水号的包装信息", "error");
+                clearPackageFormFields();
+                return;
+            }
+            const data = await response.json();
+            fillPackageFormFields(data.packages || data.package || null);
+        } catch (error) {
+            showMessage("加载包装信息失败: " + error.message, "error");
+        }
+    };
+
+    serialInput.addEventListener("change", loadPackageBySerial);
+    serialInput.addEventListener("blur", loadPackageBySerial);
+    serialInput.addEventListener("input", () => {
+        clearTimeout(packageSerialTimer);
+        packageSerialTimer = setTimeout(loadPackageBySerial, 500);
+    });
+
+    addButton.addEventListener("click", () => {
+        const items = getCurrentItems();
+        items.push(createEmptyPackageItem(items.length + 1));
+        renderPackageItems(items);
+    });
+
+    itemsContainer.addEventListener("click", event => {
+        const removeButton = event.target.closest(".remove-package-item");
+        if (!removeButton) {
+            return;
+        }
+
+        const removeIndex = Number.parseInt(removeButton.dataset.packageIndex, 10);
+        const nextItems = getCurrentItems().filter((_, index) => index !== removeIndex - 1);
+        renderPackageItems(nextItems.length > 0 ? nextItems : [createEmptyPackageItem(1)]);
+    });
+
+    itemsContainer.addEventListener("input", event => {
+        const card = event.target.closest(".package-item-card");
+        if (!card) {
+            return;
+        }
+
+        if (["pieces", "length", "width", "height"].includes(event.target.dataset.field)) {
+            updatePackageCardVolume(card);
+        }
+        if (event.target.dataset.field === "charge_weight" || ["pieces", "length", "width", "height"].includes(event.target.dataset.field)) {
+            updatePackageFormTotal(form);
+        }
+    });
+
+    modal.style.display = "block";
+}
+
+async function savePackage() {
+    const form = document.getElementById("packageFormData");
+    const serialNumber = document.getElementById("packageSerialNumber").value.trim();
+
+    if (!serialNumber) {
+        showMessage("流水号不能为空", "error");
+        return;
+    }
+
+    try {
+        const checkResponse = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
+        if (checkResponse.status === 404) {
+            showMessage("该流水号不存在，无法修改包装信息", "error");
+            return;
+        }
+        if (!checkResponse.ok) {
+            const error = await checkResponse.json();
+            showMessage("检查流水号失败: " + (error.error || "服务器错误"), "error");
+            return;
+        }
+    } catch (error) {
+        showMessage("检查流水号失败: " + error.message, "error");
+        return;
+    }
+
+    let packageItems = serializePackageFormItems(form).filter(packageItemHasContent);
+    if (packageItems.length === 0) {
+        packageItems = [createEmptyPackageItem(1)];
+    }
+    packageItems = packageItems.map((item, index) => ({
+        ...createEmptyPackageItem(index + 1),
+        ...item,
+        package_order: index + 1,
+        package_label: `包装${index + 1}`,
+        volume: item.volume || calculatePackageVolume(item)
+    }));
+
+    try {
+        const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ package_items: packageItems })
+        });
+
+        if (response.ok) {
+            showMessage("包装信息保存成功");
+            hidePackageForm();
+            loadPackages();
+            if (currentOrderDetailSerial && currentOrderDetailSerial === serialNumber) {
+                loadOrderPackageDetails(serialNumber);
+            }
+        } else {
+            const error = await response.json();
+            showMessage("保存失败: " + error.error, "error");
+        }
+    } catch (error) {
+        showMessage("保存失败: " + error.message, "error");
+    }
+}
+
+async function loadAndFilterPackages() {
+    try {
+        const response = await fetch(`${API_BASE}/packages`);
+        const data = await response.json();
+
+        let filteredPackages = groupPackagesBySerial(data.packages || []);
+
+        if (currentPackageSearchTerm) {
+            const searchLower = currentPackageSearchTerm.toLowerCase();
+            filteredPackages = filteredPackages.filter(pkg =>
+                (pkg.serial_number && pkg.serial_number.toLowerCase().includes(searchLower)) ||
+                pkg.packages.some(item =>
+                    (item.product_name && item.product_name.toLowerCase().includes(searchLower)) ||
+                    (item.package_type && item.package_type.toLowerCase().includes(searchLower)) ||
+                    (item.package_label && item.package_label.toLowerCase().includes(searchLower))
+                )
+            );
+        }
+
+        displayPackages(filteredPackages);
+    } catch (error) {
+        showMessage("加载包装信息失败: " + error.message, "error");
+    }
+}
+
 // Excel预览功能 - 预览包装信息第一行数据
 async function previewPackageExcel() {
     const fileInput = document.getElementById("packageExcelFile");
@@ -2168,6 +2775,7 @@ function showPickupTrackingForm(trackingData = null) {
                         <span class="date-separator">/</span>
                         <input type="text" id="pickupTrackingPickupDateDay" class="date-input" placeholder="DD" inputmode="numeric" maxlength="2">
                         <input type="hidden" id="pickupTrackingPickupDate">
+                        <input type="date" id="pickupTrackingPickupDatePicker" class="date-picker-trigger" aria-label="选择提货日期">
                     </div>
                 </div>
                 <div class="form-group">
@@ -2179,6 +2787,7 @@ function showPickupTrackingForm(trackingData = null) {
                         <span class="date-separator">/</span>
                         <input type="text" id="pickupTrackingArrivalTimeDay" class="date-input" placeholder="DD" inputmode="numeric" maxlength="2">
                         <input type="hidden" id="pickupTrackingArrivalTime">
+                        <input type="date" id="pickupTrackingArrivalTimePicker" class="date-picker-trigger" aria-label="选择到货时间">
                     </div>
                 </div>
                 <div class="form-group">
@@ -2499,6 +3108,7 @@ function showTransferForm(transferData = null) {
                         <span class="date-separator">/</span>
                         <input type="text" id="transferPickupDateDay" class="date-input" placeholder="DD" inputmode="numeric" maxlength="2">
                         <input type="hidden" id="transferPickupDate">
+                        <input type="date" id="transferPickupDatePicker" class="date-picker-trigger" aria-label="选择提货日期">
                     </div>
                 </div>
                 <div class="form-group">
@@ -2510,6 +3120,7 @@ function showTransferForm(transferData = null) {
                         <span class="date-separator">/</span>
                         <input type="text" id="transferArrivalPortTimeDay" class="date-input" placeholder="DD" inputmode="numeric" maxlength="2">
                         <input type="hidden" id="transferArrivalPortTime">
+                        <input type="date" id="transferArrivalPortTimePicker" class="date-picker-trigger" aria-label="选择到货时间">
                     </div>
                 </div>
                 <div class="form-group">
@@ -2521,6 +3132,7 @@ function showTransferForm(transferData = null) {
                         <span class="date-separator">/</span>
                         <input type="text" id="transferCompleteDocsSendTimeDay" class="date-input" placeholder="DD" inputmode="numeric" maxlength="2">
                         <input type="hidden" id="transferCompleteDocsSendTime">
+                        <input type="date" id="transferCompleteDocsSendTimePicker" class="date-picker-trigger" aria-label="选择完整单据回复时间">
                     </div>
                 </div>
                 <div class="form-group">
@@ -4087,6 +4699,7 @@ function showCustomsForm(recordData = null) {
                         <span class="date-separator">/</span>
                         <input type="text" id="customsStartTimeDay" class="date-input" placeholder="DD" inputmode="numeric" maxlength="2">
                         <input type="hidden" id="customsStartTime">
+                        <input type="date" id="customsStartTimePicker" class="date-picker-trigger" aria-label="选择开始报关时间">
                     </div>
                 </div>
                 <div class="form-group">
@@ -4098,6 +4711,7 @@ function showCustomsForm(recordData = null) {
                         <span class="date-separator">/</span>
                         <input type="text" id="taxPaymentTimeDay" class="date-input" placeholder="DD" inputmode="numeric" maxlength="2">
                         <input type="hidden" id="taxPaymentTime">
+                        <input type="date" id="taxPaymentTimePicker" class="date-picker-trigger" aria-label="选择付税时间">
                     </div>
                 </div>
                 <div class="form-group">
@@ -4109,6 +4723,7 @@ function showCustomsForm(recordData = null) {
                         <span class="date-separator">/</span>
                         <input type="text" id="releaseTimeDay" class="date-input" placeholder="DD" inputmode="numeric" maxlength="2">
                         <input type="hidden" id="releaseTime">
+                        <input type="date" id="releaseTimePicker" class="date-picker-trigger" aria-label="选择放行时间">
                     </div>
                 </div>
                 <div class="form-group">
