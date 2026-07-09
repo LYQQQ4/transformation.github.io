@@ -1,7 +1,13 @@
 const express = require("express");
-const router = express.Router();
 const multer = require("multer");
 const XLSX = require("xlsx");
+const {
+  normalizeCountryCode,
+  normalizeUserProfilePayload,
+  validateUserProfileId,
+} = require("../lib/user_profiles");
+
+const router = express.Router();
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -9,163 +15,305 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
       "application/vnd.ms-excel",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ];
+
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
-    } else {
-      cb(new Error("只允许上传Excel文件（.xls或.xlsx格式）"));
+      return;
     }
-  }
+
+    cb(new Error("Only .xls and .xlsx files are allowed"));
+  },
 });
 
-function normalizeCustomerRow(raw) {
-  const customer_id = String(raw["客户ID"] ?? raw["customer_id"] ?? "").trim();
-  const delivery_address = String(raw["收货地址"] ?? raw["delivery_address"] ?? "").trim();
-  const receiver_name = String(raw["收件人"] ?? raw["receiver_name"] ?? "").trim();
-  const receiver_phone = String(raw["收件人电话"] ?? raw["receiver_phone"] ?? "").trim();
-  return { customer_id, delivery_address, receiver_name, receiver_phone };
+function mapProfileToCustomer(profile) {
+  return {
+    customer_id: profile.id,
+    delivery_address: profile.address,
+    receiver_name: profile.contact_name,
+    receiver_phone: profile.phone,
+    address: profile.address,
+    contact_name: profile.contact_name,
+    phone: profile.phone,
+    company_name: profile.company_name,
+    email: profile.email,
+    remark: profile.remark,
+    legacy_customer_id: profile.legacy_customer_id,
+  };
 }
 
-module.exports = (db) => {
+function mapCustomerPayload(body = {}) {
+  const payload = normalizeUserProfilePayload({
+    id: body.customer_id,
+    address: body.delivery_address ?? body.address,
+    contact_name: body.receiver_name ?? body.contact_name,
+    phone: body.receiver_phone ?? body.phone,
+    company_name: body.company_name,
+    email: body.email,
+    remark: body.remark,
+    source_type: "customer",
+    legacy_customer_id: body.legacy_customer_id || body.customer_id,
+  });
+
+  if (payload.id) {
+    payload.country_code = normalizeCountryCode(payload.id.slice(0, 2), payload.country_code);
+    payload.sequence_no = parseInt(payload.id.slice(2), 10);
+  }
+
+  return payload;
+}
+
+function normalizeCustomerExcelRow(row = {}) {
+  return {
+    customer_id: String(row["客户ID"] ?? row.customer_id ?? row.id ?? "").trim(),
+    delivery_address: String(row["地址"] ?? row["收货地址"] ?? row.delivery_address ?? row.address ?? "").trim(),
+    receiver_name: String(row["联系人姓名"] ?? row["收件人"] ?? row.receiver_name ?? row.contact_name ?? "").trim(),
+    receiver_phone: String(row["电话"] ?? row["收件人电话"] ?? row.receiver_phone ?? row.phone ?? "").trim(),
+    company_name: String(row["公司名称"] ?? row.company_name ?? "").trim(),
+    email: String(row["邮箱"] ?? row.email ?? "").trim(),
+    remark: String(row["备注"] ?? row.remark ?? "").trim(),
+  };
+}
+
+async function ensureUserProfilesTable(db) {
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS user_profiles (
+      id VARCHAR(50) PRIMARY KEY,
+      country_code VARCHAR(10) NOT NULL,
+      sequence_no INT NOT NULL,
+      company_name VARCHAR(200) DEFAULT NULL,
+      address TEXT DEFAULT NULL,
+      contact_name VARCHAR(100) DEFAULT NULL,
+      phone VARCHAR(50) DEFAULT NULL,
+      email VARCHAR(100) DEFAULT NULL,
+      remark TEXT DEFAULT NULL,
+      dedupe_key VARCHAR(255) DEFAULT NULL,
+      source_type VARCHAR(20) DEFAULT 'manual',
+      legacy_sender_id VARCHAR(50) DEFAULT NULL,
+      legacy_customer_id VARCHAR(50) DEFAULT NULL,
+      migration_batch VARCHAR(32) DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uk_user_profiles_dedupe_key (dedupe_key),
+      KEY idx_user_profiles_legacy_sender_id (legacy_sender_id),
+      KEY idx_user_profiles_legacy_customer_id (legacy_customer_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+module.exports = (db, orderDb = null) => {
+  ensureUserProfilesTable(db).catch(() => {});
+
   router.get("/", async (req, res) => {
     try {
-      const [rows] = await db.execute("SELECT * FROM customer_info ORDER BY customer_id DESC");
-      res.json({ customers: rows });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
+      const [rows] = await db.execute(
+        "SELECT * FROM user_profiles WHERE source_type IN ('customer', 'both', 'mixed') OR legacy_customer_id IS NOT NULL ORDER BY id DESC"
+      );
+      res.json({ customers: rows.map(mapProfileToCustomer) });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
     }
   });
 
   router.get("/:id", async (req, res) => {
     try {
-      const [rows] = await db.execute("SELECT * FROM customer_info WHERE customer_id = ?", [req.params.id]);
-      if (rows.length === 0) {
-        return res.status(404).json({ error: "客户不存在" });
+      const [rows] = await db.execute("SELECT * FROM user_profiles WHERE id = ?", [req.params.id]);
+      if (!rows.length) {
+        res.status(404).json({ error: "Customer not found" });
+        return;
       }
-      res.json({ customer: rows[0] });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.json({ customer: mapProfileToCustomer(rows[0]) });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
     }
   });
 
   router.post("/", async (req, res) => {
     try {
-      const { customer_id, delivery_address, receiver_name, receiver_phone } = req.body;
-      if (!customer_id || !String(customer_id).trim()) {
-        return res.status(400).json({ error: "客户ID不能为空" });
+      const payload = mapCustomerPayload(req.body);
+      if (!payload.id || !validateUserProfileId(payload.id)) {
+        res.status(400).json({ error: "Customer ID must be country code + numeric sequence, for example ch001" });
+        return;
       }
+
       await db.execute(
-        "INSERT INTO customer_info (customer_id, delivery_address, receiver_name, receiver_phone) VALUES (?, ?, ?, ?)",
-        [String(customer_id).trim(), delivery_address || null, receiver_name || null, receiver_phone || null]
+        `INSERT INTO user_profiles
+          (id, country_code, sequence_no, company_name, address, contact_name, phone, email, remark, dedupe_key, source_type, legacy_customer_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          payload.id,
+          payload.country_code,
+          payload.sequence_no,
+          payload.company_name,
+          payload.address,
+          payload.contact_name,
+          payload.phone,
+          payload.email,
+          payload.remark,
+          payload.dedupe_key,
+          payload.source_type,
+          payload.legacy_customer_id,
+        ]
       );
-      res.json({ customer_id: String(customer_id).trim(), message: "客户创建成功" });
-    } catch (err) {
-      if (err.code === "ER_DUP_ENTRY") {
-        return res.status(400).json({ error: "客户ID已存在" });
-      }
-      res.status(500).json({ error: err.message });
+
+      res.json({ customer_id: payload.id, message: "Customer created" });
+    } catch (error) {
+      const isDuplicate = error.code === "ER_DUP_ENTRY";
+      res.status(isDuplicate ? 400 : 500).json({
+        error: isDuplicate ? "Customer ID already exists" : error.message,
+      });
     }
   });
 
   router.put("/:id", async (req, res) => {
     try {
-      const { delivery_address, receiver_name, receiver_phone } = req.body;
+      const payload = mapCustomerPayload({ ...req.body, customer_id: req.params.id });
       const [result] = await db.execute(
-        "UPDATE customer_info SET delivery_address = ?, receiver_name = ?, receiver_phone = ? WHERE customer_id = ?",
-        [delivery_address || null, receiver_name || null, receiver_phone || null, req.params.id]
+        `UPDATE user_profiles
+            SET company_name = ?, address = ?, contact_name = ?, phone = ?, email = ?, remark = ?, dedupe_key = ?, source_type = ?, legacy_customer_id = ?
+          WHERE id = ?`,
+        [
+          payload.company_name,
+          payload.address,
+          payload.contact_name,
+          payload.phone,
+          payload.email,
+          payload.remark,
+          payload.dedupe_key,
+          payload.source_type,
+          payload.legacy_customer_id,
+          req.params.id,
+        ]
       );
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ error: "客户不存在" });
+
+      if (!result.affectedRows) {
+        res.status(404).json({ error: "Customer not found" });
+        return;
       }
-      res.json({ message: "客户更新成功" });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
+
+      res.json({ message: "Customer updated" });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
     }
   });
 
   router.delete("/:id", async (req, res) => {
     try {
-      const [result] = await db.execute("DELETE FROM customer_info WHERE customer_id = ?", [req.params.id]);
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ error: "客户不存在" });
+      if (orderDb) {
+        const [references] = await orderDb.execute(
+          "SELECT COUNT(*) AS total FROM orders WHERE customer_id = ?",
+          [req.params.id]
+        );
+        if ((references[0]?.total || 0) > 0) {
+          res.status(400).json({ error: "Customer is referenced by existing orders and cannot be deleted" });
+          return;
+        }
       }
-      res.json({ message: "客户删除成功" });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
+
+      const [result] = await db.execute("DELETE FROM user_profiles WHERE id = ?", [req.params.id]);
+      if (!result.affectedRows) {
+        res.status(404).json({ error: "Customer not found" });
+        return;
+      }
+
+      res.json({ message: "Customer deleted" });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
     }
   });
 
   router.post("/parse-excel", upload.single("excelFile"), async (req, res) => {
     try {
       if (!req.file) {
-        return res.status(400).json({ error: "没有上传文件" });
+        res.status(400).json({ error: "No file uploaded" });
+        return;
       }
+
       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet);
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(firstSheet);
 
       if (!jsonData.length) {
-        return res.status(400).json({ error: "Excel文件为空或没有有效数据" });
+        res.status(400).json({ error: "Excel file is empty" });
+        return;
       }
 
-      const customerData = normalizeCustomerRow(jsonData[0]);
-      if (!customerData.customer_id) {
-        return res.status(400).json({ error: "客户ID不能为空" });
-      }
-
-      res.json({ success: true, message: "Excel数据解析成功", data: customerData });
+      res.json({ success: true, message: "Excel row parsed", data: normalizeCustomerExcelRow(jsonData[0]) });
     } catch (error) {
-      res.status(500).json({ error: "Excel文件解析失败: " + error.message });
+      res.status(500).json({ error: "Failed to parse Excel file: " + error.message });
     }
   });
 
   router.post("/import-excel", upload.single("excelFile"), async (req, res) => {
     try {
       if (!req.file) {
-        return res.status(400).json({ error: "没有上传文件" });
+        res.status(400).json({ error: "No file uploaded" });
+        return;
       }
+
       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet);
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(firstSheet);
 
       if (!jsonData.length) {
-        return res.status(400).json({ error: "Excel文件为空或没有有效数据" });
+        res.status(400).json({ error: "Excel file is empty" });
+        return;
       }
 
       const results = { total: jsonData.length, success: 0, failed: 0, errors: [] };
-
-      for (let i = 0; i < jsonData.length; i++) {
-        const rowNumber = i + 2;
-        const customerData = normalizeCustomerRow(jsonData[i]);
-
-        if (!customerData.customer_id) {
-          results.failed++;
-          results.errors.push({ row: rowNumber, errors: ["客户ID不能为空"] });
-          continue;
-        }
-
+      for (let index = 0; index < jsonData.length; index += 1) {
+        const rowNumber = index + 2;
         try {
+          const payload = mapCustomerPayload(normalizeCustomerExcelRow(jsonData[index]));
+          if (!payload.id || !validateUserProfileId(payload.id)) {
+            throw new Error("Customer ID must be country code + numeric sequence, for example ch001");
+          }
+
           await db.execute(
-            "INSERT INTO customer_info (customer_id, delivery_address, receiver_name, receiver_phone) VALUES (?, ?, ?, ?)",
-            [customerData.customer_id, customerData.delivery_address || null, customerData.receiver_name || null, customerData.receiver_phone || null]
+            `INSERT INTO user_profiles
+              (id, country_code, sequence_no, company_name, address, contact_name, phone, email, remark, dedupe_key, source_type, legacy_customer_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                company_name = VALUES(company_name),
+                address = VALUES(address),
+                contact_name = VALUES(contact_name),
+                phone = VALUES(phone),
+                email = VALUES(email),
+                remark = VALUES(remark),
+                dedupe_key = VALUES(dedupe_key),
+                source_type = VALUES(source_type),
+                legacy_customer_id = VALUES(legacy_customer_id)`,
+            [
+              payload.id,
+              payload.country_code,
+              payload.sequence_no,
+              payload.company_name,
+              payload.address,
+              payload.contact_name,
+              payload.phone,
+              payload.email,
+              payload.remark,
+              payload.dedupe_key,
+              payload.source_type,
+              payload.legacy_customer_id,
+            ]
           );
-          results.success++;
+
+          results.success += 1;
         } catch (error) {
-          results.failed++;
-          results.errors.push({ row: rowNumber, errors: [error.code === "ER_DUP_ENTRY" ? "客户ID已存在" : error.message] });
+          results.failed += 1;
+          results.errors.push({ row: rowNumber, errors: [error.message] });
         }
       }
 
       res.json({
         success: results.failed === 0,
-        message: `导入完成！总共${results.total}行数据，成功${results.success}行，失败${results.failed}行`,
-        results
+        message: `Import complete: total ${results.total}, success ${results.success}, failed ${results.failed}`,
+        results,
       });
     } catch (error) {
-      res.status(500).json({ error: "Excel文件导入失败: " + error.message });
+      res.status(500).json({ error: "Failed to import Excel file: " + error.message });
     }
   });
 

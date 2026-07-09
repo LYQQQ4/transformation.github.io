@@ -30,8 +30,8 @@ function assertStatus(resp, allowed, label) {
 
   const state = {
     userId: null,
-    senderId: `S${ts}`,
-    customerId: `C${ts}`,
+    senderId: `ch${String(ts).slice(-6)}`,
+    customerId: `us${String(ts).slice(-6)}`,
     guestId: `G${ts}`,
     productId: null,
     orderId: null,
@@ -70,19 +70,51 @@ function assertStatus(resp, allowed, label) {
     assertStatus(getResp, [200], "users get");
   });
 
+  await step("user-profiles create/update/get", async () => {
+    const createResp = await request("POST", "/api/user-profiles", {
+      id: state.customerId,
+      company_name: "Smoke Customer Co",
+      address: "Shanghai Pudong",
+      contact_name: "Smoke Receiver",
+      phone: "13700000000",
+      email: `customer_${ts}@example.com`,
+      remark: "smoke-customer",
+    });
+    assertStatus(createResp, [200], "user-profiles create");
+
+    const updateResp = await request("PUT", `/api/user-profiles/${state.customerId}`, {
+      company_name: "Smoke Customer Co Updated",
+      address: "Shanghai Minhang",
+      contact_name: "Smoke Receiver 2",
+      phone: "13600000000",
+      email: `customer2_${ts}@example.com`,
+      remark: "smoke-customer-updated",
+    });
+    assertStatus(updateResp, [200], "user-profiles update");
+
+    const getResp = await request("GET", `/api/user-profiles/${state.customerId}`);
+    assertStatus(getResp, [200], "user-profiles get");
+  });
+
   await step("senders create/update/get", async () => {
     const createResp = await request("POST", "/api/senders", {
       sender_id: state.senderId,
+      company_name: "Smoke Sender Co",
       shipping_address: "Shenzhen Baoan",
       sender_name: "Smoke Sender",
       sender_phone: "13800000000",
+      email: `sender_${ts}@example.com`,
+      remark: "smoke-sender",
     });
     assertStatus(createResp, [200], "senders create");
 
     const updateResp = await request("PUT", `/api/senders/${state.senderId}`, {
+      company_name: "Smoke Sender Co Updated",
       shipping_address: "Guangzhou Tianhe",
       sender_name: "Smoke Sender 2",
       sender_phone: "13900000000",
+      email: `sender2_${ts}@example.com`,
+      remark: "smoke-sender-updated",
     });
     assertStatus(updateResp, [200], "senders update");
 
@@ -91,18 +123,13 @@ function assertStatus(resp, allowed, label) {
   });
 
   await step("customers create/update/get", async () => {
-    const createResp = await request("POST", "/api/customers", {
-      customer_id: state.customerId,
-      delivery_address: "Shanghai Pudong",
-      receiver_name: "Smoke Receiver",
-      receiver_phone: "13700000000",
-    });
-    assertStatus(createResp, [200], "customers create");
-
     const updateResp = await request("PUT", `/api/customers/${state.customerId}`, {
+      company_name: "Smoke Customer Co Compat Updated",
       delivery_address: "Shanghai Minhang",
       receiver_name: "Smoke Receiver 2",
       receiver_phone: "13600000000",
+      email: `customer_compat_${ts}@example.com`,
+      remark: "smoke-customer-compat",
     });
     assertStatus(updateResp, [200], "customers update");
 
@@ -311,7 +338,7 @@ function assertStatus(resp, allowed, label) {
     }
 
     await request("DELETE", `/api/senders/${state.senderId}`);
-    await request("DELETE", `/api/customers/${state.customerId}`);
+    await request("DELETE", `/api/user-profiles/${state.customerId}`);
     await request("DELETE", `/api/guests/${state.guestId}`);
   });
 

@@ -23,7 +23,46 @@ const upload = multer({
     }
 });
 
-module.exports = (db) => {
+async function validateOrderUserIds(userDb, customerId, senderId) {
+  if (!userDb) {
+    return;
+  }
+
+  const normalizedCustomerId = String(customerId || "").trim();
+  const normalizedSenderId = String(senderId || "").trim();
+
+  if (!normalizedCustomerId) {
+    const error = new Error("客户ID不能为空");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const ids = [normalizedCustomerId];
+  if (normalizedSenderId) {
+    ids.push(normalizedSenderId);
+  }
+
+  const placeholders = ids.map(() => "?").join(", ");
+  const [rows] = await userDb.execute(
+    `SELECT id FROM user_profiles WHERE id IN (${placeholders})`,
+    ids
+  );
+
+  const existingIds = new Set(rows.map((row) => row.id));
+  if (!existingIds.has(normalizedCustomerId)) {
+    const error = new Error(`客户ID不存在于用户信息库: ${normalizedCustomerId}`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (normalizedSenderId && !existingIds.has(normalizedSenderId)) {
+    const error = new Error(`发件人ID不存在于用户信息库: ${normalizedSenderId}`);
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
+module.exports = (db, userDb = null) => {
   // GET all orders
   router.get("/", async (req, res) => {
     try {
@@ -86,6 +125,7 @@ module.exports = (db) => {
       const product_name = req.body.product_name;
       const remark1 = req.body.remark1;
       const remark2 = req.body.remark2;
+      await validateOrderUserIds(userDb, customer_id, sender_id);
 
       // 生成serial_number：当年+当月+001，最后三位递增，每月重置
       const now = new Date();
@@ -185,6 +225,7 @@ module.exports = (db) => {
       const product_name = req.body.product_name;
       const remark1 = req.body.remark1;
       const remark2 = req.body.remark2;
+      await validateOrderUserIds(userDb, customer_id, sender_id);
 
       const sql = "UPDATE orders SET company_name = ?, orderer = ?, receive_date = ?, business_type = ?, customer_id = ?, sender_id = ?, shipping_address = ?, sender_name = ?, sender_phone = ?, delivery_address = ?, receiver_name = ?, receiver_phone = ?, origin = ?, destination = ?, trade_term = ?, product_name = ?, remark1 = ?, remark2 = ? WHERE id = ?";
       const [result] = await db.execute(sql, [company_name, orderer, receive_date, business_type, customer_id, sender_id || null, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term || null, product_name || null, remark1 || null, remark2 || null, req.params.id]);
@@ -328,6 +369,7 @@ module.exports = (db) => {
 
           // 插入数据库
           const { company_name, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2 } = validationResult.data;
+          await validateOrderUserIds(userDb, customer_id, sender_id);
 
           // 生成serial_number：当年+当月+001，最后三位递增，每月重置
           const now = new Date();

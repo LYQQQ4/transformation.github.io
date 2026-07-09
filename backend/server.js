@@ -122,14 +122,15 @@ const userPool = mysql.createPool(userDbConfig);
   });
 
   // API routes
-  app.use("/api/orders", require("./routes/orders")(pool));
+  app.use("/api/orders", require("./routes/orders")(pool, userPool));
   app.use("/api/packages", require("./routes/packages")(pool));
   app.use("/api/pickup-trackings", require("./routes/pickup_trackings")(pool));
   app.use("/api/transfers", require("./routes/transfer")(pool));
   app.use("/api/users", require("./routes/users")(userPool));
   app.use("/api/guests", require("./routes/guests")(userPool));
-  app.use("/api/senders", require("./routes/senders")(userPool));
-  app.use("/api/customers", require("./routes/customers")(userPool));
+  app.use("/api/senders", require("./routes/senders")(userPool, pool));
+  app.use("/api/customers", require("./routes/customers")(userPool, pool));
+  app.use("/api/user-profiles", require("./routes/user_profiles")(userPool, pool));
   app.use("/api/products", require("./routes/products")(pool));
   app.use("/api/customs-clearance", require("./routes/customs_clearance")(pool));
 

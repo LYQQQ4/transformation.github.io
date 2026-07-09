@@ -5,6 +5,7 @@ const API_BASE = (() => {
     }
     return "http://127.0.0.1:3000/api";
 })();
+window.API_BASE = API_BASE;
 
 // User authentication state
 let currentUser = null;
@@ -38,6 +39,8 @@ function formatDateOnly(value) {
     const day = String(date.getDate()).padStart(2, "0");
     return `${year}/${month}/${day}`;
 }
+let currentUserProfileSearchTerm = "";
+let userProfilesData = [];
 let currentSenderSearchTerm = "";
 let currentCustomerSearchTerm = "";
 let sendersData = [];
@@ -836,7 +839,7 @@ function formatPackageItemSummary(items, field) {
             if (value === undefined || value === null || String(value).trim() === "") {
                 return "";
             }
-            return `${escapeHtml(item.package_label)}: ${escapeHtml(value)}`;
+            return `${escapeHtml(value)}`;
         })
         .filter(Boolean);
 
@@ -902,11 +905,9 @@ function renderOrderPackageContent(serialNumber, packageData) {
         <div class="detail-grid" style="margin-bottom: 16px;">
             <div><strong>流水号:</strong> ${serialNumber || ""}</div>
             <div><strong>包装数量:</strong> ${meaningfulItems.length || 1}</div>
-            <div><strong>计费重量合计:</strong> ${calculatePackageChargeWeightTotal(packageItems)}</div>
         </div>
         ${visiblePackageItems.map(item => `
             <div style="border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
-                <div style="font-weight: 600; margin-bottom: 12px;">${item.package_label}</div>
                 <div class="detail-grid">
                     <div><strong>件数:</strong> ${item.pieces || ""}</div>
                     <div><strong>长:</strong> ${item.length || ""}</div>
@@ -1330,13 +1331,13 @@ function handleCustomerIdChange(event) {
     }
     
     // 从customersData中查找对应的客户信息
-    const customer = customersData.find(c => c.customer_id === customerId);
+    const customer = userProfilesData.find(profile => profile.id === customerId);
     if (customer) {
         const form = event.target.closest("#orderFormData");
         if (form) {
-            form.querySelector("#deliveryAddress").value = customer.delivery_address || "";
-            form.querySelector("#receiverName").value = customer.receiver_name || "";
-            form.querySelector("#receiverPhone").value = customer.receiver_phone || "";
+            form.querySelector("#deliveryAddress").value = customer.address || "";
+            form.querySelector("#receiverName").value = customer.contact_name || "";
+            form.querySelector("#receiverPhone").value = customer.phone || "";
         }
     }
 }
@@ -1352,9 +1353,9 @@ function handleSenderIdChange(event) {
     if (sender) {
         const form = event.target.closest("#orderFormData");
         if (form) {
-            form.querySelector("#shippingAddress").value = sender.shipping_address || "";
-            form.querySelector("#senderName").value = sender.sender_name || "";
-            form.querySelector("#senderPhone").value = sender.sender_phone || "";
+            form.querySelector("#shippingAddress").value = sender.address || "";
+            form.querySelector("#senderName").value = sender.contact_name || "";
+            form.querySelector("#senderPhone").value = sender.phone || "";
         }
     }
 }
@@ -2191,8 +2192,7 @@ function buildPackageFormItemHtml(item, index) {
 
     return `
         <div class="package-item-card" data-package-index="${order}" style="border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <div style="font-weight: 600;">${normalizedItem.package_label}</div>
+            <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 12px;">
                 ${order === 1 ? "" : `<button type="button" class="remove-package-item" data-package-index="${order}">删除</button>`}
             </div>
             <div class="form-group">
@@ -2347,10 +2347,6 @@ function showPackageForm(packageData = null) {
                     <button type="button" id="addPackageItemButton">添加</button>
                 </div>
                 <div id="packageItemsContainer"></div>
-                <div class="form-group">
-                    <label>计费重量合计:</label>
-                    <input type="number" step="0.01" id="packageChargeWeightTotal" readonly>
-                </div>
                 <div class="button-group">
                     <button type="button" onclick="savePackage()">保存</button>
                     <button type="button" onclick="hidePackageForm()">取消</button>

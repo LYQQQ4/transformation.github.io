@@ -333,6 +333,49 @@ async function setupDatabase() {
     `);
     console.log('    ✓ customs_clearance_tracking 表已创建');
 
+    console.log('  • 创建 user_profiles 表...');
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS user_profiles (
+        id VARCHAR(50) PRIMARY KEY COMMENT '用户ID，国家代码+编号',
+        country_code VARCHAR(10) NOT NULL COMMENT '国家代码',
+        sequence_no INT NOT NULL COMMENT '国家内顺序号',
+        company_name VARCHAR(200) DEFAULT NULL COMMENT '公司名称',
+        address TEXT DEFAULT NULL COMMENT '地址',
+        contact_name VARCHAR(100) DEFAULT NULL COMMENT '联系人姓名',
+        phone VARCHAR(50) DEFAULT NULL COMMENT '电话',
+        email VARCHAR(100) DEFAULT NULL COMMENT '邮箱',
+        remark TEXT DEFAULT NULL COMMENT '备注',
+        dedupe_key VARCHAR(255) DEFAULT NULL COMMENT '去重键',
+        source_type VARCHAR(20) DEFAULT 'manual' COMMENT '来源类型',
+        legacy_sender_id VARCHAR(50) DEFAULT NULL COMMENT '原发件人ID',
+        legacy_customer_id VARCHAR(50) DEFAULT NULL COMMENT '原客户ID',
+        migration_batch VARCHAR(32) DEFAULT NULL COMMENT '迁移批次',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+        UNIQUE KEY uk_user_profiles_dedupe_key (dedupe_key),
+        KEY idx_user_profiles_country_code (country_code),
+        KEY idx_user_profiles_contact_name (contact_name),
+        KEY idx_user_profiles_legacy_sender_id (legacy_sender_id),
+        KEY idx_user_profiles_legacy_customer_id (legacy_customer_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='统一用户信息库'
+    `);
+    console.log('    ✓ user_profiles 表已创建');
+
+    console.log('  • 创建 user_profile_migration_map 表...');
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS user_profile_migration_map (
+        legacy_type VARCHAR(20) NOT NULL COMMENT '旧类型 sender/customer',
+        legacy_id VARCHAR(50) NOT NULL COMMENT '旧ID',
+        user_profile_id VARCHAR(50) NOT NULL COMMENT '新用户ID',
+        migration_batch VARCHAR(32) NOT NULL COMMENT '迁移批次',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+        PRIMARY KEY (legacy_type, legacy_id),
+        KEY idx_user_profile_id (user_profile_id),
+        KEY idx_migration_batch (migration_batch)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户信息库迁移映射表'
+    `);
+    console.log('    ✓ user_profile_migration_map 表已创建');
+
     console.log(`
 ╔════════════════════════════════════════════════════════════════╗
 ║                     ✓ 数据库初始化成功！                       ║
