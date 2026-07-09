@@ -17,6 +17,10 @@
   let currentDetailProfileId = "";
   let currentEditingProfileId = "";
   let currentDuplicateSourceId = "";
+  const ORDER_PROFILE_LIST_IDS = {
+    customer: "orderCustomerIdOptions",
+    sender: "orderSenderIdOptions",
+  };
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -205,7 +209,7 @@
   function buildLegacyFallbackMarkup(title) {
     return `
       <div class="section">
-        <h2>${escapeHtml(title)}</h2>
+        <h2>用户信息库（兼容入口）</h2>
         <p>该入口已兼容切换到统一用户信息库。</p>
         <button type="button" onclick="showPage('userProfiles')">打开用户信息库</button>
       </div>
@@ -213,14 +217,15 @@
   }
 
   function ensureUnifiedMenuLink() {
-    const senderLink = document.getElementById("senderDBLink");
-    if (!senderLink || document.getElementById(LINK_ID)) {
+    const systemMenu = document.querySelector(".sidebar-content h2 + ul + h2 + ul");
+    const productLink = document.getElementById("productDBLink");
+    if (!systemMenu || !productLink || document.getElementById(LINK_ID)) {
       return;
     }
 
     const item = document.createElement("li");
     item.innerHTML = `<a href="#" id="${LINK_ID}" onclick="showPage('userProfiles')">　　用户信息库</a>`;
-    senderLink.parentElement.parentElement.insertBefore(item, senderLink.parentElement);
+    systemMenu.insertBefore(item, productLink.parentElement);
   }
 
   function ensureUnifiedPage() {
@@ -244,10 +249,175 @@
     const senderPage = document.getElementById("senderDBPage");
     const customerPage = document.getElementById("customerDBPage");
     if (senderPage) {
-      senderPage.innerHTML = buildLegacyFallbackMarkup("发件人信息库");
+      senderPage.innerHTML = buildLegacyFallbackMarkup("用户信息库（兼容入口）");
     }
     if (customerPage) {
-      customerPage.innerHTML = buildLegacyFallbackMarkup("客户信息库");
+      customerPage.innerHTML = buildLegacyFallbackMarkup("用户信息库（兼容入口）");
+    }
+  }
+
+  function ensureOrderProfileAutocomplete() {
+    const form = document.getElementById("orderFormData");
+    if (!form) {
+      return;
+    }
+
+    const customerInput = form.querySelector("#customerId");
+    const senderInput = form.querySelector("#senderId");
+    if (!customerInput || !senderInput) {
+      return;
+    }
+
+    let customerList = document.getElementById(ORDER_PROFILE_LIST_IDS.customer);
+    if (!customerList) {
+      customerList = document.createElement("datalist");
+      customerList.id = ORDER_PROFILE_LIST_IDS.customer;
+      document.body.appendChild(customerList);
+    }
+
+    let senderList = document.getElementById(ORDER_PROFILE_LIST_IDS.sender);
+    if (!senderList) {
+      senderList = document.createElement("datalist");
+      senderList.id = ORDER_PROFILE_LIST_IDS.sender;
+      document.body.appendChild(senderList);
+    }
+
+    customerInput.setAttribute("list", ORDER_PROFILE_LIST_IDS.customer);
+    senderInput.setAttribute("list", ORDER_PROFILE_LIST_IDS.sender);
+    customerInput.setAttribute("autocomplete", "off");
+    senderInput.setAttribute("autocomplete", "off");
+
+    if (customerInput.dataset.profileBound !== "true") {
+      customerInput.addEventListener("input", function onCustomerInput(event) {
+        handleOrderProfileInput(event, "customer");
+      });
+      customerInput.addEventListener("focus", function onCustomerFocus(event) {
+        handleOrderProfileInput(event, "customer");
+      });
+      customerInput.dataset.profileBound = "true";
+    }
+
+    if (senderInput.dataset.profileBound !== "true") {
+      senderInput.addEventListener("input", function onSenderInput(event) {
+        handleOrderProfileInput(event, "sender");
+      });
+      senderInput.addEventListener("focus", function onSenderFocus(event) {
+        handleOrderProfileInput(event, "sender");
+      });
+      senderInput.dataset.profileBound = "true";
+    }
+
+    populateOrderProfileOptions(customerInput.value, "customer");
+    populateOrderProfileOptions(senderInput.value, "sender");
+  }
+
+  function populateOrderProfileOptions(keyword, type) {
+    const listId = type === "customer" ? ORDER_PROFILE_LIST_IDS.customer : ORDER_PROFILE_LIST_IDS.sender;
+    const datalist = document.getElementById(listId);
+    if (!datalist) {
+      return;
+    }
+
+    const normalizedKeyword = String(keyword || "").trim().toLowerCase();
+    const profiles = getUserProfiles();
+    const matchedProfiles = profiles
+      .filter((profile) => {
+        if (!normalizedKeyword) {
+          return true;
+        }
+        return [profile.id, profile.company_name, profile.contact_name, profile.phone]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalizedKeyword));
+      })
+      .slice(0, 20);
+
+    datalist.innerHTML = matchedProfiles
+      .map((profile) => {
+        const summary = [profile.company_name, profile.contact_name, profile.phone].filter(Boolean).join(" / ");
+        return `<option value="${escapeHtml(profile.id)}" label="${escapeHtml(summary)}"></option>`;
+      })
+      .join("");
+  }
+
+  function showOrderProfileHint(field, message, type = "info") {
+    const hint = document.getElementById(field === "customer" ? "customerIdHint" : "senderIdHint");
+    if (!hint) {
+      return;
+    }
+    hint.textContent = message;
+    hint.className = type;
+  }
+
+  function clearOrderProfileHint(field) {
+    const hint = document.getElementById(field === "customer" ? "customerIdHint" : "senderIdHint");
+    if (!hint) {
+      return;
+    }
+    hint.textContent = "";
+    hint.className = "info";
+  }
+
+  function applyCustomerProfileToOrder(form, profile) {
+    const company = form.querySelector("#companyName");
+    const address = form.querySelector("#deliveryAddress");
+    const name = form.querySelector("#receiverName");
+    const phone = form.querySelector("#receiverPhone");
+
+    if (company) {
+      company.value = profile.company_name || "";
+    }
+    if (address) {
+      address.value = profile.address || "";
+    }
+    if (name) {
+      name.value = profile.contact_name || "";
+    }
+    if (phone) {
+      phone.value = profile.phone || "";
+    }
+  }
+
+  function applySenderProfileToOrder(form, profile) {
+    const address = form.querySelector("#shippingAddress");
+    const name = form.querySelector("#senderName");
+    const phone = form.querySelector("#senderPhone");
+
+    if (address) {
+      address.value = profile.address || "";
+    }
+    if (name) {
+      name.value = profile.contact_name || "";
+    }
+    if (phone) {
+      phone.value = profile.phone || "";
+    }
+  }
+
+  function handleOrderProfileInput(event, field) {
+    const value = event.target.value.trim();
+    populateOrderProfileOptions(value, field);
+
+    if (!value) {
+      clearOrderProfileHint(field);
+      return;
+    }
+
+    const profile = findProfileById(value);
+    if (!profile) {
+      showOrderProfileHint(field, "未匹配到现有用户ID，可继续输入，提交时将由后端校验。", "info");
+      return;
+    }
+
+    clearOrderProfileHint(field);
+    const form = event.target.closest("#orderFormData");
+    if (!form) {
+      return;
+    }
+
+    if (field === "customer") {
+      applyCustomerProfileToOrder(form, profile);
+    } else {
+      applySenderProfileToOrder(form, profile);
     }
   }
 
@@ -647,11 +817,13 @@
     window.handleCustomerIdChange = function handleCustomerIdChangeCompat(event) {
       const customerId = event.target.value.trim();
       if (!customerId) {
+        clearOrderProfileHint("customer");
         return;
       }
 
       const customer = findProfileById(customerId);
       if (!customer) {
+        showOrderProfileHint("customer", "未匹配到现有用户ID，可继续输入，提交时将由后端校验。", "info");
         return;
       }
 
@@ -660,22 +832,20 @@
         return;
       }
 
-      const address = form.querySelector("#deliveryAddress");
-      const name = form.querySelector("#receiverName");
-      const phone = form.querySelector("#receiverPhone");
-      if (address) address.value = customer.address || "";
-      if (name) name.value = customer.contact_name || "";
-      if (phone) phone.value = customer.phone || "";
+      clearOrderProfileHint("customer");
+      applyCustomerProfileToOrder(form, customer);
     };
 
     window.handleSenderIdChange = function handleSenderIdChangeCompat(event) {
       const senderId = event.target.value.trim();
       if (!senderId) {
+        clearOrderProfileHint("sender");
         return;
       }
 
       const sender = findProfileById(senderId);
       if (!sender) {
+        showOrderProfileHint("sender", "未匹配到现有用户ID，可继续输入，提交时将由后端校验。", "info");
         return;
       }
 
@@ -684,12 +854,8 @@
         return;
       }
 
-      const address = form.querySelector("#shippingAddress");
-      const name = form.querySelector("#senderName");
-      const phone = form.querySelector("#senderPhone");
-      if (address) address.value = sender.address || "";
-      if (name) name.value = sender.contact_name || "";
-      if (phone) phone.value = sender.phone || "";
+      clearOrderProfileHint("sender");
+      applySenderProfileToOrder(form, sender);
     };
   }
 
@@ -739,6 +905,8 @@
         originalOnload.call(window, event);
       }
 
+      ensureOrderProfileAutocomplete();
+
       const searchInput = document.getElementById("userProfilesSearchInput");
       if (searchInput && searchInput.dataset.bound !== "true") {
         searchInput.addEventListener("keypress", function onUserProfilesSearchKeypress(keyEvent) {
@@ -776,6 +944,7 @@
     patchOnload();
     patchSenderCustomerLinks();
     syncLegacyCaches(getUserProfiles());
+    ensureOrderProfileAutocomplete();
   }
 
   window.loadUserProfiles = loadUserProfiles;

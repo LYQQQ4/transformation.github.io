@@ -568,8 +568,6 @@
 
                     <h2>系统管理</h2>
                     <ul>
-                        <li><a href="#" id="senderDBLink" onclick="showPage('senderDB')">　　发件人信息库</a></li>
-                        <li><a href="#" id="customerDBLink" onclick="showPage('customerDB')">　　客户信息库</a></li>
                         <li><a href="#" id="productDBLink" onclick="showPage('productDB')">　　产品信息库</a></li>
                         <li><a href="#" id="packagingDBLink" onclick="showPage('packagingDB')">　　包装信息库</a></li>
                         <li><a href="#" id="userManagementLink" onclick="showPage('userManagement')">　　用户管理</a></li>
@@ -851,10 +849,10 @@
                     </div>
                 </div>
 
-                <!-- 发件人信息库页面 -->
+                <!-- 用户信息库兼容页面 -->
                 <div id="senderDBPage" class="page" style="display:none;">
                     <div class="section">
-                        <h2>发件人信息库</h2>
+                        <h2>用户信息库（兼容入口）</h2>
 
                         <div class="import-section" style="margin-bottom: 24px;">
                             <h4>批量导入Excel文件</h4>
@@ -919,10 +917,10 @@
                     </div>
                 </div>
 
-                <!-- 客户信息库页面 -->
+                <!-- 用户信息库兼容页面 -->
                 <div id="customerDBPage" class="page" style="display:none;">
                     <div class="section">
-                        <h2>客户信息库</h2>
+                        <h2>用户信息库（兼容入口）</h2>
 
                         <!-- 批量导入Excel文件区块 -->
                         <div class="import-section" style="margin-bottom: 24px;">
@@ -1198,10 +1196,12 @@
                     <label>客户ID:</label>
                     <input type="text" id="customerId" required>
                 </div>
+                <div id="customerIdHint" class="info" style="margin: -8px 0 12px 132px; font-size: 12px;"></div>
                 <div class="form-group">
                     <label>发件人ID:</label>
                     <input type="text" id="senderId">
                 </div>
+                <div id="senderIdHint" class="info" style="margin: -8px 0 12px 132px; font-size: 12px;"></div>
                 <div class="form-group">
                     <label>发货地址:</label>
                     <textarea id="shippingAddress" required></textarea>
