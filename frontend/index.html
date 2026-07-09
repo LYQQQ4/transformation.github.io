@@ -585,6 +585,7 @@
                 <div id="ordersImportBar" class="import-bar">
                     <div class="import-controls">
                         <input type="file" id="excelFile" accept=".xlsx,.xls">
+                        <button type="button" onclick="downloadOrderImportTemplate()">下载导入模板</button>
                         <button type="button" onclick="importExcelBatch()">批量导入</button>
                     </div>
                     <div id="importMessage"></div>
@@ -1144,12 +1145,12 @@
                     <input type="text" id="filterDestination">
                 </div>
                 <div class="form-group">
-                    <label>开始日期:</label>
-                    <input type="date" id="filterStartDate">
-                </div>
-                <div class="form-group">
-                    <label>结束日期:</label>
-                    <input type="date" id="filterEndDate">
+                    <label>日期:</label>
+                    <select id="filterDateFilledStatus">
+                        <option value="all">全部</option>
+                        <option value="filled">已填</option>
+                        <option value="unfilled">未填</option>
+                    </select>
                 </div>
                 <div class="button-group">
                     <button type="button" onclick="applyFilters()">应用筛选</button>

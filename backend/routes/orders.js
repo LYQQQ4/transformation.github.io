@@ -2,6 +2,12 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const XLSX = require("xlsx");
+const {
+  ORDER_IMPORT_FIELDS,
+  buildOrderImportFieldMapping,
+  getOrderImportHeaders,
+  getRequiredOrderImportFields,
+} = require("../lib/order_import_schema");
 
 // 配置multer用于文件上传
 const upload = multer({
@@ -62,11 +68,121 @@ async function validateOrderUserIds(userDb, customerId, senderId) {
   }
 }
 
+async function fetchOrderUserProfiles(userDb, customerId, senderId) {
+  if (!userDb) {
+    return {};
+  }
+
+  const ids = [String(customerId || "").trim(), String(senderId || "").trim()].filter(Boolean);
+  if (!ids.length) {
+    return {};
+  }
+
+  const placeholders = ids.map(() => "?").join(", ");
+  const [rows] = await userDb.execute(
+    `SELECT id, company_name, address, contact_name, phone FROM user_profiles WHERE id IN (${placeholders})`,
+    ids
+  );
+
+  return rows.reduce((accumulator, row) => {
+    accumulator[row.id] = row;
+    return accumulator;
+  }, {});
+}
+
+async function enrichOrderPayloadWithUserProfiles(userDb, payload) {
+  const normalizedPayload = { ...payload };
+  await validateOrderUserIds(userDb, normalizedPayload.customer_id, normalizedPayload.sender_id);
+
+  const profiles = await fetchOrderUserProfiles(userDb, normalizedPayload.customer_id, normalizedPayload.sender_id);
+  const customerProfile = profiles[String(normalizedPayload.customer_id || "").trim()];
+  const senderProfile = profiles[String(normalizedPayload.sender_id || "").trim()];
+
+  if (customerProfile) {
+    normalizedPayload.company_name = normalizedPayload.company_name || customerProfile.company_name || "";
+    normalizedPayload.delivery_address = normalizedPayload.delivery_address || customerProfile.address || "";
+    normalizedPayload.receiver_name = normalizedPayload.receiver_name || customerProfile.contact_name || "";
+    normalizedPayload.receiver_phone = normalizedPayload.receiver_phone || customerProfile.phone || "";
+  }
+
+  if (senderProfile) {
+    normalizedPayload.shipping_address = normalizedPayload.shipping_address || senderProfile.address || "";
+    normalizedPayload.sender_name = normalizedPayload.sender_name || senderProfile.contact_name || "";
+    normalizedPayload.sender_phone = normalizedPayload.sender_phone || senderProfile.phone || "";
+  }
+
+  return normalizedPayload;
+}
+
 module.exports = (db, userDb = null) => {
+  router.get("/import-template", async (req, res) => {
+    try {
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.aoa_to_sheet([getOrderImportHeaders()]);
+      XLSX.utils.book_append_sheet(workbook, worksheet, "订单导入模板");
+
+      const requiredFields = new Set(getRequiredOrderImportFields());
+      const noteSheetRows = [
+        ["字段", "说明"],
+        ...ORDER_IMPORT_FIELDS.map((field) => {
+          const notes = [];
+          notes.push(requiredFields.has(field.key) ? "必填" : "选填");
+          if (field.key === "receive_date") {
+            notes.push("格式: YYYY-MM-DD 或 YYYY/MM/DD");
+          }
+          if (field.key === "customer_id" || field.key === "sender_id") {
+            notes.push("统一用户库ID，错误时会按行返回失败原因");
+          }
+          return [field.label, notes.join("；")];
+        }),
+      ];
+      const noteWorksheet = XLSX.utils.aoa_to_sheet(noteSheetRows);
+      XLSX.utils.book_append_sheet(workbook, noteWorksheet, "填写说明");
+
+      const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", 'attachment; filename="order_import_template.xlsx"');
+      res.send(buffer);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to generate import template: " + error.message });
+    }
+  });
+
   // GET all orders
   router.get("/", async (req, res) => {
     try {
-      const [rows] = await db.execute("SELECT * FROM orders ORDER BY serial_number DESC");
+      const conditions = [];
+      const params = [];
+
+      const appendLikeCondition = (fieldName) => {
+        const value = String(req.query[fieldName] || "").trim();
+        if (!value) {
+          return;
+        }
+        conditions.push(`${fieldName} LIKE ?`);
+        params.push(`%${value}%`);
+      };
+
+      appendLikeCondition("company_name");
+      appendLikeCondition("orderer");
+      appendLikeCondition("business_type");
+      appendLikeCondition("customer_id");
+      appendLikeCondition("sender_id");
+      appendLikeCondition("origin");
+      appendLikeCondition("destination");
+
+      const dateFilledStatus = String(req.query.dateFilledStatus || "all").trim();
+      if (dateFilledStatus === "filled") {
+        conditions.push("receive_date IS NOT NULL");
+      } else if (dateFilledStatus === "unfilled") {
+        conditions.push("receive_date IS NULL");
+      }
+
+      const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+      const [rows] = await db.execute(
+        `SELECT * FROM orders ${whereClause} ORDER BY serial_number DESC`,
+        params
+      );
       res.json({ orders: rows });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -125,7 +241,26 @@ module.exports = (db, userDb = null) => {
       const product_name = req.body.product_name;
       const remark1 = req.body.remark1;
       const remark2 = req.body.remark2;
-      await validateOrderUserIds(userDb, customer_id, sender_id);
+      const enrichedOrderData = await enrichOrderPayloadWithUserProfiles(userDb, {
+        company_name,
+        orderer,
+        receive_date,
+        business_type,
+        customer_id,
+        sender_id,
+        shipping_address,
+        sender_name,
+        sender_phone,
+        delivery_address,
+        receiver_name,
+        receiver_phone,
+        origin,
+        destination,
+        trade_term,
+        product_name,
+        remark1,
+        remark2,
+      });
 
       // 生成serial_number：当年+当月+001，最后三位递增，每月重置
       const now = new Date();
@@ -158,7 +293,7 @@ module.exports = (db, userDb = null) => {
         // 尝试插入orders表，如果serial_number已存在会失败
         try {
           const sql = "INSERT INTO orders (company_name, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2, serial_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-          const [result] = await connection.execute(sql, [company_name, orderer, receive_date, business_type, customer_id, sender_id || null, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term || null, product_name || null, remark1 || null, remark2 || null, serialNumber]);
+          const [result] = await connection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, enrichedOrderData.receive_date, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, serialNumber]);
 
           // 同时在package表中插入记录，使用相同的serial_number，只填入serial_number，其他字段为空
           const packageSql = "INSERT INTO \`package\` (serial_number, package_label, package_order) VALUES (?, ?, ?)";
@@ -225,10 +360,29 @@ module.exports = (db, userDb = null) => {
       const product_name = req.body.product_name;
       const remark1 = req.body.remark1;
       const remark2 = req.body.remark2;
-      await validateOrderUserIds(userDb, customer_id, sender_id);
+      const enrichedOrderData = await enrichOrderPayloadWithUserProfiles(userDb, {
+        company_name,
+        orderer,
+        receive_date,
+        business_type,
+        customer_id,
+        sender_id,
+        shipping_address,
+        sender_name,
+        sender_phone,
+        delivery_address,
+        receiver_name,
+        receiver_phone,
+        origin,
+        destination,
+        trade_term,
+        product_name,
+        remark1,
+        remark2,
+      });
 
       const sql = "UPDATE orders SET company_name = ?, orderer = ?, receive_date = ?, business_type = ?, customer_id = ?, sender_id = ?, shipping_address = ?, sender_name = ?, sender_phone = ?, delivery_address = ?, receiver_name = ?, receiver_phone = ?, origin = ?, destination = ?, trade_term = ?, product_name = ?, remark1 = ?, remark2 = ? WHERE id = ?";
-      const [result] = await db.execute(sql, [company_name, orderer, receive_date, business_type, customer_id, sender_id || null, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term || null, product_name || null, remark1 || null, remark2 || null, req.params.id]);
+      const [result] = await db.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, enrichedOrderData.receive_date, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, req.params.id]);
       if (result.affectedRows === 0) {
         res.status(404).json({ error: "Order not found" });
         return;
@@ -308,6 +462,8 @@ module.exports = (db, userDb = null) => {
         });
       }
 
+      validationResult.data = await enrichOrderPayloadWithUserProfiles(userDb, validationResult.data);
+
       res.json({
         success: true,
         message: "Excel数据解析成功",
@@ -367,9 +523,7 @@ module.exports = (db, userDb = null) => {
             continue;
           }
 
-          // 插入数据库
-          const { company_name, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2 } = validationResult.data;
-          await validateOrderUserIds(userDb, customer_id, sender_id);
+          const enrichedOrderData = await enrichOrderPayloadWithUserProfiles(userDb, validationResult.data);
 
           // 生成serial_number：当年+当月+001，最后三位递增，每月重置
           const now = new Date();
@@ -406,7 +560,7 @@ module.exports = (db, userDb = null) => {
             // 尝试插入所有表
             try {
               const sql = "INSERT INTO orders (company_name, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2, serial_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-              const [insertResult] = await rowConnection.execute(sql, [company_name, orderer, receive_date, business_type, customer_id, sender_id || null, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term || null, product_name || null, remark1 || null, remark2 || null, serialNumber]);
+              const [insertResult] = await rowConnection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, enrichedOrderData.receive_date, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, serialNumber]);
 
               // 同时在package表中插入记录，使用相同的serial_number
               const packageSql = "INSERT INTO \`package\` (serial_number, package_label, package_order) VALUES (?, ?, ?)";
@@ -502,39 +656,10 @@ function validateExcelData(data) {
     data: {}
   };
 
-  // 定义字段映射
-  const fieldMapping = {
-    "公司抬头": "company_name",
-    "公司名称": "company_name",
-    "指令人": "orderer",
-    "接收指令日期": "receive_date",
-    "接收日期": "receive_date",
-    "指令日期": "receive_date",
-    "日期": "receive_date",
-    "业务类型": "business_type",
-    "客户ID": "customer_id",
-    "发件人ID": "sender_id",
-    "发货地址": "shipping_address",
-    "发件人": "sender_name",
-    "发件人电话": "sender_phone",
-    "收货地址": "delivery_address",
-    "收件人": "receiver_name",
-    "收件人电话": "receiver_phone",
-    "始发地": "origin",
-    "目的地": "destination",
-    "贸易术语": "trade_term",
-    "货物品名": "product_name",
-    "品名": "product_name",
-    "备注1": "remark1",
-    "备注2": "remark2"
-  };
+  const fieldMapping = buildOrderImportFieldMapping();
 
   // 检查必需字段
-  const requiredFields = [
-    "company_name", "orderer", "receive_date", "business_type",
-    "customer_id", "shipping_address", "sender_name", "sender_phone",
-    "delivery_address", "receiver_name", "receiver_phone", "origin", "destination"
-  ];
+  const requiredFields = getRequiredOrderImportFields();
 
   // 将Excel字段名转换为数据库字段名
   for (const [excelField, dbField] of Object.entries(fieldMapping)) {

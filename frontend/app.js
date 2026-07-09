@@ -607,7 +607,8 @@ let currentGuestSearchTerm = "";
 // Order functions
 async function loadOrders() {
     try {
-        const response = await fetch(`${API_BASE}/orders`);
+        const query = buildOrderFilterQuery();
+        const response = await fetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
         const data = await response.json();
         displayOrders(data.orders);
     } catch (error) {
@@ -1490,7 +1491,6 @@ function displayImportResults(result) {
 }
 
 function fillFormWithData(data) {
-    // 填充表单字段
     const fieldMapping = {
         company_name: "companyName",
         orderer: "orderer",
@@ -1530,6 +1530,30 @@ function showImportMessage(message, type = "info") {
     const importMessage = document.getElementById("importMessage");
     importMessage.innerHTML = message;
     importMessage.className = type;
+}
+
+async function downloadOrderImportTemplate() {
+    try {
+        const response = await fetch(`${API_BASE}/orders/import-template`);
+        if (!response.ok) {
+            const error = await response.json();
+            showImportMessage(error.error || "下载模板失败", "error");
+            return;
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "order_import_template.xlsx";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showImportMessage("导入模板下载成功", "success");
+    } catch (error) {
+        showImportMessage("下载模板失败: " + error.message, "error");
+    }
 }
 
 async function saveOrder() {
@@ -1644,9 +1668,14 @@ function applyFilters() {
         customer_id: document.getElementById("filterCustomerId").value.trim(),
         origin: document.getElementById("filterOrigin").value.trim(),
         destination: document.getElementById("filterDestination").value.trim(),
-        start_date: document.getElementById("filterStartDate").value,
-        end_date: document.getElementById("filterEndDate").value
+        dateFilledStatus: document.getElementById("filterDateFilledStatus").value
     };
+
+    Object.keys(currentFilters).forEach(key => {
+        if (currentFilters[key] === "" || currentFilters[key] === "all") {
+            delete currentFilters[key];
+        }
+    });
 
     // Load and filter orders
     loadAndFilterOrders();
@@ -1656,6 +1685,10 @@ function applyFilters() {
 function clearFilters() {
     // Clear filter form
     document.getElementById("filterFormData").reset();
+    const dateFilledStatus = document.getElementById("filterDateFilledStatus");
+    if (dateFilledStatus) {
+        dateFilledStatus.value = "all";
+    }
     // Clear current filters
     currentFilters = {};
     // Clear search term as well
@@ -1671,67 +1704,25 @@ function searchOrders() {
     loadAndFilterOrders();
 }
 
+function buildOrderFilterQuery() {
+    const params = new URLSearchParams();
+
+    Object.entries(currentFilters || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+            params.set(key, value);
+        }
+    });
+
+    return params.toString();
+}
+
 async function loadAndFilterOrders() {
     try {
-        const response = await fetch(`${API_BASE}/orders`);
+        const query = buildOrderFilterQuery();
+        const response = await fetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
         const data = await response.json();
 
         let filteredOrders = data.orders;
-
-        // Apply filters
-        if (Object.keys(currentFilters).length > 0) {
-            filteredOrders = filteredOrders.filter(order => {
-                // Company name filter
-                if (currentFilters.company_name && !order.company_name.toLowerCase().includes(currentFilters.company_name.toLowerCase())) {
-                    return false;
-                }
-
-                // Orderer filter
-                if (currentFilters.orderer && !order.orderer.toLowerCase().includes(currentFilters.orderer.toLowerCase())) {
-                    return false;
-                }
-
-                // Business type filter
-                if (currentFilters.business_type && !order.business_type.toLowerCase().includes(currentFilters.business_type.toLowerCase())) {
-                    return false;
-                }
-
-                // Customer ID filter
-                if (currentFilters.customer_id && !order.customer_id.toLowerCase().includes(currentFilters.customer_id.toLowerCase())) {
-                    return false;
-                }
-
-                // Origin filter
-                if (currentFilters.origin && !order.origin.toLowerCase().includes(currentFilters.origin.toLowerCase())) {
-                    return false;
-                }
-
-                // Destination filter
-                if (currentFilters.destination && !order.destination.toLowerCase().includes(currentFilters.destination.toLowerCase())) {
-                    return false;
-                }
-
-                // Date range filter
-                if (currentFilters.start_date || currentFilters.end_date) {
-                    const orderDate = new Date(order.receive_date);
-                    if (currentFilters.start_date) {
-                        const startDate = new Date(currentFilters.start_date);
-                        if (orderDate < startDate) {
-                            return false;
-                        }
-                    }
-                    if (currentFilters.end_date) {
-                        const endDate = new Date(currentFilters.end_date);
-                        endDate.setHours(23, 59, 59, 999); // Include the entire end date
-                        if (orderDate > endDate) {
-                            return false;
-                        }
-                    }
-                }
-
-                return true;
-            });
-        }
 
         // Apply search term (if any)
         if (currentSearchTerm) {
