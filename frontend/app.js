@@ -665,8 +665,8 @@ function displayOrders(orders) {
             <td>${order.company_name}</td>
             <td>${order.orderer}</td>
             <td>${order.business_type}</td>
-            <td>${order.customer_id}</td>
             <td>${order.sender_id || ""}</td>
+            <td>${order.customer_id}</td>
             <td>${displayDate}</td>
             <td>${order.origin}</td>
             <td>${order.destination}</td>
@@ -699,8 +699,8 @@ function renderOrderDetailView(order) {
             <div><strong>公司名称:</strong> ${order.company_name || ""}</div>
             <div><strong>指令人:</strong> ${order.orderer || ""}</div>
             <div><strong>业务类型:</strong> ${order.business_type || ""}</div>
-            <div><strong>客户ID:</strong> ${order.customer_id || ""}</div>
             <div><strong>发件人ID:</strong> ${order.sender_id || ""}</div>
+            <div><strong>客户ID:</strong> ${order.customer_id || ""}</div>
             <div><strong>接收指令日期:</strong> ${displayDate}</div>
             <div><strong>始发地:</strong> ${order.origin || ""}</div>
             <div><strong>目的地:</strong> ${order.destination || ""}</div>
@@ -1496,8 +1496,8 @@ function fillFormWithData(data) {
         orderer: "orderer",
         receive_date: "receiveDate",
         business_type: "businessType",
-        customer_id: "customerId",
         sender_id: "senderId",
+        customer_id: "customerId",
         shipping_address: "shippingAddress",
         sender_name: "senderName",
         sender_phone: "senderPhone",
@@ -1567,8 +1567,8 @@ async function saveOrder() {
         orderer: getOrderFormElement("orderer", form).value,
         receive_date: getReceiveDateValue(form),
         business_type: getOrderFormElement("businessType", form).value,
-        customer_id: getOrderFormElement("customerId", form).value,
         sender_id: getOrderFormElement("senderId", form).value,
+        customer_id: getOrderFormElement("customerId", form).value,
         shipping_address: getOrderFormElement("shippingAddress", form).value,
         sender_name: getOrderFormElement("senderName", form).value,
         sender_phone: getOrderFormElement("senderPhone", form).value,

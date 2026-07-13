@@ -10,6 +10,7 @@ const {
   getPreEnrichRequiredOrderImportFields,
   getRequiredOrderImportFields,
 } = require("../lib/order_import_schema");
+const { validateUserProfileId } = require("../lib/user_profiles");
 
 // 配置multer用于文件上传
 const upload = multer({
@@ -30,6 +31,74 @@ const upload = multer({
         }
     }
 });
+
+function normalizeOrderImportValue(value) {
+  return String(value || "").trim();
+}
+
+async function collectOrderUserIdErrors(userDb, customerId, senderId, options = {}) {
+  const {
+    requireCustomerId = true,
+    requireSenderId = false,
+    validateFormat = false,
+  } = options;
+  const errors = [];
+
+  const normalizedCustomerId = normalizeOrderImportValue(customerId);
+  const normalizedSenderId = normalizeOrderImportValue(senderId);
+
+  if (requireSenderId && !normalizedSenderId) {
+    errors.push("发件人ID不能为空");
+  }
+
+  if (requireCustomerId && !normalizedCustomerId) {
+    errors.push("客户ID不能为空");
+  }
+
+  const idsToCheck = [];
+  const seenIds = new Set();
+  const pushIdForLookup = (id) => {
+    if (!id || seenIds.has(id)) {
+      return;
+    }
+    seenIds.add(id);
+    idsToCheck.push(id);
+  };
+
+  if (validateFormat && normalizedSenderId && !validateUserProfileId(normalizedSenderId)) {
+    errors.push(`发件人ID格式不正确，请使用统一用户库ID格式（如 ch001）：${normalizedSenderId}`);
+  } else if (normalizedSenderId) {
+    pushIdForLookup(normalizedSenderId);
+  }
+
+  if (validateFormat && normalizedCustomerId && !validateUserProfileId(normalizedCustomerId)) {
+    errors.push(`客户ID格式不正确，请使用统一用户库ID格式（如 ch001）：${normalizedCustomerId}`);
+  } else if (normalizedCustomerId) {
+    pushIdForLookup(normalizedCustomerId);
+  }
+
+  if (!userDb || !idsToCheck.length) {
+    return errors;
+  }
+
+  const placeholders = idsToCheck.map(() => "?").join(", ");
+  const [rows] = await userDb.execute(
+    `SELECT id FROM user_profiles WHERE id IN (${placeholders})`,
+    idsToCheck
+  );
+
+  const existingIds = new Set(rows.map((row) => row.id));
+
+  if (normalizedSenderId && !existingIds.has(normalizedSenderId) && validateUserProfileId(normalizedSenderId)) {
+    errors.push(`发件人ID不存在于统一用户库：${normalizedSenderId}`);
+  }
+
+  if (normalizedCustomerId && !existingIds.has(normalizedCustomerId) && validateUserProfileId(normalizedCustomerId)) {
+    errors.push(`客户ID不存在于统一用户库：${normalizedCustomerId}`);
+  }
+
+  return errors;
+}
 
 async function validateOrderUserIds(userDb, customerId, senderId) {
   if (!userDb) {
@@ -75,7 +144,7 @@ async function fetchOrderUserProfiles(userDb, customerId, senderId) {
     return {};
   }
 
-  const ids = [String(customerId || "").trim(), String(senderId || "").trim()].filter(Boolean);
+  const ids = [normalizeOrderImportValue(customerId), normalizeOrderImportValue(senderId)].filter(Boolean);
   if (!ids.length) {
     return {};
   }
@@ -92,13 +161,11 @@ async function fetchOrderUserProfiles(userDb, customerId, senderId) {
   }, {});
 }
 
-async function enrichOrderPayloadWithUserProfiles(userDb, payload) {
+async function enrichOrderPayloadFromProfiles(userDb, payload) {
   const normalizedPayload = { ...payload };
-  await validateOrderUserIds(userDb, normalizedPayload.customer_id, normalizedPayload.sender_id);
-
   const profiles = await fetchOrderUserProfiles(userDb, normalizedPayload.customer_id, normalizedPayload.sender_id);
-  const customerProfile = profiles[String(normalizedPayload.customer_id || "").trim()];
-  const senderProfile = profiles[String(normalizedPayload.sender_id || "").trim()];
+  const customerProfile = profiles[normalizeOrderImportValue(normalizedPayload.customer_id)];
+  const senderProfile = profiles[normalizeOrderImportValue(normalizedPayload.sender_id)];
 
   if (customerProfile) {
     normalizedPayload.company_name = normalizedPayload.company_name || customerProfile.company_name || "";
@@ -114,6 +181,11 @@ async function enrichOrderPayloadWithUserProfiles(userDb, payload) {
   }
 
   return normalizedPayload;
+}
+
+async function enrichOrderPayloadWithUserProfiles(userDb, payload) {
+  await validateOrderUserIds(userDb, payload.customer_id, payload.sender_id);
+  return enrichOrderPayloadFromProfiles(userDb, payload);
 }
 
 function validateRequiredFields(payload, requiredFields, fieldMapping) {
@@ -139,17 +211,22 @@ module.exports = (db, userDb = null) => {
 
       const requiredFields = new Set(getRequiredOrderImportFields());
       const noteSheetRows = [
-        ["字段", "说明"],
+        ["\u5b57\u6bb5", "\u8bf4\u660e"],
         ...ORDER_IMPORT_FIELDS.map((field) => {
           const notes = [];
-          notes.push(requiredFields.has(field.key) ? "必填" : "选填");
+          notes.push(requiredFields.has(field.key) ? "\u5fc5\u586b" : "\u9009\u586b");
           if (field.key === "receive_date") {
-            notes.push("格式: YYYY-MM-DD 或 YYYY/MM/DD");
+            notes.push("\u683c\u5f0f: YYYY-MM-DD \u6216 YYYY/MM/DD");
           }
-          if (field.key === "customer_id" || field.key === "sender_id") {
-            notes.push("统一用户库ID，错误时会按行返回失败原因");
+          if (field.key === "sender_id") {
+            notes.push("\u8bf7\u5148\u586b\u5199\u53d1\u4ef6\u4ebaID\uff0c\u4e14\u5fc5\u987b\u6765\u81ea\u7edf\u4e00\u7528\u6237\u5e93");
+            notes.push("\u6821\u9a8c\u5931\u8d25\u65f6\u4f1a\u6309\u884c\u8fd4\u56de\u5931\u8d25\u539f\u56e0");
           }
-          return [field.label, notes.join("；")];
+          if (field.key === "customer_id") {
+            notes.push("\u8bf7\u540e\u586b\u5199\u5ba2\u6237ID\uff0c\u4e14\u5fc5\u987b\u6765\u81ea\u7edf\u4e00\u7528\u6237\u5e93");
+            notes.push("\u6821\u9a8c\u5931\u8d25\u65f6\u4f1a\u6309\u884c\u8fd4\u56de\u5931\u8d25\u539f\u56e0");
+          }
+          return [field.label, notes.join("\uff1b")];
         }),
       ];
       const noteWorksheet = XLSX.utils.aoa_to_sheet(noteSheetRows);
@@ -478,7 +555,24 @@ module.exports = (db, userDb = null) => {
         });
       }
 
-      validationResult.data = await enrichOrderPayloadWithUserProfiles(userDb, validationResult.data);
+      const userIdErrors = await collectOrderUserIdErrors(
+        userDb,
+        validationResult.data.customer_id,
+        validationResult.data.sender_id,
+        {
+          requireCustomerId: true,
+          requireSenderId: true,
+          validateFormat: true,
+        }
+      );
+      if (userIdErrors.length > 0) {
+        return res.status(400).json({
+          error: "\u6570\u636e\u9a8c\u8bc1\u5931\u8d25",
+          details: userIdErrors
+        });
+      }
+
+      validationResult.data = await enrichOrderPayloadFromProfiles(userDb, validationResult.data);
       const postEnrichErrors = validateRequiredFields(
         validationResult.data,
         getPostEnrichRequiredOrderImportFields(),
@@ -547,10 +641,31 @@ module.exports = (db, userDb = null) => {
               row: rowNumber,
               errors: validationResult.errors
             });
+            await rowConnection.rollback();
             continue;
           }
 
-          const enrichedOrderData = await enrichOrderPayloadWithUserProfiles(userDb, validationResult.data);
+          const userIdErrors = await collectOrderUserIdErrors(
+            userDb,
+            validationResult.data.customer_id,
+            validationResult.data.sender_id,
+            {
+              requireCustomerId: true,
+              requireSenderId: true,
+              validateFormat: true,
+            }
+          );
+          if (userIdErrors.length > 0) {
+            results.failed++;
+            results.errors.push({
+              row: rowNumber,
+              errors: userIdErrors
+            });
+            await rowConnection.rollback();
+            continue;
+          }
+
+          const enrichedOrderData = await enrichOrderPayloadFromProfiles(userDb, validationResult.data);
           const postEnrichErrors = validateRequiredFields(
             enrichedOrderData,
             getPostEnrichRequiredOrderImportFields(),
@@ -562,6 +677,7 @@ module.exports = (db, userDb = null) => {
               row: rowNumber,
               errors: postEnrichErrors
             });
+            await rowConnection.rollback();
             continue;
           }
 
