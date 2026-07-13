@@ -5,6 +5,7 @@ const ORDER_IMPORT_FIELDS = [
     aliases: ["公司抬头", "公司名称"],
     formId: "companyName",
     required: true,
+    allowAutoFillFromProfile: true,
   },
   {
     key: "orderer",
@@ -33,6 +34,7 @@ const ORDER_IMPORT_FIELDS = [
     aliases: ["客户ID"],
     formId: "customerId",
     required: true,
+    allowAutoFillFromProfile: false,
   },
   {
     key: "sender_id",
@@ -40,6 +42,7 @@ const ORDER_IMPORT_FIELDS = [
     aliases: ["发件人ID"],
     formId: "senderId",
     required: false,
+    allowAutoFillFromProfile: false,
   },
   {
     key: "shipping_address",
@@ -47,6 +50,7 @@ const ORDER_IMPORT_FIELDS = [
     aliases: ["发货地址"],
     formId: "shippingAddress",
     required: true,
+    allowAutoFillFromProfile: true,
   },
   {
     key: "sender_name",
@@ -54,6 +58,7 @@ const ORDER_IMPORT_FIELDS = [
     aliases: ["发件人"],
     formId: "senderName",
     required: true,
+    allowAutoFillFromProfile: true,
   },
   {
     key: "sender_phone",
@@ -61,6 +66,7 @@ const ORDER_IMPORT_FIELDS = [
     aliases: ["发件人电话"],
     formId: "senderPhone",
     required: true,
+    allowAutoFillFromProfile: true,
   },
   {
     key: "delivery_address",
@@ -68,6 +74,7 @@ const ORDER_IMPORT_FIELDS = [
     aliases: ["收货地址"],
     formId: "deliveryAddress",
     required: true,
+    allowAutoFillFromProfile: true,
   },
   {
     key: "receiver_name",
@@ -75,6 +82,7 @@ const ORDER_IMPORT_FIELDS = [
     aliases: ["收件人"],
     formId: "receiverName",
     required: true,
+    allowAutoFillFromProfile: true,
   },
   {
     key: "receiver_phone",
@@ -82,6 +90,7 @@ const ORDER_IMPORT_FIELDS = [
     aliases: ["收件人电话"],
     formId: "receiverPhone",
     required: true,
+    allowAutoFillFromProfile: true,
   },
   {
     key: "origin",
@@ -152,10 +161,22 @@ function getRequiredOrderImportFields() {
   return ORDER_IMPORT_FIELDS.filter((field) => field.required).map((field) => field.key);
 }
 
+function getPreEnrichRequiredOrderImportFields() {
+  return ORDER_IMPORT_FIELDS
+    .filter((field) => field.required && !field.allowAutoFillFromProfile)
+    .map((field) => field.key);
+}
+
+function getPostEnrichRequiredOrderImportFields() {
+  return ORDER_IMPORT_FIELDS.filter((field) => field.required).map((field) => field.key);
+}
+
 module.exports = {
   ORDER_IMPORT_FIELDS,
   buildOrderFormFieldMapping,
   buildOrderImportFieldMapping,
   getOrderImportHeaders,
+  getPostEnrichRequiredOrderImportFields,
+  getPreEnrichRequiredOrderImportFields,
   getRequiredOrderImportFields,
 };

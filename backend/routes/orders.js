@@ -6,6 +6,8 @@ const {
   ORDER_IMPORT_FIELDS,
   buildOrderImportFieldMapping,
   getOrderImportHeaders,
+  getPostEnrichRequiredOrderImportFields,
+  getPreEnrichRequiredOrderImportFields,
   getRequiredOrderImportFields,
 } = require("../lib/order_import_schema");
 
@@ -112,6 +114,20 @@ async function enrichOrderPayloadWithUserProfiles(userDb, payload) {
   }
 
   return normalizedPayload;
+}
+
+function validateRequiredFields(payload, requiredFields, fieldMapping) {
+  const errors = [];
+
+  for (const field of requiredFields) {
+    if (!payload[field] || String(payload[field]).trim() === "") {
+      const excelFieldNames = Object.keys(fieldMapping).filter((key) => fieldMapping[key] === field);
+      const excelFieldName = excelFieldNames.length > 0 ? excelFieldNames[0] : field;
+      errors.push(`"${excelFieldName}" 字段为空，请检查Excel文件`);
+    }
+  }
+
+  return errors;
 }
 
 module.exports = (db, userDb = null) => {
@@ -463,6 +479,17 @@ module.exports = (db, userDb = null) => {
       }
 
       validationResult.data = await enrichOrderPayloadWithUserProfiles(userDb, validationResult.data);
+      const postEnrichErrors = validateRequiredFields(
+        validationResult.data,
+        getPostEnrichRequiredOrderImportFields(),
+        buildOrderImportFieldMapping()
+      );
+      if (postEnrichErrors.length > 0) {
+        return res.status(400).json({
+          error: "数据验证失败",
+          details: postEnrichErrors
+        });
+      }
 
       res.json({
         success: true,
@@ -524,6 +551,19 @@ module.exports = (db, userDb = null) => {
           }
 
           const enrichedOrderData = await enrichOrderPayloadWithUserProfiles(userDb, validationResult.data);
+          const postEnrichErrors = validateRequiredFields(
+            enrichedOrderData,
+            getPostEnrichRequiredOrderImportFields(),
+            buildOrderImportFieldMapping()
+          );
+          if (postEnrichErrors.length > 0) {
+            results.failed++;
+            results.errors.push({
+              row: rowNumber,
+              errors: postEnrichErrors
+            });
+            continue;
+          }
 
           // 生成serial_number：当年+当月+001，最后三位递增，每月重置
           const now = new Date();
@@ -658,8 +698,7 @@ function validateExcelData(data) {
 
   const fieldMapping = buildOrderImportFieldMapping();
 
-  // 检查必需字段
-  const requiredFields = getRequiredOrderImportFields();
+  const requiredFields = getPreEnrichRequiredOrderImportFields();
 
   // 将Excel字段名转换为数据库字段名
   for (const [excelField, dbField] of Object.entries(fieldMapping)) {
@@ -668,15 +707,9 @@ function validateExcelData(data) {
     }
   }
 
-  // 检查必需字段是否为空
-  for (const field of requiredFields) {
-    if (!result.data[field] || result.data[field].toString().trim() === "") {
-      // 查找所有可能的Excel字段名
-      const excelFieldNames = Object.keys(fieldMapping).filter(key => fieldMapping[key] === field);
-      const excelFieldName = excelFieldNames.length > 0 ? excelFieldNames[0] : field;
-      result.errors.push(`"${excelFieldName}" 字段为空，请检查Excel文件`);
-      result.isValid = false;
-    }
+  result.errors.push(...validateRequiredFields(result.data, requiredFields, fieldMapping));
+  if (result.errors.length > 0) {
+    result.isValid = false;
   }
 
   // 验证日期格式
