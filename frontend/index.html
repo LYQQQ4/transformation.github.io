@@ -1058,7 +1058,62 @@
                 <div id="packagingDBPage" class="page" style="display:none;">
                     <div class="section">
                         <h2>包装信息库</h2>
-                        <p>包装信息库功能正在开发中...</p>
+
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
+                            <button type="button" onclick="loadPackagingDb()">加载箱型</button>
+                            <button type="button" onclick="showPackagingDbForm()">新增箱型</button>
+                            <div id="packagingDbMessage" class="info"></div>
+                        </div>
+
+                        <div id="packagingDbForm" style="display:none; margin-top: 16px; padding: 16px; background-color: #F9FAFB; border-radius: 6px; border: 1px solid #E5E7EB;">
+                            <h3 id="packagingDbFormTitle" style="margin: 0 0 16px 0; color: #111827; font-size: 16px; font-weight: 600;">箱型表单</h3>
+                            <form id="packagingDbFormData">
+                                <div class="form-group">
+                                    <label>箱型ID:</label>
+                                    <input type="text" id="packagingDbBoxTypeId" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>包装类型:</label>
+                                    <input type="text" id="packagingDbPackageType">
+                                </div>
+                                <div class="form-group">
+                                    <label>长(cm):</label>
+                                    <input type="number" step="0.01" min="0" id="packagingDbLengthCm" oninput="updatePackagingDbVolume()">
+                                </div>
+                                <div class="form-group">
+                                    <label>宽(cm):</label>
+                                    <input type="number" step="0.01" min="0" id="packagingDbWidthCm" oninput="updatePackagingDbVolume()">
+                                </div>
+                                <div class="form-group">
+                                    <label>高(cm):</label>
+                                    <input type="number" step="0.01" min="0" id="packagingDbHeightCm" oninput="updatePackagingDbVolume()">
+                                </div>
+                                <div class="form-group">
+                                    <label>体积(cm3):</label>
+                                    <input type="number" step="0.0001" min="0" id="packagingDbVolumeCm3" readonly>
+                                </div>
+                                <div class="button-group" style="text-align: left; margin-top: 16px;">
+                                    <button type="button" onclick="savePackagingBoxType()">保存</button>
+                                    <button type="button" onclick="hidePackagingDbForm()">取消</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <table id="packagingDbTable">
+                            <thead>
+                                <tr>
+                                    <th>箱型ID</th>
+                                    <th>包装类型</th>
+                                    <th>长(cm)</th>
+                                    <th>宽(cm)</th>
+                                    <th>高(cm)</th>
+                                    <th>体积(cm3)</th>
+                                    <th>更新时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
                     </div>
                 </div>
 

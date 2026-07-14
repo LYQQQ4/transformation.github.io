@@ -45,6 +45,8 @@ let currentSenderSearchTerm = "";
 let currentCustomerSearchTerm = "";
 let sendersData = [];
 let customersData = [];
+let packageBoxTypes = [];
+let packageBoxTypesLoaded = false;
 
 // Utility functions
 function showMessage(message, type = "success") {
@@ -761,7 +763,9 @@ function createEmptyPackageItem(order = 1) {
     return {
         package_label: `包装${order}`,
         package_order: order,
+        box_type_id: "",
         product_name: "",
+        product_code: "",
         pieces: "",
         length: "",
         width: "",
@@ -769,6 +773,9 @@ function createEmptyPackageItem(order = 1) {
         volume: "",
         charge_weight: "",
         package_type: "",
+        customs_port: "",
+        customs_title: "",
+        regulatory_conditions: "",
         remark1: "",
         remark2: ""
     };
@@ -800,7 +807,9 @@ function normalizePackageItems(packageData) {
 
 function packageItemHasContent(item) {
     return [
+        item.box_type_id,
         item.product_name,
+        item.product_code,
         item.pieces,
         item.length,
         item.width,
@@ -808,6 +817,9 @@ function packageItemHasContent(item) {
         item.volume,
         item.charge_weight,
         item.package_type,
+        item.customs_port,
+        item.customs_title,
+        item.regulatory_conditions,
         item.remark1,
         item.remark2
     ].some(value => value !== undefined && value !== null && String(value).trim() !== "");
@@ -2659,6 +2671,995 @@ function showPackageImportMessage(message, type = "info") {
     const packageImportMessage = document.getElementById("packageImportMessage");
     packageImportMessage.innerHTML = message;
     packageImportMessage.className = type;
+}
+
+function formatPackageDimension(value) {
+    return value === undefined || value === null || String(value).trim() === "" ? "" : escapeHtml(value);
+}
+
+function formatPackageSummary(items, field, formatter = value => escapeHtml(value)) {
+    return (items || [])
+        .filter(packageItemHasContent)
+        .map(item => item[field])
+        .filter(value => value !== undefined && value !== null && String(value).trim() !== "")
+        .map(value => formatter(value))
+        .join("<br>");
+}
+
+function getBoxTypeById(boxTypeId) {
+    return packageBoxTypes.find(item => item.box_type_id === boxTypeId) || null;
+}
+
+function ensurePackagingPageStructure() {
+    const packagingPage = document.getElementById("packagingPage");
+    if (!packagingPage) {
+        return;
+    }
+
+    const section = packagingPage.querySelector(".section");
+    if (!section) {
+        return;
+    }
+
+    const existingTable = document.getElementById("packagesTable");
+    const existingDbTable = document.getElementById("packagingDbTable");
+    const packageTemplateButton = packagingPage.querySelector('button[onclick="downloadPackageImportTemplate()"]');
+    if (existingTable && existingDbTable && packageTemplateButton) {
+        return;
+    }
+
+    section.innerHTML = `
+        <h2>包装信息维护</h2>
+        <div class="import-section" style="margin-bottom: 24px;">
+            <h4>批量导入 Excel</h4>
+            <input type="file" id="packageExcelFile" accept=".xlsx,.xls">
+            <button type="button" onclick="previewPackageExcel()">预览数据</button>
+            <button type="button" onclick="importPackageExcelBatch()" style="margin-left: 8px;">批量导入</button>
+            <button type="button" onclick="downloadPackageImportTemplate()" style="margin-left: 8px;">下载导入模板</button>
+            <div id="packageImportMessage"></div>
+            <div id="packageImportResults" style="display: none; margin-top: 12px;">
+                <h5>导入结果</h5>
+                <div id="packageImportSummary"></div>
+                <div id="packageImportErrors"></div>
+            </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
+            <button type="button" onclick="loadPackages()">加载包装信息</button>
+            <button type="button" onclick="showPackageForm()">修改包装信息</button>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <input type="text" id="packageSearchInput" placeholder="搜索流水号、箱型ID、品名..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 260px;">
+                <button type="button" onclick="searchPackages()">搜索</button>
+            </div>
+        </div>
+        <table id="packagesTable">
+            <thead>
+                <tr>
+                    <th>流水号</th>
+                    <th>箱型ID</th>
+                    <th>件数</th>
+                    <th>长(cm)</th>
+                    <th>宽(cm)</th>
+                    <th>高(cm)</th>
+                    <th>体积(cm3)</th>
+                    <th>计费重量</th>
+                    <th>包装类型</th>
+                    <th>品名</th>
+                    <th>备注1</th>
+                    <th>备注2</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    `;
+
+    const packagingDbPage = document.getElementById("packagingDBPage");
+    const packagingDbSection = packagingDbPage?.querySelector(".section");
+    if (packagingDbSection) {
+        packagingDbSection.innerHTML = `
+            <h2>包装信息库</h2>
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
+                <button type="button" onclick="loadPackagingDb()">加载箱型</button>
+                <button type="button" onclick="showPackagingDbForm()">新增箱型</button>
+                <div id="packagingDbMessage" class="info"></div>
+            </div>
+            <div id="packagingDbForm" style="display:none; margin-top: 16px; padding: 16px; background-color: #F9FAFB; border-radius: 6px; border: 1px solid #E5E7EB;">
+                <h3 id="packagingDbFormTitle" style="margin: 0 0 16px 0; color: #111827; font-size: 16px; font-weight: 600;">箱型表单</h3>
+                <form id="packagingDbFormData">
+                    <div class="form-group">
+                        <label>箱型ID:</label>
+                        <input type="text" id="packagingDbBoxTypeId" required>
+                    </div>
+                    <div class="form-group">
+                        <label>包装类型:</label>
+                        <input type="text" id="packagingDbPackageType">
+                    </div>
+                    <div class="form-group">
+                        <label>长(cm):</label>
+                        <input type="number" step="0.01" min="0" id="packagingDbLengthCm" oninput="updatePackagingDbVolume()">
+                    </div>
+                    <div class="form-group">
+                        <label>宽(cm):</label>
+                        <input type="number" step="0.01" min="0" id="packagingDbWidthCm" oninput="updatePackagingDbVolume()">
+                    </div>
+                    <div class="form-group">
+                        <label>高(cm):</label>
+                        <input type="number" step="0.01" min="0" id="packagingDbHeightCm" oninput="updatePackagingDbVolume()">
+                    </div>
+                    <div class="form-group">
+                        <label>体积(cm3):</label>
+                        <input type="number" step="0.0001" min="0" id="packagingDbVolumeCm3" readonly>
+                    </div>
+                    <div class="button-group" style="text-align: left; margin-top: 16px;">
+                        <button type="button" onclick="savePackagingBoxType()">保存</button>
+                        <button type="button" onclick="hidePackagingDbForm()">取消</button>
+                    </div>
+                </form>
+            </div>
+            <table id="packagingDbTable">
+                <thead>
+                    <tr>
+                        <th>箱型ID</th>
+                        <th>包装类型</th>
+                        <th>长(cm)</th>
+                        <th>宽(cm)</th>
+                        <th>高(cm)</th>
+                        <th>体积(cm3)</th>
+                        <th>更新时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        `;
+    }
+
+    const packageSearchInput = document.getElementById("packageSearchInput");
+    if (packageSearchInput) {
+        packageSearchInput.value = currentPackageSearchTerm;
+        packageSearchInput.addEventListener("keypress", function(event) {
+            if (event.key === "Enter") {
+                searchPackages();
+            }
+        });
+    }
+}
+
+async function loadPackageBoxTypes(forceReload = false) {
+    if (packageBoxTypesLoaded && !forceReload) {
+        return packageBoxTypes;
+    }
+
+    const response = await fetch(`${API_BASE}/packages/box-types`);
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data.error || "加载箱型失败");
+    }
+
+    packageBoxTypes = Array.isArray(data.boxTypes) ? data.boxTypes : [];
+    packageBoxTypesLoaded = true;
+    return packageBoxTypes;
+}
+
+async function ensurePackageBoxTypesLoaded(forceReload = false) {
+    try {
+        return await loadPackageBoxTypes(forceReload);
+    } catch (error) {
+        showMessage(error.message, "error");
+        return packageBoxTypes;
+    }
+}
+
+function buildPackageBoxTypeOptions(selectedValue = "") {
+    const options = ['<option value="">手动填写</option>'];
+    packageBoxTypes.forEach(boxType => {
+        const selected = boxType.box_type_id === selectedValue ? "selected" : "";
+        const label = `${escapeHtml(boxType.box_type_id)}${boxType.package_type ? ` / ${escapeHtml(boxType.package_type)}` : ""}`;
+        options.push(`<option value="${escapeHtml(boxType.box_type_id)}" ${selected}>${label}</option>`);
+    });
+    return options.join("");
+}
+
+function applyBoxTypeSnapshot(card, boxTypeId) {
+    const boxType = getBoxTypeById(boxTypeId);
+    if (!card || !boxType) {
+        return;
+    }
+
+    const mapping = {
+        package_type: boxType.package_type,
+        length: boxType.length_cm,
+        width: boxType.width_cm,
+        height: boxType.height_cm,
+        volume: boxType.volume_cm3
+    };
+
+    Object.entries(mapping).forEach(([field, value]) => {
+        const input = card.querySelector(`[data-field="${field}"]`);
+        if (input) {
+            input.value = value ?? "";
+        }
+    });
+
+    updatePackageCardVolume(card);
+}
+
+function togglePackageItemDetails(card) {
+    if (!card) {
+        return;
+    }
+
+    const details = card.querySelector(".package-item-details");
+    const toggleButton = card.querySelector(".toggle-package-details");
+    if (!details || !toggleButton) {
+        return;
+    }
+
+    const isHidden = details.style.display === "none";
+    details.style.display = isHidden ? "block" : "none";
+    toggleButton.textContent = isHidden ? "收起设置" : "设置";
+}
+
+function buildPackageFormItemHtml(item, index) {
+    const order = index + 1;
+    const normalizedItem = {
+        ...createEmptyPackageItem(order),
+        ...item,
+        package_order: order,
+        package_label: item.package_label || `包装${order}`
+    };
+
+    return `
+        <div class="package-item-card" data-package-index="${order}" style="border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px; margin-bottom: 16px; background: #FFFFFF;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
+                <div style="font-weight: 600; color: #111827;">${escapeHtml(normalizedItem.package_label)}</div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button type="button" class="toggle-package-details">设置</button>
+                    ${order === 1 ? "" : `<button type="button" class="remove-package-item" data-package-index="${order}">删除</button>`}
+                </div>
+            </div>
+            <div class="form-group">
+                <label>箱型ID:</label>
+                <select data-field="box_type_id" class="package-box-type-select">${buildPackageBoxTypeOptions(normalizedItem.box_type_id)}</select>
+            </div>
+            <div class="form-group">
+                <label>件数:</label>
+                <input type="number" step="1" min="0" data-field="pieces" value="${escapeHtml(normalizedItem.pieces)}">
+            </div>
+            <div class="package-item-details" style="display: none;">
+                <div class="form-group">
+                    <label>长(cm):</label>
+                    <input type="number" step="0.01" min="0" data-field="length" value="${escapeHtml(normalizedItem.length)}">
+                </div>
+                <div class="form-group">
+                    <label>宽(cm):</label>
+                    <input type="number" step="0.01" min="0" data-field="width" value="${escapeHtml(normalizedItem.width)}">
+                </div>
+                <div class="form-group">
+                    <label>高(cm):</label>
+                    <input type="number" step="0.01" min="0" data-field="height" value="${escapeHtml(normalizedItem.height)}">
+                </div>
+                <div class="form-group">
+                    <label>体积(cm3):</label>
+                    <input type="number" step="0.0001" data-field="volume" value="${escapeHtml(normalizedItem.volume || calculatePackageVolume(normalizedItem))}" readonly>
+                </div>
+                <div class="form-group">
+                    <label>包装类型:</label>
+                    <input type="text" data-field="package_type" value="${escapeHtml(normalizedItem.package_type)}">
+                </div>
+                <div class="form-group">
+                    <label>计费重量:</label>
+                    <input type="number" step="0.01" data-field="charge_weight" value="${escapeHtml(normalizedItem.charge_weight)}">
+                </div>
+                <div class="form-group">
+                    <label>品名:</label>
+                    <input type="text" data-field="product_name" value="${escapeHtml(normalizedItem.product_name)}">
+                </div>
+                <div class="form-group">
+                    <label>商品编号:</label>
+                    <input type="text" data-field="product_code" value="${escapeHtml(normalizedItem.product_code)}">
+                </div>
+                <div class="form-group">
+                    <label>报关口岸:</label>
+                    <input type="text" data-field="customs_port" value="${escapeHtml(normalizedItem.customs_port)}">
+                </div>
+                <div class="form-group">
+                    <label>报关抬头:</label>
+                    <input type="text" data-field="customs_title" value="${escapeHtml(normalizedItem.customs_title)}">
+                </div>
+                <div class="form-group">
+                    <label>监管条件:</label>
+                    <input type="text" data-field="regulatory_conditions" value="${escapeHtml(normalizedItem.regulatory_conditions)}">
+                </div>
+                <div class="form-group">
+                    <label>备注1:</label>
+                    <textarea data-field="remark1">${escapeHtml(normalizedItem.remark1)}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>备注2:</label>
+                    <textarea data-field="remark2">${escapeHtml(normalizedItem.remark2)}</textarea>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function serializePackageFormItems(form) {
+    return Array.from(form.querySelectorAll(".package-item-card")).map((card, index) => {
+        const order = index + 1;
+        const item = createEmptyPackageItem(order);
+        card.querySelectorAll("[data-field]").forEach(field => {
+            item[field.dataset.field] = field.value;
+        });
+        item.package_order = order;
+        item.package_label = `包装${order}`;
+        item.volume = item.volume || calculatePackageVolume(item);
+        return item;
+    });
+}
+
+function updatePackageCardVolume(card) {
+    if (!card) {
+        return;
+    }
+
+    const item = {
+        pieces: card.querySelector('[data-field="pieces"]')?.value || "",
+        length: card.querySelector('[data-field="length"]')?.value || "",
+        width: card.querySelector('[data-field="width"]')?.value || "",
+        height: card.querySelector('[data-field="height"]')?.value || ""
+    };
+
+    const volumeInput = card.querySelector('[data-field="volume"]');
+    if (volumeInput) {
+        volumeInput.value = calculatePackageVolume(item);
+    }
+}
+
+function displayPackages(packages) {
+    ensurePackagingPageStructure();
+    const tbody = document.querySelector("#packagesTable tbody");
+    if (!tbody) {
+        return;
+    }
+
+    const groupedPackages = Array.isArray(packages?.[0]?.packages) ? packages : groupPackagesBySerial(packages || []);
+    tbody.innerHTML = "";
+
+    groupedPackages.forEach(group => {
+        const row = tbody.insertRow();
+        row.innerHTML = `
+            <td>${escapeHtml(group.serial_number || "")}</td>
+            <td>${formatPackageSummary(group.packages, "box_type_id")}</td>
+            <td>${formatPackageSummary(group.packages, "pieces")}</td>
+            <td>${formatPackageSummary(group.packages, "length", formatPackageDimension)}</td>
+            <td>${formatPackageSummary(group.packages, "width", formatPackageDimension)}</td>
+            <td>${formatPackageSummary(group.packages, "height", formatPackageDimension)}</td>
+            <td>${formatPackageSummary(group.packages, "volume", value => escapeHtml(value || ""))}</td>
+            <td>${escapeHtml(calculatePackageChargeWeightTotal(group.packages) || "")}</td>
+            <td>${formatPackageSummary(group.packages, "package_type")}</td>
+            <td>${formatPackageSummary(group.packages, "product_name")}</td>
+            <td>${formatPackageSummary(group.packages, "remark1")}</td>
+            <td>${formatPackageSummary(group.packages, "remark2")}</td>
+            <td><button type="button" onclick="editPackage('${escapeHtml(group.serial_number || "")}')">编辑</button></td>
+        `;
+    });
+}
+
+async function loadPackages() {
+    ensurePackagingPageStructure();
+    await ensurePackageBoxTypesLoaded();
+
+    try {
+        const response = await fetch(`${API_BASE}/packages`);
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "加载包装信息失败");
+        }
+
+        let groupedPackages = groupPackagesBySerial(data.packages || []);
+        if (currentPackageSearchTerm) {
+            const searchLower = currentPackageSearchTerm.toLowerCase();
+            groupedPackages = groupedPackages.filter(group =>
+                (group.serial_number && group.serial_number.toLowerCase().includes(searchLower)) ||
+                group.packages.some(item =>
+                    (item.box_type_id && item.box_type_id.toLowerCase().includes(searchLower)) ||
+                    (item.product_name && item.product_name.toLowerCase().includes(searchLower)) ||
+                    (item.package_type && item.package_type.toLowerCase().includes(searchLower))
+                )
+            );
+        }
+
+        displayPackages(groupedPackages);
+    } catch (error) {
+        showMessage("加载包装信息失败: " + error.message, "error");
+    }
+}
+
+async function editPackage(serialNumber) {
+    await ensurePackageBoxTypesLoaded();
+
+    try {
+        const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "加载包装信息失败");
+        }
+
+        showPackageForm({
+            serial_number: serialNumber,
+            packages: data.packages || data.package || null
+        });
+    } catch (error) {
+        showMessage("加载包装信息失败: " + error.message, "error");
+    }
+}
+
+async function showPackageForm(packageData = null) {
+    ensurePackagingPageStructure();
+    await ensurePackageBoxTypesLoaded();
+
+    const existingModal = document.getElementById("packageModal");
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.id = "packageModal";
+    modal.onclick = function(event) {
+        if (event.target === modal) {
+            hidePackageForm();
+        }
+    };
+
+    const serialReadOnly = packageData && packageData.serial_number ? "readonly" : "";
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 920px;">
+            <div class="modal-header">
+                <h3>修改包装信息</h3>
+                <button class="modal-close" onclick="hidePackageForm()">&times;</button>
+            </div>
+            <form id="packageFormData">
+                <div class="form-group">
+                    <label>流水号:</label>
+                    <input type="text" id="packageSerialNumber" required ${serialReadOnly}>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap;">
+                    <div style="font-weight: 600; color: #111827;">包装明细</div>
+                    <button type="button" id="addPackageItemButton">新增包装</button>
+                </div>
+                <div id="packageItemsContainer"></div>
+                <div class="form-group">
+                    <label>总计费重量:</label>
+                    <input type="number" id="packageChargeWeightTotal" readonly>
+                </div>
+                <div class="button-group">
+                    <button type="button" onclick="savePackage()">保存</button>
+                    <button type="button" onclick="hidePackageForm()">取消</button>
+                </div>
+            </form>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const form = modal.querySelector("#packageFormData");
+    const serialInput = form.querySelector("#packageSerialNumber");
+    const itemsContainer = form.querySelector("#packageItemsContainer");
+    const addButton = form.querySelector("#addPackageItemButton");
+
+    const renderPackageItems = (items) => {
+        const normalizedItems = (items && items.length > 0 ? items : [createEmptyPackageItem(1)]).map((item, index) => ({
+            ...createEmptyPackageItem(index + 1),
+            ...item,
+            package_order: index + 1,
+            package_label: item.package_label || `包装${index + 1}`,
+            volume: item.volume || calculatePackageVolume(item)
+        }));
+
+        itemsContainer.innerHTML = normalizedItems.map((item, index) => buildPackageFormItemHtml(item, index)).join("");
+        updatePackageFormTotal(form);
+    };
+
+    const getCurrentItems = () => serializePackageFormItems(form);
+
+    const fillPackageFormFields = (data) => {
+        renderPackageItems(normalizePackageItems(data));
+    };
+
+    const clearPackageFormFields = () => {
+        renderPackageItems([createEmptyPackageItem(1)]);
+    };
+
+    if (packageData) {
+        serialInput.value = packageData.serial_number || "";
+        fillPackageFormFields(packageData.packages || packageData);
+    } else {
+        clearPackageFormFields();
+    }
+
+    let packageSerialTimer = null;
+    let lastPackageSerial = serialInput.value.trim();
+
+    const loadPackageBySerial = async () => {
+        const serial = serialInput.value.trim();
+        if (!serial) {
+            clearPackageFormFields();
+            return;
+        }
+        if (serial === lastPackageSerial) {
+            return;
+        }
+        lastPackageSerial = serial;
+
+        try {
+            const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serial)}`);
+            if (!response.ok) {
+                if (response.status === 404) {
+                    clearPackageFormFields();
+                    return;
+                }
+                const error = await response.json();
+                throw new Error(error.error || "加载包装信息失败");
+            }
+
+            const data = await response.json();
+            fillPackageFormFields(data.packages || data.package || null);
+        } catch (error) {
+            showMessage("加载包装信息失败: " + error.message, "error");
+        }
+    };
+
+    serialInput.addEventListener("change", loadPackageBySerial);
+    serialInput.addEventListener("blur", loadPackageBySerial);
+    serialInput.addEventListener("input", () => {
+        clearTimeout(packageSerialTimer);
+        packageSerialTimer = setTimeout(loadPackageBySerial, 500);
+    });
+
+    addButton.addEventListener("click", () => {
+        const items = getCurrentItems();
+        items.push(createEmptyPackageItem(items.length + 1));
+        renderPackageItems(items);
+    });
+
+    itemsContainer.addEventListener("click", event => {
+        const toggleButton = event.target.closest(".toggle-package-details");
+        if (toggleButton) {
+            togglePackageItemDetails(toggleButton.closest(".package-item-card"));
+            return;
+        }
+
+        const removeButton = event.target.closest(".remove-package-item");
+        if (removeButton) {
+            const removeIndex = Number.parseInt(removeButton.dataset.packageIndex, 10);
+            const nextItems = getCurrentItems().filter((_, index) => index !== removeIndex - 1);
+            renderPackageItems(nextItems.length > 0 ? nextItems : [createEmptyPackageItem(1)]);
+        }
+    });
+
+    itemsContainer.addEventListener("change", event => {
+        const card = event.target.closest(".package-item-card");
+        if (!card) {
+            return;
+        }
+
+        if (event.target.matches(".package-box-type-select")) {
+            applyBoxTypeSnapshot(card, event.target.value);
+            updatePackageFormTotal(form);
+        }
+    });
+
+    itemsContainer.addEventListener("input", event => {
+        const card = event.target.closest(".package-item-card");
+        if (!card) {
+            return;
+        }
+
+        if (["pieces", "length", "width", "height"].includes(event.target.dataset.field)) {
+            updatePackageCardVolume(card);
+        }
+        if (event.target.dataset.field === "charge_weight" || ["pieces", "length", "width", "height"].includes(event.target.dataset.field)) {
+            updatePackageFormTotal(form);
+        }
+    });
+
+    modal.style.display = "block";
+}
+
+function hidePackageForm() {
+    const modal = document.getElementById("packageModal");
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function updatePackageFormTotal(form) {
+    const totalInput = form?.querySelector("#packageChargeWeightTotal");
+    if (!totalInput) {
+        return;
+    }
+    totalInput.value = calculatePackageChargeWeightTotal(serializePackageFormItems(form));
+}
+
+async function savePackage() {
+    const form = document.getElementById("packageFormData");
+    const serialNumber = document.getElementById("packageSerialNumber")?.value.trim();
+
+    if (!serialNumber) {
+        showMessage("流水号不能为空", "error");
+        return;
+    }
+
+    try {
+        const checkResponse = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
+        if (checkResponse.status === 404) {
+            showMessage("该流水号不存在，无法修改包装信息", "error");
+            return;
+        }
+        if (!checkResponse.ok) {
+            const error = await checkResponse.json();
+            throw new Error(error.error || "检查流水号失败");
+        }
+    } catch (error) {
+        showMessage("检查流水号失败: " + error.message, "error");
+        return;
+    }
+
+    let packageItems = serializePackageFormItems(form).filter(packageItemHasContent);
+    if (packageItems.length === 0) {
+        packageItems = [createEmptyPackageItem(1)];
+    }
+
+    packageItems = packageItems.map((item, index) => ({
+        ...createEmptyPackageItem(index + 1),
+        ...item,
+        package_order: index + 1,
+        package_label: `包装${index + 1}`,
+        volume: item.volume || calculatePackageVolume(item)
+    }));
+
+    try {
+        const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ package_items: packageItems })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "保存失败");
+        }
+
+        showMessage("包装信息保存成功");
+        hidePackageForm();
+        await loadPackages();
+        if (currentOrderDetailSerial && currentOrderDetailSerial === serialNumber) {
+            loadOrderPackageDetails(serialNumber);
+        }
+    } catch (error) {
+        showMessage("保存失败: " + error.message, "error");
+    }
+}
+
+function searchPackages() {
+    const input = document.getElementById("packageSearchInput");
+    currentPackageSearchTerm = input ? input.value.trim() : "";
+    loadPackages();
+}
+
+async function previewPackageExcel() {
+    ensurePackagingPageStructure();
+    const fileInput = document.getElementById("packageExcelFile");
+    if (!fileInput?.files?.length) {
+        showPackageImportMessage("请选择要导入的 Excel 文件", "error");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("excelFile", fileInput.files[0]);
+
+    try {
+        showPackageImportMessage("正在解析 Excel 文件...", "info");
+        const response = await fetch(`${API_BASE}/packages/parse-excel`, {
+            method: "POST",
+            body: formData
+        });
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            const message = result.details ? result.details.join("<br>") : (result.error || "预览失败");
+            showPackageImportMessage(message, "error");
+            return;
+        }
+
+        const preview = result.data || {};
+        showPackageImportMessage(
+            `预览成功：流水号 ${escapeHtml(preview.serial_number || "")}，箱型ID ${escapeHtml(preview.box_type_id || "")}`,
+            "success"
+        );
+    } catch (error) {
+        showPackageImportMessage("预览失败: " + error.message, "error");
+    }
+}
+
+async function importPackageExcelBatch() {
+    ensurePackagingPageStructure();
+    const fileInput = document.getElementById("packageExcelFile");
+    if (!fileInput?.files?.length) {
+        showPackageImportMessage("请选择要导入的 Excel 文件", "error");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("excelFile", fileInput.files[0]);
+
+    try {
+        showPackageImportMessage("正在批量导入包装 Excel 数据...", "info");
+        const response = await fetch(`${API_BASE}/packages/import-excel`, {
+            method: "POST",
+            body: formData
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || "批量导入失败");
+        }
+
+        displayPackageImportResults(result);
+        showPackageImportMessage(result.message || "导入完成", result.success ? "success" : "error");
+        if (result.results?.success > 0) {
+            await loadPackages();
+        }
+    } catch (error) {
+        showPackageImportMessage("批量导入失败: " + error.message, "error");
+    }
+}
+
+function displayPackageImportResults(result) {
+    const container = document.getElementById("packageImportResults");
+    const summary = document.getElementById("packageImportSummary");
+    const errors = document.getElementById("packageImportErrors");
+    if (!container || !summary || !errors) {
+        return;
+    }
+
+    if (!result.results) {
+        container.style.display = "none";
+        return;
+    }
+
+    summary.innerHTML = `
+        <p><strong>总行数:</strong> ${result.results.total}</p>
+        <p><strong>成功导入:</strong> ${result.results.success}</p>
+        <p><strong>导入失败:</strong> ${result.results.failed}</p>
+    `;
+
+    if (Array.isArray(result.results.errors) && result.results.errors.length > 0) {
+        errors.innerHTML = `<h6>错误详情:</h6><ul>${result.results.errors.map(item => `<li><strong>第 ${escapeHtml(item.row)} 行</strong> ${escapeHtml((item.errors || []).join(", "))}</li>`).join("")}</ul>`;
+    } else {
+        errors.innerHTML = "";
+    }
+
+    container.style.display = "block";
+}
+
+function showPackageImportMessage(message, type = "info") {
+    const packageImportMessage = document.getElementById("packageImportMessage");
+    if (!packageImportMessage) {
+        return;
+    }
+
+    packageImportMessage.innerHTML = message;
+    packageImportMessage.className = type;
+}
+
+async function downloadPackageImportTemplate() {
+    try {
+        const response = await fetch(`${API_BASE}/packages/import-template`);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || "下载模板失败");
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "package_import_template.xlsx";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showPackageImportMessage("导入模板下载成功", "success");
+    } catch (error) {
+        showPackageImportMessage("下载模板失败: " + error.message, "error");
+    }
+}
+
+function showPackagingDbMessage(message, type = "info") {
+    const messageElement = document.getElementById("packagingDbMessage");
+    if (!messageElement) {
+        return;
+    }
+    messageElement.textContent = message;
+    messageElement.className = type;
+}
+
+function hidePackagingDbForm() {
+    const formWrapper = document.getElementById("packagingDbForm");
+    const form = document.getElementById("packagingDbFormData");
+    if (formWrapper) {
+        formWrapper.style.display = "none";
+    }
+    if (form) {
+        form.reset();
+        delete form.dataset.editId;
+    }
+    updatePackagingDbVolume();
+}
+
+function showPackagingDbForm(boxType = null) {
+    ensurePackagingPageStructure();
+    const formWrapper = document.getElementById("packagingDbForm");
+    const form = document.getElementById("packagingDbFormData");
+    const title = document.getElementById("packagingDbFormTitle");
+    if (!formWrapper || !form) {
+        return;
+    }
+
+    form.reset();
+    delete form.dataset.editId;
+
+    if (boxType) {
+        title.textContent = "编辑箱型";
+        form.dataset.editId = boxType.id;
+        document.getElementById("packagingDbBoxTypeId").value = boxType.box_type_id || "";
+        document.getElementById("packagingDbPackageType").value = boxType.package_type || "";
+        document.getElementById("packagingDbLengthCm").value = boxType.length_cm || "";
+        document.getElementById("packagingDbWidthCm").value = boxType.width_cm || "";
+        document.getElementById("packagingDbHeightCm").value = boxType.height_cm || "";
+        document.getElementById("packagingDbVolumeCm3").value = boxType.volume_cm3 || "";
+    } else {
+        title.textContent = "新增箱型";
+    }
+
+    formWrapper.style.display = "block";
+    updatePackagingDbVolume();
+}
+
+function updatePackagingDbVolume() {
+    const length = parseFloat(document.getElementById("packagingDbLengthCm")?.value);
+    const width = parseFloat(document.getElementById("packagingDbWidthCm")?.value);
+    const height = parseFloat(document.getElementById("packagingDbHeightCm")?.value);
+    const volumeInput = document.getElementById("packagingDbVolumeCm3");
+    if (!volumeInput) {
+        return;
+    }
+
+    if ([length, width, height].some(value => Number.isNaN(value))) {
+        volumeInput.value = "";
+        return;
+    }
+
+    const volume = length * width * height;
+    volumeInput.value = Number.isFinite(volume) ? volume.toFixed(4) : "";
+}
+
+function displayPackagingDb(boxTypes) {
+    const tbody = document.querySelector("#packagingDbTable tbody");
+    if (!tbody) {
+        return;
+    }
+
+    tbody.innerHTML = "";
+    (boxTypes || []).forEach(boxType => {
+        const row = tbody.insertRow();
+        row.innerHTML = `
+            <td>${escapeHtml(boxType.box_type_id || "")}</td>
+            <td>${escapeHtml(boxType.package_type || "")}</td>
+            <td>${escapeHtml(boxType.length_cm || "")}</td>
+            <td>${escapeHtml(boxType.width_cm || "")}</td>
+            <td>${escapeHtml(boxType.height_cm || "")}</td>
+            <td>${escapeHtml(boxType.volume_cm3 || "")}</td>
+            <td>${formatDateOnly(boxType.updated_at)}</td>
+            <td>
+                <button type="button" onclick="editPackagingBoxType(${boxType.id})">编辑</button>
+                <button type="button" onclick="deletePackagingBoxType(${boxType.id})">删除</button>
+            </td>
+        `;
+    });
+}
+
+async function loadPackagingDb() {
+    ensurePackagingPageStructure();
+    try {
+        const boxTypes = await loadPackageBoxTypes(true);
+        displayPackagingDb(boxTypes);
+        showPackagingDbMessage(`已加载 ${boxTypes.length} 个箱型`, "success");
+    } catch (error) {
+        showPackagingDbMessage(error.message, "error");
+    }
+}
+
+async function savePackagingBoxType() {
+    const form = document.getElementById("packagingDbFormData");
+    if (!form) {
+        return;
+    }
+
+    const payload = {
+        box_type_id: document.getElementById("packagingDbBoxTypeId")?.value.trim(),
+        package_type: document.getElementById("packagingDbPackageType")?.value.trim(),
+        length_cm: document.getElementById("packagingDbLengthCm")?.value,
+        width_cm: document.getElementById("packagingDbWidthCm")?.value,
+        height_cm: document.getElementById("packagingDbHeightCm")?.value,
+        volume_cm3: document.getElementById("packagingDbVolumeCm3")?.value
+    };
+
+    if (!payload.box_type_id) {
+        showPackagingDbMessage("箱型ID不能为空", "error");
+        return;
+    }
+
+    const editId = form.dataset.editId;
+
+    try {
+        const response = await fetch(editId ? `${API_BASE}/packages/box-types/${editId}` : `${API_BASE}/packages/box-types`, {
+            method: editId ? "PUT" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "保存箱型失败");
+        }
+
+        hidePackagingDbForm();
+        await loadPackagingDb();
+        await loadPackages();
+        showPackagingDbMessage(editId ? "箱型更新成功" : "箱型创建成功", "success");
+    } catch (error) {
+        showPackagingDbMessage(error.message, "error");
+    }
+}
+
+async function editPackagingBoxType(id) {
+    try {
+        const response = await fetch(`${API_BASE}/packages/box-types/${id}`);
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "加载箱型失败");
+        }
+
+        showPackagingDbForm(data.boxType || null);
+    } catch (error) {
+        showPackagingDbMessage(error.message, "error");
+    }
+}
+
+async function deletePackagingBoxType(id) {
+    if (!confirm("确定删除该箱型吗？")) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/packages/box-types/${id}`, {
+            method: "DELETE"
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "删除箱型失败");
+        }
+
+        await loadPackagingDb();
+        await loadPackages();
+        showPackagingDbMessage("箱型删除成功", "success");
+    } catch (error) {
+        showPackagingDbMessage(error.message, "error");
+    }
 }
 
 // Pickup tracking functions
@@ -4523,6 +5524,7 @@ function showPage(pageName) {
     } else if (pageName === "packagingDB") {
         document.getElementById("packagingDBPage").style.display = "block";
         document.getElementById("packagingDBLink").classList.add("active");
+        loadPackagingDb();
     } else if (pageName === "userManagement") {
         document.getElementById("userManagementPage").style.display = "block";
         document.getElementById("userManagementLink").classList.add("active");
