@@ -873,6 +873,7 @@ function createEmptyPackageItem(order = 1) {
         product_name: "",
         product_code: "",
         pieces: "",
+        single_weight: "",
         length: "",
         width: "",
         height: "",
@@ -917,6 +918,7 @@ function packageItemHasContent(item) {
         item.product_name,
         item.product_code,
         item.pieces,
+        item.single_weight,
         item.length,
         item.width,
         item.height,
@@ -932,7 +934,6 @@ function packageItemHasContent(item) {
 }
 
 function calculatePackageVolume(item) {
-    const pieces = parseFloat(item.pieces) || 1;
     const length = parseFloat(item.length);
     const width = parseFloat(item.width);
     const height = parseFloat(item.height);
@@ -941,13 +942,36 @@ function calculatePackageVolume(item) {
         return "";
     }
 
-    const volume = length * width * height * pieces;
+    const volume = (length * width * height) / 1000000;
     return Number.isFinite(volume) ? volume.toFixed(4) : "";
 }
 
-function calculatePackageChargeWeightTotal(items) {
-    const total = items.reduce((sum, item) => sum + (parseFloat(item.charge_weight) || 0), 0);
+function calculatePackageItemActualWeight(item) {
+    const singleWeight = parseFloat(item.single_weight);
+    if (Number.isNaN(singleWeight)) {
+        return 0;
+    }
+    const pieces = parseFloat(item.pieces);
+    const safePieces = Number.isNaN(pieces) || pieces <= 0 ? 1 : pieces;
+    return safePieces * singleWeight;
+}
+
+function calculatePackageActualWeightTotal(items) {
+    const total = (items || []).reduce((sum, item) => sum + calculatePackageItemActualWeight(item), 0);
     return total > 0 ? total.toFixed(2) : "";
+}
+
+function getPackageChargeWeightValue(items) {
+    const chargeWeight = (items || []).find(item => {
+        const value = item?.charge_weight;
+        return value !== undefined && value !== null && String(value).trim() !== "";
+    })?.charge_weight;
+    const parsed = parseFloat(chargeWeight);
+    return Number.isNaN(parsed) ? (chargeWeight || "") : parsed.toFixed(2);
+}
+
+function calculatePackageChargeWeightTotal(items) {
+    return getPackageChargeWeightValue(items);
 }
 
 function formatPackageItemSummary(items, field) {
@@ -999,41 +1023,27 @@ function renderOrderPackageContent(serialNumber, packageData) {
     const meaningfulItems = packageItems.filter(packageItemHasContent);
     const visiblePackageItems = meaningfulItems.length > 0 ? packageItems : [];
     currentOrderPackageData = packageItems.map(item => ({ ...item, serial_number: serialNumber }));
-    const hasPackage = meaningfulItems.length > 0;
-    const packageInfo = packageItems[0] || {};
-
-    packageContent.innerHTML = `
-        ${hasPackage ? "" : "<div style=\"margin-bottom: 8px; color: #9CA3AF;\">暂无包装信息</div>"}
-        <div class="detail-grid">
-            <div><strong>流水号:</strong> ${serialNumber || ""}</div>
-            <div><strong>件数:</strong> ${packageInfo.pieces || ""}</div>
-            <div><strong>长:</strong> ${packageInfo.length || ""}</div>
-            <div><strong>宽:</strong> ${packageInfo.width || ""}</div>
-            <div><strong>高:</strong> ${packageInfo.height || ""}</div>
-            <div><strong>体积:</strong> ${packageInfo.volume || ""}</div>
-            <div><strong>计费重量:</strong> ${packageInfo.charge_weight || ""}</div>
-            <div><strong>包装种类:</strong> ${packageInfo.package_type || ""}</div>
-            <div><strong>货物品名:</strong> ${packageInfo.product_name || ""}</div>
-            <div><strong>备注1:</strong> ${packageInfo.remark1 || ""}</div>
-            <div><strong>备注2:</strong> ${packageInfo.remark2 || ""}</div>
-        </div>
-    `;
+    const actualWeightTotal = calculatePackageActualWeightTotal(meaningfulItems);
+    const chargeWeightValue = getPackageChargeWeightValue(meaningfulItems);
 
     packageContent.innerHTML = `
         ${meaningfulItems.length === 0 ? "<div style=\"margin-bottom: 8px; color: #9CA3AF;\">暂无包装信息</div>" : ""}
         <div class="detail-grid" style="margin-bottom: 16px;">
             <div><strong>流水号:</strong> ${serialNumber || ""}</div>
             <div><strong>包装数量:</strong> ${meaningfulItems.length || 1}</div>
+            <div><strong>实重:</strong> ${actualWeightTotal || ""}</div>
+            <div><strong>计费重量:</strong> ${chargeWeightValue || ""}</div>
         </div>
         ${visiblePackageItems.map(item => `
             <div style="border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
                 <div class="detail-grid">
                     <div><strong>件数:</strong> ${item.pieces || ""}</div>
+                    <div><strong>单件重量:</strong> ${item.single_weight || ""}</div>
                     <div><strong>长:</strong> ${item.length || ""}</div>
                     <div><strong>宽:</strong> ${item.width || ""}</div>
                     <div><strong>高:</strong> ${item.height || ""}</div>
                     <div><strong>体积:</strong> ${item.volume || calculatePackageVolume(item)}</div>
-                    <div><strong>计费重量:</strong> ${item.charge_weight || ""}</div>
+                    <div><strong>实重:</strong> ${calculatePackageItemActualWeight(item) ? calculatePackageItemActualWeight(item).toFixed(2) : ""}</div>
                     <div><strong>包装种类:</strong> ${item.package_type || ""}</div>
                     <div><strong>货物品名:</strong> ${item.product_name || ""}</div>
                     <div><strong>备注1:</strong> ${item.remark1 || ""}</div>
@@ -2332,7 +2342,7 @@ function showPackageForm(packageData = null) {
             return;
         }
 
-        const volume = length * width * height * (isNaN(pieces) ? 1 : pieces);
+        const volume = (length * width * height) / 1000000;
         document.getElementById("packageVolume").value = Number.isFinite(volume) ? volume.toFixed(4) : "";
     };
 
@@ -2574,6 +2584,7 @@ function buildPackageFormItemHtml(item, index) {
 }
 
 function serializePackageFormItems(form) {
+    const chargeWeightTotal = form?.querySelector("#packageChargeWeightTotal")?.value ?? "";
     return Array.from(form.querySelectorAll(".package-item-card")).map((card, index) => {
         const order = index + 1;
         const item = createEmptyPackageItem(order);
@@ -2582,7 +2593,8 @@ function serializePackageFormItems(form) {
         });
         item.package_order = order;
         item.package_label = `包装${order}`;
-        item.volume = item.volume || calculatePackageVolume(item);
+        item.volume = calculatePackageVolume(item);
+        item.charge_weight = chargeWeightTotal;
         return item;
     });
 }
@@ -2601,6 +2613,17 @@ function updatePackageCardVolume(card) {
     const volumeInput = card.querySelector('[data-field="volume"]');
     if (volumeInput) {
         volumeInput.value = calculatePackageVolume(item);
+    }
+
+    const actualWeightInput = card.querySelector('.package-item-actual-weight');
+    if (actualWeightInput) {
+        actualWeightInput.value = calculatePackageItemActualWeight({
+            pieces: card.querySelector('[data-field="pieces"]')?.value || "",
+            single_weight: card.querySelector('[data-field="single_weight"]')?.value || ""
+        }) || "";
+        if (actualWeightInput.value) {
+            actualWeightInput.value = Number(actualWeightInput.value).toFixed(2);
+        }
     }
 }
 
@@ -3068,10 +3091,12 @@ function ensurePackagingPageStructure() {
                     <th>流水号</th>
                     <th>箱型ID</th>
                     <th>件数</th>
+                    <th>单件重量</th>
                     <th>长(cm)</th>
                     <th>宽(cm)</th>
                     <th>高(cm)</th>
-                    <th>体积(cm3)</th>
+                    <th>体积(m³)</th>
+                    <th>实重</th>
                     <th>计费重量</th>
                     <th>包装类型</th>
                     <th>品名</th>
@@ -3118,7 +3143,7 @@ function ensurePackagingPageStructure() {
                         <input type="number" step="0.01" min="0" id="packagingDbHeightCm" oninput="updatePackagingDbVolume()">
                     </div>
                     <div class="form-group">
-                        <label>体积(cm3):</label>
+                        <label>体积(m³):</label>
                         <input type="number" step="0.0001" min="0" id="packagingDbVolumeCm3" readonly>
                     </div>
                     <div class="button-group" style="text-align: left; margin-top: 16px;">
@@ -3135,7 +3160,7 @@ function ensurePackagingPageStructure() {
                         <th>长(cm)</th>
                         <th>宽(cm)</th>
                         <th>高(cm)</th>
-                        <th>体积(cm3)</th>
+                        <th>体积(m³)</th>
                         <th>更新时间</th>
                         <th>操作</th>
                     </tr>
@@ -3257,6 +3282,10 @@ function buildPackageFormItemHtml(item, index) {
                 <label>件数:</label>
                 <input type="number" step="1" min="0" data-field="pieces" value="${escapeHtml(normalizedItem.pieces)}">
             </div>
+            <div class="form-group">
+                <label>单件重量:</label>
+                <input type="number" step="0.01" min="0" data-field="single_weight" value="${escapeHtml(normalizedItem.single_weight)}">
+            </div>
             <div class="package-item-details" style="display: none;">
                 <div class="form-group">
                     <label>长(cm):</label>
@@ -3271,16 +3300,16 @@ function buildPackageFormItemHtml(item, index) {
                     <input type="number" step="0.01" min="0" data-field="height" value="${escapeHtml(normalizedItem.height)}">
                 </div>
                 <div class="form-group">
-                    <label>体积(cm3):</label>
+                    <label>体积(m³):</label>
                     <input type="number" step="0.0001" data-field="volume" value="${escapeHtml(normalizedItem.volume || calculatePackageVolume(normalizedItem))}" readonly>
+                </div>
+                <div class="form-group">
+                    <label>实重:</label>
+                    <input type="number" step="0.01" class="package-item-actual-weight" value="${escapeHtml(calculatePackageItemActualWeight(normalizedItem) ? calculatePackageItemActualWeight(normalizedItem).toFixed(2) : "")}" readonly>
                 </div>
                 <div class="form-group">
                     <label>包装类型:</label>
                     <input type="text" data-field="package_type" value="${escapeHtml(normalizedItem.package_type)}">
-                </div>
-                <div class="form-group">
-                    <label>计费重量:</label>
-                    <input type="number" step="0.01" data-field="charge_weight" value="${escapeHtml(normalizedItem.charge_weight)}">
                 </div>
                 <div class="form-group">
                     <label>品名:</label>
@@ -3363,11 +3392,13 @@ function displayPackages(packages) {
             <td>${escapeHtml(group.serial_number || "")}</td>
             <td>${formatPackageSummary(group.packages, "box_type_id")}</td>
             <td>${formatPackageSummary(group.packages, "pieces")}</td>
+            <td>${formatPackageSummary(group.packages, "single_weight", value => escapeHtml(value || ""))}</td>
             <td>${formatPackageSummary(group.packages, "length", formatPackageDimension)}</td>
             <td>${formatPackageSummary(group.packages, "width", formatPackageDimension)}</td>
             <td>${formatPackageSummary(group.packages, "height", formatPackageDimension)}</td>
             <td>${formatPackageSummary(group.packages, "volume", value => escapeHtml(value || ""))}</td>
-            <td>${escapeHtml(calculatePackageChargeWeightTotal(group.packages) || "")}</td>
+            <td>${escapeHtml(calculatePackageActualWeightTotal(group.packages) || "")}</td>
+            <td>${escapeHtml(getPackageChargeWeightValue(group.packages) || "")}</td>
             <td>${formatPackageSummary(group.packages, "package_type")}</td>
             <td>${formatPackageSummary(group.packages, "product_name")}</td>
             <td>${formatPackageSummary(group.packages, "remark1")}</td>
@@ -3463,8 +3494,12 @@ async function showPackageForm(packageData = null) {
                 </div>
                 <div id="packageItemsContainer"></div>
                 <div class="form-group">
-                    <label>总计费重量:</label>
-                    <input type="number" id="packageChargeWeightTotal" readonly>
+                    <label>实重:</label>
+                    <input type="number" id="packageActualWeightTotal" readonly>
+                </div>
+                <div class="form-group">
+                    <label>计费重量:</label>
+                    <input type="number" step="0.01" min="0" id="packageChargeWeightTotal">
                 </div>
                 <div class="button-group">
                     <button type="button" onclick="savePackage()">保存</button>
@@ -3480,6 +3515,7 @@ async function showPackageForm(packageData = null) {
     const serialInput = form.querySelector("#packageSerialNumber");
     const itemsContainer = form.querySelector("#packageItemsContainer");
     const addButton = form.querySelector("#addPackageItemButton");
+    const chargeWeightTotalInput = form.querySelector("#packageChargeWeightTotal");
 
     const renderPackageItems = (items) => {
         const normalizedItems = (items && items.length > 0 ? items : [createEmptyPackageItem(1)]).map((item, index) => ({
@@ -3487,11 +3523,14 @@ async function showPackageForm(packageData = null) {
             ...item,
             package_order: index + 1,
             package_label: item.package_label || `包装${index + 1}`,
-            volume: item.volume || calculatePackageVolume(item)
+            volume: calculatePackageVolume(item)
         }));
 
         itemsContainer.innerHTML = normalizedItems.map((item, index) => buildPackageFormItemHtml(item, index)).join("");
         updatePackageFormTotal(form);
+        if (chargeWeightTotalInput) {
+            chargeWeightTotalInput.value = getPackageChargeWeightValue(normalizedItems);
+        }
     };
 
     const getCurrentItems = () => serializePackageFormItems(form);
@@ -3589,10 +3628,10 @@ async function showPackageForm(packageData = null) {
             return;
         }
 
-        if (["pieces", "length", "width", "height"].includes(event.target.dataset.field)) {
+        if (["pieces", "single_weight", "length", "width", "height"].includes(event.target.dataset.field)) {
             updatePackageCardVolume(card);
         }
-        if (event.target.dataset.field === "charge_weight" || ["pieces", "length", "width", "height"].includes(event.target.dataset.field)) {
+        if (["pieces", "single_weight", "length", "width", "height"].includes(event.target.dataset.field)) {
             updatePackageFormTotal(form);
         }
     });
@@ -3608,16 +3647,17 @@ function hidePackageForm() {
 }
 
 function updatePackageFormTotal(form) {
-    const totalInput = form?.querySelector("#packageChargeWeightTotal");
+    const totalInput = form?.querySelector("#packageActualWeightTotal");
     if (!totalInput) {
         return;
     }
-    totalInput.value = calculatePackageChargeWeightTotal(serializePackageFormItems(form));
+    totalInput.value = calculatePackageActualWeightTotal(serializePackageFormItems(form));
 }
 
 async function savePackage() {
     const form = document.getElementById("packageFormData");
     const serialNumber = document.getElementById("packageSerialNumber")?.value.trim();
+    const chargeWeightTotal = document.getElementById("packageChargeWeightTotal")?.value ?? "";
 
     if (!serialNumber) {
         showMessage("流水号不能为空", "error");
@@ -3649,7 +3689,8 @@ async function savePackage() {
         ...item,
         package_order: index + 1,
         package_label: `包装${index + 1}`,
-        volume: item.volume || calculatePackageVolume(item)
+        volume: calculatePackageVolume(item),
+        charge_weight: chargeWeightTotal
     }));
 
     try {
@@ -3875,7 +3916,7 @@ function updatePackagingDbVolume() {
         return;
     }
 
-    const volume = length * width * height;
+    const volume = (length * width * height) / 1000000;
     volumeInput.value = Number.isFinite(volume) ? volume.toFixed(4) : "";
 }
 

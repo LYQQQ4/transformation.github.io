@@ -53,7 +53,11 @@ const PACKAGE_EXCEL_FIELD_MAPPING = {
   "高(cm)": "height",
   height: "height",
   height_cm: "height",
+  "单件重量": "single_weight",
+  single_weight: "single_weight",
   "体积": "volume",
+  "体积(m³)": "volume",
+  "体积(m3)": "volume",
   "体积(cm³)": "volume",
   "体积(cm3)": "volume",
   volume: "volume",
@@ -105,12 +109,19 @@ function roundMetricValue(value, digits = 4) {
   return Number(value.toFixed(digits));
 }
 
-function calculateVolumeCm3(length, width, height, pieces = 1) {
-  const safePieces = Number.isFinite(pieces) && pieces > 0 ? pieces : 1;
+function calculateVolumeCm3(length, width, height) {
   if (![length, width, height].every((value) => Number.isFinite(value))) {
     return null;
   }
-  return roundMetricValue(length * width * height * safePieces, 4);
+  return roundMetricValue((length * width * height) / 1000000, 4);
+}
+
+function calculateActualWeight(pieces, singleWeight) {
+  if (!Number.isFinite(singleWeight)) {
+    return null;
+  }
+  const safePieces = Number.isFinite(pieces) && pieces > 0 ? pieces : 1;
+  return roundMetricValue(safePieces * singleWeight, 2);
 }
 
 function buildPackageLabel(order) {
@@ -136,8 +147,7 @@ function normalizeBoxTypePayload(payload = {}) {
     normalized.volume_cm3 = calculateVolumeCm3(
       normalized.length_cm,
       normalized.width_cm,
-      normalized.height_cm,
-      1
+      normalized.height_cm
     );
   } else if (Number.isFinite(normalized.volume_cm3)) {
     normalized.volume_cm3 = roundMetricValue(normalized.volume_cm3, 4);
@@ -159,7 +169,7 @@ function validateBoxTypePayload(payload) {
         length_cm: "长(cm)",
         width_cm: "宽(cm)",
         height_cm: "高(cm)",
-        volume_cm3: "体积(cm³)",
+        volume_cm3: "体积(m³)",
       };
       errors.push(`${labels[field]} 必须是有效数字`);
     }
@@ -171,7 +181,7 @@ function validateBoxTypePayload(payload) {
         length_cm: "长(cm)",
         width_cm: "宽(cm)",
         height_cm: "高(cm)",
-        volume_cm3: "体积(cm³)",
+        volume_cm3: "体积(m³)",
       };
       errors.push(`${labels[field]} 不能小于 0`);
     }
@@ -191,6 +201,7 @@ function normalizePackageRow(row = {}, order = 1, boxTypeMap = new Map()) {
     product_name: normalizeText(row.product_name) || null,
     product_code: normalizeText(row.product_code) || null,
     pieces: parseNullableNumber(row.pieces),
+    single_weight: parseNullableNumber(row.single_weight),
     length: parseNullableNumber(row.length),
     width: parseNullableNumber(row.width),
     height: parseNullableNumber(row.height),
@@ -216,19 +227,27 @@ function applyPackageVolumeFallback(item) {
   if (Number.isNaN(item.length)) item.length = null;
   if (Number.isNaN(item.width)) item.width = null;
   if (Number.isNaN(item.height)) item.height = null;
+  if (Number.isNaN(item.single_weight)) item.single_weight = null;
   if (Number.isNaN(item.volume)) item.volume = null;
   if (Number.isNaN(item.pieces)) item.pieces = null;
   if (Number.isNaN(item.charge_weight)) item.charge_weight = null;
 
   if (
-    item.volume === null &&
     Number.isFinite(item.length) &&
     Number.isFinite(item.width) &&
     Number.isFinite(item.height)
   ) {
-    item.volume = calculateVolumeCm3(item.length, item.width, item.height, item.pieces || 1);
+    item.volume = calculateVolumeCm3(item.length, item.width, item.height);
   } else if (Number.isFinite(item.volume)) {
     item.volume = roundMetricValue(item.volume, 4);
+  }
+
+  if (Number.isFinite(item.single_weight)) {
+    item.single_weight = roundMetricValue(item.single_weight, 2);
+  }
+
+  if (Number.isFinite(item.charge_weight)) {
+    item.charge_weight = roundMetricValue(item.charge_weight, 2);
   }
 }
 
@@ -247,8 +266,7 @@ function applyBoxTypeToPackageRow(item, boxTypeMap) {
   item.width = Number.isFinite(item.width) ? item.width : boxType.width_cm;
   item.height = Number.isFinite(item.height) ? item.height : boxType.height_cm;
   if (!Number.isFinite(item.volume) && Number.isFinite(boxType.volume_cm3)) {
-    const pieces = item.pieces || 1;
-    item.volume = roundMetricValue(boxType.volume_cm3 * pieces, 4);
+    item.volume = roundMetricValue(boxType.volume_cm3, 4);
   }
   return item;
 }
@@ -312,6 +330,7 @@ async function ensurePackageSchema(db) {
           { name: "package_label", sql: "ALTER TABLE `package` ADD COLUMN package_label VARCHAR(50) DEFAULT NULL COMMENT '包装标签' AFTER serial_number" },
           { name: "package_order", sql: "ALTER TABLE `package` ADD COLUMN package_order INT DEFAULT 1 COMMENT '包装排序' AFTER package_label" },
           { name: "box_type_id", sql: "ALTER TABLE `package` ADD COLUMN box_type_id VARCHAR(64) DEFAULT NULL COMMENT '箱型ID' AFTER package_order" },
+          { name: "single_weight", sql: "ALTER TABLE `package` ADD COLUMN single_weight DOUBLE DEFAULT NULL COMMENT '单件重量' AFTER pieces" },
         ];
 
         for (const column of packageColumns) {
@@ -445,10 +464,13 @@ function buildPackageResponseRows(rows = [], boxTypeMap = new Map()) {
       package_order: normalized.package_order,
       box_type_id: normalized.box_type_id,
       package_type: normalized.package_type,
+      single_weight: normalized.single_weight,
       length: normalized.length,
       width: normalized.width,
       height: normalized.height,
       volume: normalized.volume,
+      charge_weight: normalized.charge_weight,
+      actual_weight: calculateActualWeight(normalized.pieces, normalized.single_weight),
     };
   });
 }
@@ -477,7 +499,7 @@ function validatePackageExcelData(data, boxTypeMap = new Map()) {
     }
   });
 
-  const numericFields = ["pieces", "length", "width", "height", "volume", "charge_weight"];
+  const numericFields = ["pieces", "single_weight", "length", "width", "height", "volume", "charge_weight"];
   numericFields.forEach((field) => {
     if (result.data[field] !== undefined) {
       const numericValue = parseNullableNumber(result.data[field]);
@@ -674,10 +696,11 @@ module.exports = (db) => {
         "箱型ID",
         "包装类型",
         "件数",
+        "单件重量",
         "长(cm)",
         "宽(cm)",
         "高(cm)",
-        "体积(cm³)",
+        "体积(m³)",
         "计费重量",
         "品名",
         "商品编号",
@@ -698,7 +721,8 @@ module.exports = (db) => {
         ["长(cm)", "尺寸单位统一为 cm"],
         ["宽(cm)", "尺寸单位统一为 cm"],
         ["高(cm)", "尺寸单位统一为 cm"],
-        ["体积(cm³)", "体积单位统一为 cm³；为空时按 长×宽×高×件数 自动计算"],
+        ["单件重量", "单件重量将按 件数×单件重量 参与实重汇总"],
+        ["体积(m³)", "体积按 长×宽×高 / 1000000 自动计算"],
       ];
       const noteSheet = XLSX.utils.aoa_to_sheet(noteRows);
       XLSX.utils.book_append_sheet(workbook, noteSheet, "填写说明");
@@ -781,7 +805,7 @@ module.exports = (db) => {
 
       const [result] = await db.execute(
         `UPDATE \`package\`
-         SET package_label = ?, package_order = ?, box_type_id = ?, product_name = ?, product_code = ?, pieces = ?, length = ?, width = ?, height = ?, volume = ?, charge_weight = ?, package_type = ?, customs_port = ?, customs_title = ?, regulatory_conditions = ?, remark1 = ?, remark2 = ?
+         SET package_label = ?, package_order = ?, box_type_id = ?, product_name = ?, product_code = ?, pieces = ?, single_weight = ?, length = ?, width = ?, height = ?, volume = ?, charge_weight = ?, package_type = ?, customs_port = ?, customs_title = ?, regulatory_conditions = ?, remark1 = ?, remark2 = ?
          WHERE id = ?`,
         [
           toNull(normalized.package_label),
@@ -790,6 +814,7 @@ module.exports = (db) => {
           toNull(normalized.product_name),
           toNull(normalized.product_code),
           toNull(normalized.pieces),
+          toNull(normalized.single_weight),
           toNull(normalized.length),
           toNull(normalized.width),
           toNull(normalized.height),
@@ -858,6 +883,7 @@ module.exports = (db) => {
           product_name,
           product_code,
           pieces,
+          single_weight,
           length,
           width,
           height,
@@ -869,7 +895,7 @@ module.exports = (db) => {
           regulatory_conditions,
           remark1,
           remark2
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       for (const item of packageItems) {
@@ -881,6 +907,7 @@ module.exports = (db) => {
           toNull(item.product_name),
           toNull(item.product_code),
           toNull(item.pieces),
+          toNull(item.single_weight),
           toNull(item.length),
           toNull(item.width),
           toNull(item.height),
@@ -985,6 +1012,7 @@ module.exports = (db) => {
             product_name,
             product_code,
             pieces,
+            single_weight,
             length,
             width,
             height,
@@ -1001,12 +1029,13 @@ module.exports = (db) => {
 
           const [updateResult] = await db.execute(
             `UPDATE \`package\`
-             SET product_name = ?, product_code = ?, pieces = ?, length = ?, width = ?, height = ?, volume = ?, charge_weight = ?, package_type = ?, box_type_id = ?, customs_port = ?, customs_title = ?, regulatory_conditions = ?, remark1 = ?, remark2 = ?
+             SET product_name = ?, product_code = ?, pieces = ?, single_weight = ?, length = ?, width = ?, height = ?, volume = ?, charge_weight = ?, package_type = ?, box_type_id = ?, customs_port = ?, customs_title = ?, regulatory_conditions = ?, remark1 = ?, remark2 = ?
              WHERE serial_number = ?`,
             [
               toNull(product_name),
               toNull(product_code),
               toNull(pieces),
+              toNull(single_weight),
               toNull(length),
               toNull(width),
               toNull(height),

@@ -102,6 +102,7 @@ async function setupDatabase() {
         product_name VARCHAR(200) DEFAULT NULL COMMENT '品名',
         product_code VARCHAR(100) DEFAULT NULL COMMENT '商品编号',
         pieces INT DEFAULT NULL COMMENT '件数',
+        single_weight DOUBLE DEFAULT NULL COMMENT '单件重量',
         length DOUBLE DEFAULT NULL COMMENT '长',
         width DOUBLE DEFAULT NULL COMMENT '宽',
         height DOUBLE DEFAULT NULL COMMENT '高',

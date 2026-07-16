@@ -117,6 +117,7 @@ async function setupDatabase() {
         product_name VARCHAR(200) DEFAULT NULL COMMENT '品名',
         product_code VARCHAR(100) DEFAULT NULL COMMENT '商品编号',
         pieces INT DEFAULT NULL COMMENT '件数',
+        single_weight DOUBLE DEFAULT NULL COMMENT '单件重量',
         length DOUBLE DEFAULT NULL COMMENT '长',
         width DOUBLE DEFAULT NULL COMMENT '宽',
         height DOUBLE DEFAULT NULL COMMENT '高',
@@ -142,6 +143,7 @@ async function setupDatabase() {
       { name: "product_name", sql: "ALTER TABLE package ADD COLUMN product_name VARCHAR(200) DEFAULT NULL COMMENT '品名'" },
       { name: "product_code", sql: "ALTER TABLE package ADD COLUMN product_code VARCHAR(100) DEFAULT NULL COMMENT '商品编号'" },
       { name: "pieces", sql: "ALTER TABLE package ADD COLUMN pieces INT DEFAULT NULL COMMENT '件数'" },
+      { name: "single_weight", sql: "ALTER TABLE package ADD COLUMN single_weight DOUBLE DEFAULT NULL COMMENT '单件重量'" },
       { name: "length", sql: "ALTER TABLE package ADD COLUMN length DOUBLE DEFAULT NULL COMMENT '长'" },
       { name: "width", sql: "ALTER TABLE package ADD COLUMN width DOUBLE DEFAULT NULL COMMENT '宽'" },
       { name: "height", sql: "ALTER TABLE package ADD COLUMN height DOUBLE DEFAULT NULL COMMENT '高'" }
