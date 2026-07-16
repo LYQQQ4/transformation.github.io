@@ -606,13 +606,15 @@ let currentPickupTrackingSearchTerm = "";
 let currentTransferSearchTerm = "";
 let currentGuestSearchTerm = "";
 
-function buildOrderDateRangeFilterHtml(label, fromId, toId) {
+function buildOrderFilledStatusFilterHtml(label, selectId) {
     return `
         <div class="form-group">
             <label>${label}:</label>
-            <input type="date" id="${fromId}">
-            <span style="margin: 0 8px; color: #6B7280;">至</span>
-            <input type="date" id="${toId}">
+            <select id="${selectId}">
+                <option value="all">全部</option>
+                <option value="filled">已填</option>
+                <option value="unfilled">未填</option>
+            </select>
         </div>
     `;
 }
@@ -627,7 +629,7 @@ function ensureOrderIndexStructure() {
                 <th>指令人</th>
                 <th>业务类型</th>
                 <th>发件人ID</th>
-                <th>客户ID</th>
+                <th>收件人ID</th>
                 <th>接收指令日期</th>
                 <th>起始地</th>
                 <th>目的地</th>
@@ -648,7 +650,7 @@ function ensureOrderIndexStructure() {
     }
 
     const filterForm = document.getElementById("filterFormData");
-    if (filterForm && !document.getElementById("filterCompleteDocsSendTimeFrom")) {
+    if (filterForm && !document.getElementById("filterCompleteDocsSendTimeFilledStatus")) {
         filterForm.innerHTML = `
             <div class="form-group">
                 <label>公司名称:</label>
@@ -663,7 +665,11 @@ function ensureOrderIndexStructure() {
                 <input type="text" id="filterBusinessType">
             </div>
             <div class="form-group">
-                <label>客户ID:</label>
+                <label>发件人ID:</label>
+                <input type="text" id="filterSenderId">
+            </div>
+            <div class="form-group">
+                <label>收件人ID:</label>
                 <input type="text" id="filterCustomerId">
             </div>
             <div class="form-group">
@@ -686,12 +692,12 @@ function ensureOrderIndexStructure() {
                     <option value="unfilled">未填</option>
                 </select>
             </div>
-            ${buildOrderDateRangeFilterHtml("提货时间", "filterPickupDateFrom", "filterPickupDateTo")}
-            ${buildOrderDateRangeFilterHtml("开始报关时间", "filterCustomsStartTimeFrom", "filterCustomsStartTimeTo")}
-            ${buildOrderDateRangeFilterHtml("付税时间", "filterTaxPaymentTimeFrom", "filterTaxPaymentTimeTo")}
-            ${buildOrderDateRangeFilterHtml("放行时间", "filterReleaseTimeFrom", "filterReleaseTimeTo")}
-            ${buildOrderDateRangeFilterHtml("到货时间", "filterArrivalTimeFrom", "filterArrivalTimeTo")}
-            ${buildOrderDateRangeFilterHtml("完整单据回复时间", "filterCompleteDocsSendTimeFrom", "filterCompleteDocsSendTimeTo")}
+            ${buildOrderFilledStatusFilterHtml("提货时间", "filterPickupDateFilledStatus")}
+            ${buildOrderFilledStatusFilterHtml("开始报关时间", "filterCustomsStartTimeFilledStatus")}
+            ${buildOrderFilledStatusFilterHtml("付税时间", "filterTaxPaymentTimeFilledStatus")}
+            ${buildOrderFilledStatusFilterHtml("放行时间", "filterReleaseTimeFilledStatus")}
+            ${buildOrderFilledStatusFilterHtml("到货时间", "filterArrivalTimeFilledStatus")}
+            ${buildOrderFilledStatusFilterHtml("完整单据回复时间", "filterCompleteDocsSendTimeFilledStatus")}
             <div class="button-group">
                 <button type="button" onclick="applyFilters()">应用筛选</button>
                 <button type="button" onclick="clearFilters()">清除筛选</button>
@@ -802,7 +808,7 @@ function renderOrderDetailView(order) {
             <div><strong>指令人:</strong> ${order.orderer || ""}</div>
             <div><strong>业务类型:</strong> ${order.business_type || ""}</div>
             <div><strong>发件人ID:</strong> ${order.sender_id || ""}</div>
-            <div><strong>客户ID:</strong> ${order.customer_id || ""}</div>
+            <div><strong>收件人ID:</strong> ${order.customer_id || ""}</div>
             <div><strong>接收指令日期:</strong> ${displayDate}</div>
             <div><strong>始发地:</strong> ${order.origin || ""}</div>
             <div><strong>目的地:</strong> ${order.destination || ""}</div>
@@ -1777,6 +1783,7 @@ function applyFilters() {
         company_name: document.getElementById("filterCompanyName").value.trim(),
         orderer: document.getElementById("filterOrderer").value.trim(),
         business_type: document.getElementById("filterBusinessType").value.trim(),
+        sender_id: document.getElementById("filterSenderId").value.trim(),
         customer_id: document.getElementById("filterCustomerId").value.trim(),
         origin: document.getElementById("filterOrigin").value.trim(),
         destination: document.getElementById("filterDestination").value.trim(),
@@ -1873,7 +1880,7 @@ function ensureOrderIndexStructure() {
                 <th>指令人</th>
                 <th>业务类型</th>
                 <th>发件人ID</th>
-                <th>客户ID</th>
+                <th>收件人ID</th>
                 <th>接收指令日期</th>
                 <th>起始地</th>
                 <th>目的地</th>
@@ -1894,7 +1901,7 @@ function ensureOrderIndexStructure() {
     }
 
     const filterForm = document.getElementById("filterFormData");
-    if (filterForm && !document.getElementById("filterCompleteDocsSendTimeFrom")) {
+    if (filterForm && !document.getElementById("filterCompleteDocsSendTimeFilledStatus")) {
         filterForm.innerHTML = `
             <div class="form-group">
                 <label>公司名称:</label>
@@ -1909,7 +1916,11 @@ function ensureOrderIndexStructure() {
                 <input type="text" id="filterBusinessType">
             </div>
             <div class="form-group">
-                <label>客户ID:</label>
+                <label>发件人ID:</label>
+                <input type="text" id="filterSenderId">
+            </div>
+            <div class="form-group">
+                <label>收件人ID:</label>
                 <input type="text" id="filterCustomerId">
             </div>
             <div class="form-group">
@@ -1932,12 +1943,12 @@ function ensureOrderIndexStructure() {
                     <option value="unfilled">未填</option>
                 </select>
             </div>
-            ${buildOrderDateRangeFilterHtml("提货时间", "filterPickupDateFrom", "filterPickupDateTo")}
-            ${buildOrderDateRangeFilterHtml("开始报关时间", "filterCustomsStartTimeFrom", "filterCustomsStartTimeTo")}
-            ${buildOrderDateRangeFilterHtml("付税时间", "filterTaxPaymentTimeFrom", "filterTaxPaymentTimeTo")}
-            ${buildOrderDateRangeFilterHtml("放行时间", "filterReleaseTimeFrom", "filterReleaseTimeTo")}
-            ${buildOrderDateRangeFilterHtml("到货时间", "filterArrivalTimeFrom", "filterArrivalTimeTo")}
-            ${buildOrderDateRangeFilterHtml("完整单据回复时间", "filterCompleteDocsSendTimeFrom", "filterCompleteDocsSendTimeTo")}
+            ${buildOrderFilledStatusFilterHtml("提货时间", "filterPickupDateFilledStatus")}
+            ${buildOrderFilledStatusFilterHtml("开始报关时间", "filterCustomsStartTimeFilledStatus")}
+            ${buildOrderFilledStatusFilterHtml("付税时间", "filterTaxPaymentTimeFilledStatus")}
+            ${buildOrderFilledStatusFilterHtml("放行时间", "filterReleaseTimeFilledStatus")}
+            ${buildOrderFilledStatusFilterHtml("到货时间", "filterArrivalTimeFilledStatus")}
+            ${buildOrderFilledStatusFilterHtml("完整单据回复时间", "filterCompleteDocsSendTimeFilledStatus")}
             <div class="button-group">
                 <button type="button" onclick="applyFilters()">应用筛选</button>
                 <button type="button" onclick="clearFilters()">清除筛选</button>
@@ -2006,22 +2017,17 @@ function applyFilters() {
         company_name: getFilterInputValue("filterCompanyName"),
         orderer: getFilterInputValue("filterOrderer"),
         business_type: getFilterInputValue("filterBusinessType"),
+        sender_id: getFilterInputValue("filterSenderId"),
         customer_id: getFilterInputValue("filterCustomerId"),
         origin: getFilterInputValue("filterOrigin"),
         destination: getFilterInputValue("filterDestination"),
         index_title: getFilterInputValue("filterIndexTitle"),
-        pickup_date_from: getFilterInputValue("filterPickupDateFrom"),
-        pickup_date_to: getFilterInputValue("filterPickupDateTo"),
-        customs_start_time_from: getFilterInputValue("filterCustomsStartTimeFrom"),
-        customs_start_time_to: getFilterInputValue("filterCustomsStartTimeTo"),
-        tax_payment_time_from: getFilterInputValue("filterTaxPaymentTimeFrom"),
-        tax_payment_time_to: getFilterInputValue("filterTaxPaymentTimeTo"),
-        release_time_from: getFilterInputValue("filterReleaseTimeFrom"),
-        release_time_to: getFilterInputValue("filterReleaseTimeTo"),
-        arrival_time_from: getFilterInputValue("filterArrivalTimeFrom"),
-        arrival_time_to: getFilterInputValue("filterArrivalTimeTo"),
-        complete_docs_send_time_from: getFilterInputValue("filterCompleteDocsSendTimeFrom"),
-        complete_docs_send_time_to: getFilterInputValue("filterCompleteDocsSendTimeTo"),
+        pickup_date_filled_status: getFilterInputValue("filterPickupDateFilledStatus"),
+        customs_start_time_filled_status: getFilterInputValue("filterCustomsStartTimeFilledStatus"),
+        tax_payment_time_filled_status: getFilterInputValue("filterTaxPaymentTimeFilledStatus"),
+        release_time_filled_status: getFilterInputValue("filterReleaseTimeFilledStatus"),
+        arrival_time_filled_status: getFilterInputValue("filterArrivalTimeFilledStatus"),
+        complete_docs_send_time_filled_status: getFilterInputValue("filterCompleteDocsSendTimeFilledStatus"),
         dateFilledStatus: document.getElementById("filterDateFilledStatus")?.value || "all"
     };
 

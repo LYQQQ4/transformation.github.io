@@ -256,25 +256,12 @@ module.exports = (db, userDb = null) => {
         params.push(`%${value}%`);
       };
 
-      const appendDateRangeCondition = (fieldName, columnName) => {
-        const exactValue = String(req.query[fieldName] || "").trim();
-        const fromValue = String(req.query[`${fieldName}_from`] || "").trim();
-        const toValue = String(req.query[`${fieldName}_to`] || "").trim();
-
-        if (exactValue) {
-          conditions.push(`DATE(${columnName}) = ?`);
-          params.push(exactValue);
-          return;
-        }
-
-        if (fromValue) {
-          conditions.push(`DATE(${columnName}) >= ?`);
-          params.push(fromValue);
-        }
-
-        if (toValue) {
-          conditions.push(`DATE(${columnName}) <= ?`);
-          params.push(toValue);
+      const appendFilledStatusCondition = (fieldName, columnName) => {
+        const filledStatus = String(req.query[fieldName] || "all").trim();
+        if (filledStatus === "filled") {
+          conditions.push(`${columnName} IS NOT NULL`);
+        } else if (filledStatus === "unfilled") {
+          conditions.push(`${columnName} IS NULL`);
         }
       };
 
@@ -287,19 +274,13 @@ module.exports = (db, userDb = null) => {
       appendLikeCondition("destination", "o.destination");
       appendLikeCondition("index_title", "p.customs_title");
 
-      appendDateRangeCondition("pickup_date", "p.pickup_date");
-      appendDateRangeCondition("customs_start_time", "c.customs_start_time");
-      appendDateRangeCondition("tax_payment_time", "c.tax_payment_time");
-      appendDateRangeCondition("release_time", "c.release_time");
-      appendDateRangeCondition("arrival_time", "p.arrival_time");
-      appendDateRangeCondition("complete_docs_send_time", "t.complete_docs_send_time");
-
-      const dateFilledStatus = String(req.query.dateFilledStatus || "all").trim();
-      if (dateFilledStatus === "filled") {
-        conditions.push("o.receive_date IS NOT NULL");
-      } else if (dateFilledStatus === "unfilled") {
-        conditions.push("o.receive_date IS NULL");
-      }
+      appendFilledStatusCondition("dateFilledStatus", "o.receive_date");
+      appendFilledStatusCondition("pickup_date_filled_status", "p.pickup_date");
+      appendFilledStatusCondition("customs_start_time_filled_status", "c.customs_start_time");
+      appendFilledStatusCondition("tax_payment_time_filled_status", "c.tax_payment_time");
+      appendFilledStatusCondition("release_time_filled_status", "c.release_time");
+      appendFilledStatusCondition("arrival_time_filled_status", "p.arrival_time");
+      appendFilledStatusCondition("complete_docs_send_time_filled_status", "t.complete_docs_send_time");
 
       const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       const [rows] = await db.execute(
