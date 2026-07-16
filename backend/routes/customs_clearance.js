@@ -1,6 +1,15 @@
 const express = require("express");
 const router = express.Router();
 
+function normalizeCustomsSerialNumber(value) {
+  return String(value || "").trim();
+}
+
+function logCustomsRouteError(routeName, context, error) {
+  const payload = context ? ` ${JSON.stringify(context)}` : "";
+  console.error(`[customs_clearance] ${routeName}${payload}:`, error);
+}
+
 module.exports = (db) => {
   // 获取所有报关信息跟踪记录
   router.get("/", async (req, res) => {
@@ -37,18 +46,24 @@ module.exports = (db) => {
   // 根据流水号获取报关信息跟踪记录
   router.get("/serial/:serial_number", async (req, res) => {
     try {
+      const serialNumber = normalizeCustomsSerialNumber(req.params.serial_number);
+      if (!serialNumber || serialNumber === "undefined") {
+        return res.status(400).json({ error: "serial_number is required" });
+      }
+
       const [rows] = await db.execute(
         `SELECT c.*, o.company_name, o.orderer, o.business_type, o.customer_id
          FROM customs_clearance_tracking c
          LEFT JOIN orders o ON c.serial_number = o.serial_number
          WHERE c.serial_number = ?`,
-        [req.params.serial_number]
+        [serialNumber]
       );
       if (rows.length === 0) {
         return res.status(404).json({ error: "记录未找到" });
       }
       res.json({ record: rows[0] });
     } catch (err) {
+      logCustomsRouteError("getBySerial", { serial_number: req.params.serial_number }, err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -162,6 +177,11 @@ module.exports = (db) => {
   // 根据流水号更新报关信息跟踪记录
   router.put("/serial/:serial_number", async (req, res) => {
     try {
+      const serialNumber = normalizeCustomsSerialNumber(req.params.serial_number);
+      if (!serialNumber || serialNumber === "undefined") {
+        return res.status(400).json({ error: "serial_number is required" });
+      }
+
       const {
         customs_start_time,
         tax_payment_time,
@@ -192,7 +212,7 @@ module.exports = (db) => {
         customs_supplier || null,
         remark1 || null,
         remark2 || null,
-        req.params.serial_number
+        serialNumber
       ]);
 
       if (result.affectedRows === 0) {
@@ -201,6 +221,7 @@ module.exports = (db) => {
 
       res.json({ message: "报关信息跟踪记录更新成功" });
     } catch (err) {
+      logCustomsRouteError("updateBySerial", { serial_number: req.params.serial_number, body: req.body }, err);
       res.status(500).json({ error: err.message });
     }
   });

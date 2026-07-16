@@ -23,6 +23,15 @@ const upload = multer({
     }
 });
 
+function normalizeTransferSerialNumber(value) {
+  return String(value || "").trim();
+}
+
+function logTransferRouteError(routeName, context, error) {
+  const payload = context ? ` ${JSON.stringify(context)}` : "";
+  console.error(`[transfer] ${routeName}${payload}:`, error);
+}
+
 module.exports = (db) => {
   // GET all transfers
   router.get("/", async (req, res) => {
@@ -36,6 +45,7 @@ module.exports = (db) => {
       const [rows] = await db.execute("SELECT * FROM transfer ORDER BY create_time DESC");
       res.json({ transfers: rows });
     } catch (err) {
+      logTransferRouteError("list", null, err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -43,7 +53,7 @@ module.exports = (db) => {
   // GET transfer by serial_number
   router.get("/serial/:serial_number", async (req, res) => {
     try {
-      const serialNumber = req.params.serial_number;
+      const serialNumber = normalizeTransferSerialNumber(req.params.serial_number);
       if (!serialNumber || serialNumber === "undefined") {
         return res.status(400).json({ error: "serial_number is required" });
       }
@@ -55,6 +65,7 @@ module.exports = (db) => {
       }
       res.json({ transfer: rows[0] });
     } catch (err) {
+      logTransferRouteError("getBySerial", { serial_number: req.params.serial_number }, err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -69,6 +80,7 @@ module.exports = (db) => {
       }
       res.json({ transfer: rows[0] });
     } catch (err) {
+      logTransferRouteError("getById", { id: req.params.id }, err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -132,6 +144,11 @@ module.exports = (db) => {
   // PUT update transfer by serial_number
   router.put("/serial/:serial_number", async (req, res) => {
     try {
+      const serialNumber = normalizeTransferSerialNumber(req.params.serial_number);
+      if (!serialNumber || serialNumber === "undefined") {
+        return res.status(400).json({ error: "serial_number is required" });
+      }
+
       const {
         transport_mode,
         tracking_number,
@@ -163,7 +180,7 @@ module.exports = (db) => {
         sanitize(transport_mode), sanitize(tracking_number), sanitize(contract_number),
         sanitize(pickup_date), sanitize(arrival_port_time), sanitize(clearance_time), sanitize(delivery_time),
         sanitize(complete_docs_send_time), sanitize(cargo_flow_info), sanitize(supplier), sanitize(value_added_services),
-        sanitize(billing_period), sanitize(remark1), sanitize(remark2), sanitize(remark3), sanitize(req.params.serial_number)
+        sanitize(billing_period), sanitize(remark1), sanitize(remark2), sanitize(remark3), sanitize(serialNumber)
       ];
 
       const [result] = await db.execute(sql, params);
@@ -174,6 +191,7 @@ module.exports = (db) => {
       }
       res.json({ message: "Transfer updated successfully" });
     } catch (err) {
+      logTransferRouteError("updateBySerial", { serial_number: req.params.serial_number, body: req.body }, err);
       res.status(500).json({ error: err.message });
     }
   });

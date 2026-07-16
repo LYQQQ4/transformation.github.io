@@ -606,9 +606,109 @@ let currentPickupTrackingSearchTerm = "";
 let currentTransferSearchTerm = "";
 let currentGuestSearchTerm = "";
 
+function buildOrderDateRangeFilterHtml(label, fromId, toId) {
+    return `
+        <div class="form-group">
+            <label>${label}:</label>
+            <input type="date" id="${fromId}">
+            <span style="margin: 0 8px; color: #6B7280;">至</span>
+            <input type="date" id="${toId}">
+        </div>
+    `;
+}
+
+function ensureOrderIndexStructure() {
+    const tableHead = document.querySelector("#ordersTable thead");
+    if (tableHead && !tableHead.textContent.includes("完整单据回复时间")) {
+        tableHead.innerHTML = `
+            <tr>
+                <th>流水号</th>
+                <th>公司名称</th>
+                <th>指令人</th>
+                <th>业务类型</th>
+                <th>发件人ID</th>
+                <th>客户ID</th>
+                <th>接收指令日期</th>
+                <th>起始地</th>
+                <th>目的地</th>
+                <th>贸易术语</th>
+                <th>货物品名</th>
+                <th>抬头</th>
+                <th>提货时间</th>
+                <th>开始报关时间</th>
+                <th>付税时间</th>
+                <th>放行时间</th>
+                <th>到货时间</th>
+                <th>完整单据回复时间</th>
+                <th>备注1</th>
+                <th>备注2</th>
+                <th>操作</th>
+            </tr>
+        `;
+    }
+
+    const filterForm = document.getElementById("filterFormData");
+    if (filterForm && !document.getElementById("filterCompleteDocsSendTimeFrom")) {
+        filterForm.innerHTML = `
+            <div class="form-group">
+                <label>公司名称:</label>
+                <input type="text" id="filterCompanyName">
+            </div>
+            <div class="form-group">
+                <label>指令人:</label>
+                <input type="text" id="filterOrderer">
+            </div>
+            <div class="form-group">
+                <label>业务类型:</label>
+                <input type="text" id="filterBusinessType">
+            </div>
+            <div class="form-group">
+                <label>客户ID:</label>
+                <input type="text" id="filterCustomerId">
+            </div>
+            <div class="form-group">
+                <label>起始地:</label>
+                <input type="text" id="filterOrigin">
+            </div>
+            <div class="form-group">
+                <label>目的地:</label>
+                <input type="text" id="filterDestination">
+            </div>
+            <div class="form-group">
+                <label>抬头:</label>
+                <input type="text" id="filterIndexTitle">
+            </div>
+            <div class="form-group">
+                <label>接收指令日期:</label>
+                <select id="filterDateFilledStatus">
+                    <option value="all">全部</option>
+                    <option value="filled">已填</option>
+                    <option value="unfilled">未填</option>
+                </select>
+            </div>
+            ${buildOrderDateRangeFilterHtml("提货时间", "filterPickupDateFrom", "filterPickupDateTo")}
+            ${buildOrderDateRangeFilterHtml("开始报关时间", "filterCustomsStartTimeFrom", "filterCustomsStartTimeTo")}
+            ${buildOrderDateRangeFilterHtml("付税时间", "filterTaxPaymentTimeFrom", "filterTaxPaymentTimeTo")}
+            ${buildOrderDateRangeFilterHtml("放行时间", "filterReleaseTimeFrom", "filterReleaseTimeTo")}
+            ${buildOrderDateRangeFilterHtml("到货时间", "filterArrivalTimeFrom", "filterArrivalTimeTo")}
+            ${buildOrderDateRangeFilterHtml("完整单据回复时间", "filterCompleteDocsSendTimeFrom", "filterCompleteDocsSendTimeTo")}
+            <div class="button-group">
+                <button type="button" onclick="applyFilters()">应用筛选</button>
+                <button type="button" onclick="clearFilters()">清除筛选</button>
+                <button type="button" onclick="hideFilterForm()">取消</button>
+            </div>
+        `;
+    }
+}
+
+function getFilterInputValue(id) {
+    return document.getElementById(id)?.value.trim() || "";
+}
+
 // Order functions
 async function loadOrders() {
     try {
+        ensureOrderIndexStructure();
         const query = buildOrderFilterQuery();
         const response = await fetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
         const data = await response.json();
@@ -1754,6 +1854,231 @@ async function loadAndFilterOrders() {
                     (order.remark1 && order.remark1.toLowerCase().includes(searchLower)) ||
                     (order.remark2 && order.remark2.toLowerCase().includes(searchLower))
                 );
+            });
+        }
+
+        displayOrders(filteredOrders);
+    } catch (error) {
+        showMessage("加载订单失败: " + error.message, "error");
+    }
+}
+
+function ensureOrderIndexStructure() {
+    const tableHead = document.querySelector("#ordersTable thead");
+    if (tableHead && !tableHead.textContent.includes("完整单据回复时间")) {
+        tableHead.innerHTML = `
+            <tr>
+                <th>流水号</th>
+                <th>公司名称</th>
+                <th>指令人</th>
+                <th>业务类型</th>
+                <th>发件人ID</th>
+                <th>客户ID</th>
+                <th>接收指令日期</th>
+                <th>起始地</th>
+                <th>目的地</th>
+                <th>贸易术语</th>
+                <th>货物品名</th>
+                <th>抬头</th>
+                <th>提货时间</th>
+                <th>开始报关时间</th>
+                <th>付税时间</th>
+                <th>放行时间</th>
+                <th>到货时间</th>
+                <th>完整单据回复时间</th>
+                <th>备注1</th>
+                <th>备注2</th>
+                <th>操作</th>
+            </tr>
+        `;
+    }
+
+    const filterForm = document.getElementById("filterFormData");
+    if (filterForm && !document.getElementById("filterCompleteDocsSendTimeFrom")) {
+        filterForm.innerHTML = `
+            <div class="form-group">
+                <label>公司名称:</label>
+                <input type="text" id="filterCompanyName">
+            </div>
+            <div class="form-group">
+                <label>指令人:</label>
+                <input type="text" id="filterOrderer">
+            </div>
+            <div class="form-group">
+                <label>业务类型:</label>
+                <input type="text" id="filterBusinessType">
+            </div>
+            <div class="form-group">
+                <label>客户ID:</label>
+                <input type="text" id="filterCustomerId">
+            </div>
+            <div class="form-group">
+                <label>起始地:</label>
+                <input type="text" id="filterOrigin">
+            </div>
+            <div class="form-group">
+                <label>目的地:</label>
+                <input type="text" id="filterDestination">
+            </div>
+            <div class="form-group">
+                <label>抬头:</label>
+                <input type="text" id="filterIndexTitle">
+            </div>
+            <div class="form-group">
+                <label>接收指令日期:</label>
+                <select id="filterDateFilledStatus">
+                    <option value="all">全部</option>
+                    <option value="filled">已填</option>
+                    <option value="unfilled">未填</option>
+                </select>
+            </div>
+            ${buildOrderDateRangeFilterHtml("提货时间", "filterPickupDateFrom", "filterPickupDateTo")}
+            ${buildOrderDateRangeFilterHtml("开始报关时间", "filterCustomsStartTimeFrom", "filterCustomsStartTimeTo")}
+            ${buildOrderDateRangeFilterHtml("付税时间", "filterTaxPaymentTimeFrom", "filterTaxPaymentTimeTo")}
+            ${buildOrderDateRangeFilterHtml("放行时间", "filterReleaseTimeFrom", "filterReleaseTimeTo")}
+            ${buildOrderDateRangeFilterHtml("到货时间", "filterArrivalTimeFrom", "filterArrivalTimeTo")}
+            ${buildOrderDateRangeFilterHtml("完整单据回复时间", "filterCompleteDocsSendTimeFrom", "filterCompleteDocsSendTimeTo")}
+            <div class="button-group">
+                <button type="button" onclick="applyFilters()">应用筛选</button>
+                <button type="button" onclick="clearFilters()">清除筛选</button>
+                <button type="button" onclick="hideFilterForm()">取消</button>
+            </div>
+        `;
+    }
+}
+
+function displayOrders(orders) {
+    ensureOrderIndexStructure();
+
+    orders.sort((a, b) => {
+        const aSerial = parseInt(a.serial_number || a.id) || 0;
+        const bSerial = parseInt(b.serial_number || b.id) || 0;
+        return bSerial - aSerial;
+    });
+
+    const tbody = document.querySelector("#ordersTable tbody");
+    if (!tbody) {
+        return;
+    }
+
+    tbody.innerHTML = "";
+    orders.forEach(order => {
+        const row = tbody.insertRow();
+        const displayDate = formatDateOnly(order.receive_date);
+
+        row.innerHTML = `
+            <td><button class="link-button" onclick="showOrderDetails(${order.id})">${order.serial_number || order.id}</button></td>
+            <td>${order.company_name || ""}</td>
+            <td>${order.orderer || ""}</td>
+            <td>${order.business_type || ""}</td>
+            <td>${order.sender_id || ""}</td>
+            <td>${order.customer_id || ""}</td>
+            <td>${displayDate}</td>
+            <td>${order.origin || ""}</td>
+            <td>${order.destination || ""}</td>
+            <td>${order.trade_term || ""}</td>
+            <td>${order.product_name || ""}</td>
+            <td>${order.index_title || ""}</td>
+            <td>${formatDateOnly(order.pickup_date)}</td>
+            <td>${formatDateOnly(order.customs_start_time)}</td>
+            <td>${formatDateOnly(order.tax_payment_time)}</td>
+            <td>${formatDateOnly(order.release_time)}</td>
+            <td>${formatDateOnly(order.arrival_time)}</td>
+            <td>${formatDateOnly(order.complete_docs_send_time)}</td>
+            <td>${order.remark1 || ""}</td>
+            <td>${order.remark2 || ""}</td>
+            <td>
+                <button onclick="editOrder(${order.id})">编辑</button>
+                <button onclick="deleteOrder(${order.id})">删除</button>
+            </td>
+        `;
+    });
+}
+
+function showFilterForm() {
+    ensureOrderIndexStructure();
+    document.getElementById("filterModal").style.display = "block";
+}
+
+function applyFilters() {
+    ensureOrderIndexStructure();
+    currentFilters = {
+        company_name: getFilterInputValue("filterCompanyName"),
+        orderer: getFilterInputValue("filterOrderer"),
+        business_type: getFilterInputValue("filterBusinessType"),
+        customer_id: getFilterInputValue("filterCustomerId"),
+        origin: getFilterInputValue("filterOrigin"),
+        destination: getFilterInputValue("filterDestination"),
+        index_title: getFilterInputValue("filterIndexTitle"),
+        pickup_date_from: getFilterInputValue("filterPickupDateFrom"),
+        pickup_date_to: getFilterInputValue("filterPickupDateTo"),
+        customs_start_time_from: getFilterInputValue("filterCustomsStartTimeFrom"),
+        customs_start_time_to: getFilterInputValue("filterCustomsStartTimeTo"),
+        tax_payment_time_from: getFilterInputValue("filterTaxPaymentTimeFrom"),
+        tax_payment_time_to: getFilterInputValue("filterTaxPaymentTimeTo"),
+        release_time_from: getFilterInputValue("filterReleaseTimeFrom"),
+        release_time_to: getFilterInputValue("filterReleaseTimeTo"),
+        arrival_time_from: getFilterInputValue("filterArrivalTimeFrom"),
+        arrival_time_to: getFilterInputValue("filterArrivalTimeTo"),
+        complete_docs_send_time_from: getFilterInputValue("filterCompleteDocsSendTimeFrom"),
+        complete_docs_send_time_to: getFilterInputValue("filterCompleteDocsSendTimeTo"),
+        dateFilledStatus: document.getElementById("filterDateFilledStatus")?.value || "all"
+    };
+
+    Object.keys(currentFilters).forEach(key => {
+        if (currentFilters[key] === "" || currentFilters[key] === "all") {
+            delete currentFilters[key];
+        }
+    });
+
+    loadAndFilterOrders();
+    hideFilterForm();
+}
+
+function clearFilters() {
+    ensureOrderIndexStructure();
+    document.getElementById("filterFormData")?.reset();
+    const dateFilledStatus = document.getElementById("filterDateFilledStatus");
+    if (dateFilledStatus) {
+        dateFilledStatus.value = "all";
+    }
+    currentFilters = {};
+    currentSearchTerm = "";
+    const searchInput = document.getElementById("searchInput");
+    if (searchInput) {
+        searchInput.value = "";
+    }
+    loadOrders();
+    hideFilterForm();
+}
+
+async function loadAndFilterOrders() {
+    try {
+        ensureOrderIndexStructure();
+        const query = buildOrderFilterQuery();
+        const response = await fetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
+        const data = await response.json();
+
+        let filteredOrders = data.orders || [];
+
+        if (currentSearchTerm) {
+            const searchLower = currentSearchTerm.toLowerCase();
+            filteredOrders = filteredOrders.filter(order => {
+                return [
+                    order.serial_number,
+                    order.company_name,
+                    order.orderer,
+                    order.business_type,
+                    order.customer_id,
+                    order.sender_id,
+                    order.origin,
+                    order.destination,
+                    order.trade_term,
+                    order.product_name,
+                    order.index_title,
+                    order.remark1,
+                    order.remark2
+                ].some(value => value && String(value).toLowerCase().includes(searchLower));
             });
         }
 
@@ -4053,6 +4378,9 @@ async function editTransfer(serialNumber) {
         const encoded = encodeURIComponent(serialNumber);
         const response = await fetch(`${API_BASE}/transfers/serial/${encoded}`);
         const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "加载送货运输跟踪失败");
+        }
         showTransferForm(data.transfer);
     } catch (error) {
         showMessage("加载送货运输跟踪失败: " + error.message, "error");
@@ -4243,8 +4571,8 @@ function hideTransferForm() {
 
 async function saveTransfer() {
     const form = document.getElementById("transferFormData");
-    const serialNumber = document.getElementById("transferSerialNumber").value;
-    const trackingNumber = document.getElementById("transferTrackingNumber").value;
+    const serialNumber = document.getElementById("transferSerialNumber").value.trim();
+    const trackingNumber = document.getElementById("transferTrackingNumber").value.trim();
 
     if (!serialNumber) {
         showMessage("流水号不能为空", "error");
@@ -4261,7 +4589,14 @@ async function saveTransfer() {
         const encoded = encodeURIComponent(serialNumber);
         const checkResponse = await fetch(`${API_BASE}/transfers/serial/${encoded}`);
         if (!checkResponse.ok) {
-            showMessage("该流水号不存在，无法修改送货运输跟踪信息", "error");
+            let errorMessage = "该流水号不存在，无法修改送货运输跟踪信息";
+            try {
+                const checkError = await checkResponse.json();
+                errorMessage = checkError.error || errorMessage;
+            } catch (parseError) {
+                console.error("Failed to parse transfer precheck error:", parseError);
+            }
+            showMessage(errorMessage, "error");
             return;
         }
     } catch (error) {
@@ -4975,10 +5310,18 @@ function displayLibraryImportResults(result, resultContainerId, summaryId, error
     }
 
     if (result.results) {
+        const createdCount = Number(result.results.success || 0);
+        const updatedCount = Number(result.results.updated || 0);
+        const mergedCount = Number(result.results.merged || 0);
+        const failedCount = Number(result.results.failed || 0);
+        const hasExtendedCounters = updatedCount > 0 || mergedCount > 0;
+
         summary.innerHTML = `
             <p><strong>总行数:</strong> ${result.results.total}</p>
-            <p><strong>成功导入:</strong> ${result.results.success}</p>
-            <p><strong>导入失败:</strong> ${result.results.failed}</p>
+            <p><strong>${hasExtendedCounters ? "新增创建" : "成功导入"}:</strong> ${createdCount}</p>
+            ${hasExtendedCounters ? `<p><strong>更新已有:</strong> ${updatedCount}</p>` : ""}
+            ${hasExtendedCounters ? `<p><strong>合并已有:</strong> ${mergedCount}</p>` : ""}
+            <p><strong>导入失败:</strong> ${failedCount}</p>
         `;
 
         if (result.results.errors && result.results.errors.length > 0) {
@@ -5898,6 +6241,9 @@ async function saveCustomsClearance() {
             showMessage("报关信息保存成功");
             hideCustomsForm();
             loadCustomsClearance();
+            if (currentOrderDetailSerial && currentOrderDetailSerial === serialNumber) {
+                loadOrderCustomsClearanceDetails(serialNumber);
+            }
         } else {
             const error = await response.json();
             showMessage("保存失败: " + error.error, "error");

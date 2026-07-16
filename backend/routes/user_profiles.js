@@ -10,6 +10,15 @@ const {
 } = require("../lib/user_profiles");
 
 const router = express.Router();
+const USER_PROFILE_IMPORT_HEADERS = [
+  "用户ID",
+  "公司名称",
+  "地址",
+  "联系人姓名",
+  "电话",
+  "邮箱",
+  "备注",
+];
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -222,6 +231,36 @@ async function importProfile(db, rawProfile) {
 module.exports = (db, orderDb = null) => {
   ensureUserProfilesTable(db).catch((error) => {
     console.error("ensure user_profiles table failed:", error.message);
+  });
+
+  router.get("/import-template", async (req, res) => {
+    try {
+      await ensureUserProfilesTable(db);
+
+      const workbook = XLSX.utils.book_new();
+      const templateSheet = XLSX.utils.aoa_to_sheet([USER_PROFILE_IMPORT_HEADERS]);
+      XLSX.utils.book_append_sheet(workbook, templateSheet, "用户信息导入模板");
+
+      const noteRows = [
+        ["字段", "说明"],
+        ["用户ID", "选填；格式为国家代码+数字序号，例如 ch001、us002；留空时系统将自动生成"],
+        ["公司名称", "选填；建议填写完整公司名称"],
+        ["地址", "选填；建议填写完整地址"],
+        ["联系人姓名", "选填"],
+        ["电话", "选填"],
+        ["邮箱", "选填"],
+        ["备注", "选填"],
+      ];
+      const noteSheet = XLSX.utils.aoa_to_sheet(noteRows);
+      XLSX.utils.book_append_sheet(workbook, noteSheet, "填写说明");
+
+      const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", 'attachment; filename="user_profiles_import_template.xlsx"');
+      res.send(buffer);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to generate import template: " + error.message });
+    }
   });
 
   router.get("/", async (req, res) => {

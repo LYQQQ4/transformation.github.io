@@ -247,33 +247,77 @@ module.exports = (db, userDb = null) => {
       const conditions = [];
       const params = [];
 
-      const appendLikeCondition = (fieldName) => {
+      const appendLikeCondition = (fieldName, columnName = fieldName) => {
         const value = String(req.query[fieldName] || "").trim();
         if (!value) {
           return;
         }
-        conditions.push(`${fieldName} LIKE ?`);
+        conditions.push(`${columnName} LIKE ?`);
         params.push(`%${value}%`);
       };
 
-      appendLikeCondition("company_name");
-      appendLikeCondition("orderer");
-      appendLikeCondition("business_type");
-      appendLikeCondition("customer_id");
-      appendLikeCondition("sender_id");
-      appendLikeCondition("origin");
-      appendLikeCondition("destination");
+      const appendDateRangeCondition = (fieldName, columnName) => {
+        const exactValue = String(req.query[fieldName] || "").trim();
+        const fromValue = String(req.query[`${fieldName}_from`] || "").trim();
+        const toValue = String(req.query[`${fieldName}_to`] || "").trim();
+
+        if (exactValue) {
+          conditions.push(`DATE(${columnName}) = ?`);
+          params.push(exactValue);
+          return;
+        }
+
+        if (fromValue) {
+          conditions.push(`DATE(${columnName}) >= ?`);
+          params.push(fromValue);
+        }
+
+        if (toValue) {
+          conditions.push(`DATE(${columnName}) <= ?`);
+          params.push(toValue);
+        }
+      };
+
+      appendLikeCondition("company_name", "o.company_name");
+      appendLikeCondition("orderer", "o.orderer");
+      appendLikeCondition("business_type", "o.business_type");
+      appendLikeCondition("customer_id", "o.customer_id");
+      appendLikeCondition("sender_id", "o.sender_id");
+      appendLikeCondition("origin", "o.origin");
+      appendLikeCondition("destination", "o.destination");
+      appendLikeCondition("index_title", "p.customs_title");
+
+      appendDateRangeCondition("pickup_date", "p.pickup_date");
+      appendDateRangeCondition("customs_start_time", "c.customs_start_time");
+      appendDateRangeCondition("tax_payment_time", "c.tax_payment_time");
+      appendDateRangeCondition("release_time", "c.release_time");
+      appendDateRangeCondition("arrival_time", "p.arrival_time");
+      appendDateRangeCondition("complete_docs_send_time", "t.complete_docs_send_time");
 
       const dateFilledStatus = String(req.query.dateFilledStatus || "all").trim();
       if (dateFilledStatus === "filled") {
-        conditions.push("receive_date IS NOT NULL");
+        conditions.push("o.receive_date IS NOT NULL");
       } else if (dateFilledStatus === "unfilled") {
-        conditions.push("receive_date IS NULL");
+        conditions.push("o.receive_date IS NULL");
       }
 
       const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       const [rows] = await db.execute(
-        `SELECT * FROM orders ${whereClause} ORDER BY serial_number DESC`,
+        `SELECT
+           o.*,
+           p.customs_title AS index_title,
+           p.pickup_date AS pickup_date,
+           c.customs_start_time AS customs_start_time,
+           c.tax_payment_time AS tax_payment_time,
+           c.release_time AS release_time,
+           p.arrival_time AS arrival_time,
+           t.complete_docs_send_time AS complete_docs_send_time
+         FROM orders o
+         LEFT JOIN pickup_transport_tracking p ON p.serial_number = o.serial_number
+         LEFT JOIN customs_clearance_tracking c ON c.serial_number = o.serial_number
+         LEFT JOIN transfer t ON t.serial_number = o.serial_number
+         ${whereClause}
+         ORDER BY o.serial_number DESC`,
         params
       );
       res.json({ orders: rows });

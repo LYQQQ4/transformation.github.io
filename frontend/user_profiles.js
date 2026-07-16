@@ -129,6 +129,7 @@
             <input type="file" id="userProfilesExcelFile" accept=".xlsx,.xls">
             <button type="button" onclick="previewUserProfilesExcel()">预览数据</button>
             <button type="button" onclick="importUserProfilesExcelBatch()" style="margin-left: 8px;">批量导入</button>
+            <button type="button" onclick="downloadUserProfilesImportTemplate()" style="margin-left: 8px;">下载 Excel 模板</button>
             <button type="button" onclick="exportUserProfiles()">导出</button>
             <div id="userProfilesImportMessage"></div>
             <div id="userProfilesImportResults" style="display: none;">
@@ -715,6 +716,30 @@
     }
   }
 
+  async function downloadUserProfilesImportTemplate() {
+    try {
+      showImportMessage("正在下载 Excel 模板...", "info");
+      const response = await fetch(`${window.API_BASE}/user-profiles/import-template`);
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.error || "下载模板失败");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "user_profiles_import_template.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showImportMessage("Excel 模板下载成功", "success");
+    } catch (error) {
+      showImportMessage(error.message, "error");
+    }
+  }
+
   function exportUserProfiles() {
     const profiles = filterUserProfiles(getUserProfiles(), currentSearchTerm);
     if (!profiles.length) {
@@ -958,6 +983,7 @@
   window.deleteUserProfile = deleteUserProfile;
   window.previewUserProfilesExcel = previewUserProfilesExcel;
   window.importUserProfilesExcelBatch = importUserProfilesExcelBatch;
+  window.downloadUserProfilesImportTemplate = downloadUserProfilesImportTemplate;
   window.exportUserProfiles = exportUserProfiles;
 
   if (document.readyState === "loading") {
