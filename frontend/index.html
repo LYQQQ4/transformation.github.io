@@ -617,14 +617,18 @@
                                     <th>指令人</th>
                                     <th>业务类型</th>
                                     <th>发件人ID</th>
-                                    <th>收件人ID</th>
+                                    <th>客户ID</th>
                                     <th>接收指令日期</th>
-                                    <th>始发地</th>
+                                    <th>起始地</th>
                                     <th>目的地</th>
                                     <th>贸易术语</th>
                                     <th>货物品名</th>
-                                    <th>备注1</th>
-                                    <th>备注2</th>
+                                    <th>提货时间</th>
+                                    <th>开始报关时间</th>
+                                    <th>付税时间</th>
+                                    <th>放行时间</th>
+                                    <th>到货时间</th>
+                                    <th>完整单据回复时间</th>
                                     <th>操作</th>
                                 </tr>
                             </thead>
@@ -710,18 +714,22 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
-                                    <th>件数</th>
-                                    <th>单件重量</th>
-                                    <th>长</th>
-                                    <th>宽</th>
-                                    <th>高</th>
-                                    <th>体积</th>
-                                    <th>实重</th>
-                                    <th>计费重量</th>
-                                    <th>包装种类</th>
+                                    <th>公司名称</th>
+                                    <th>指令人</th>
+                                    <th>业务类型</th>
+                                    <th>发件人ID</th>
+                                    <th>客户ID</th>
+                                    <th>接收指令日期</th>
+                                    <th>起始地</th>
+                                    <th>目的地</th>
+                                    <th>贸易术语</th>
                                     <th>货物品名</th>
-                                    <th>备注1</th>
-                                    <th>备注2</th>
+                                    <th>运输方式</th>
+                                    <th>运单号</th>
+                                    <th>件数</th>
+                                    <th>重量</th>
+                                    <th>体积</th>
+                                    <th>计费重量</th>
                                     <th>操作</th>
                                 </tr>
                             </thead>
@@ -739,7 +747,7 @@
                             <button onclick="loadPickupTrackings()">加载提货运输跟踪</button>
                             <button onclick="showPickupTrackingForm()">修改提货运输跟踪</button>
                             <div style="display: flex; align-items: center; gap: 8px;">
-                                <input type="text" id="pickupTrackingSearchInput" placeholder="搜索流水号、运单号或供应商..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 220px;">
+                                <input type="text" id="pickupTrackingSearchInput" placeholder="搜索流水号或运单号..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 220px;">
                                 <button onclick="searchPickupTrackings()">搜索</button>
                             </div>
                         </div>
@@ -747,14 +755,21 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
+                                    <th>公司名称</th>
+                                    <th>指令人</th>
+                                    <th>业务类型</th>
+                                    <th>发件人ID</th>
+                                    <th>客户ID</th>
+                                    <th>接收指令日期</th>
+                                    <th>起始地</th>
+                                    <th>目的地</th>
+                                    <th>贸易术语</th>
+                                    <th>货物品名</th>
                                     <th>运输方式</th>
                                     <th>运单号</th>
-                                    <th>始发地</th>
-                                    <th>目的地</th>
                                     <th>报关口岸</th>
                                     <th>提货日期</th>
                                     <th>到货时间</th>
-                                    <th>运输供应商</th>
                                     <th>操作</th>
                                 </tr>
                             </thead>
@@ -780,13 +795,22 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
+                                    <th>公司名称</th>
+                                    <th>指令人</th>
+                                    <th>业务类型</th>
+                                    <th>发件人ID</th>
+                                    <th>客户ID</th>
+                                    <th>接收指令日期</th>
+                                    <th>起始地</th>
+                                    <th>目的地</th>
+                                    <th>贸易术语</th>
+                                    <th>货物品名</th>
+                                    <th>运输方式</th>
+                                    <th>运单号</th>
                                     <th>开始报关时间</th>
                                     <th>付税时间</th>
                                     <th>放行时间</th>
                                     <th>报关单号</th>
-                                    <th>报关供应商</th>
-                                    <th>备注1</th>
-                                    <th>备注2</th>
                                     <th>操作</th>
                                 </tr>
                             </thead>
@@ -818,7 +842,7 @@
                             <button onclick="loadTransfers()">加载送货运输跟踪</button>
                             <button onclick="showTransferForm()">修改送货运输跟踪</button>
                             <div style="display: flex; align-items: center; gap: 8px;">
-                                <input type="text" id="transferSearchInput" placeholder="搜索流水号、运单号或供应商..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 200px;">
+                                <input type="text" id="transferSearchInput" placeholder="搜索流水号或运单号..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 200px;">
                                 <button onclick="searchTransfers()">搜索</button>
                             </div>
                         </div>
@@ -826,16 +850,21 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
+                                    <th>公司名称</th>
+                                    <th>指令人</th>
+                                    <th>业务类型</th>
+                                    <th>发件人ID</th>
+                                    <th>客户ID</th>
+                                    <th>接收指令日期</th>
+                                    <th>起始地</th>
+                                    <th>目的地</th>
+                                    <th>贸易术语</th>
+                                    <th>货物品名</th>
                                     <th>运输方式</th>
                                     <th>运单号</th>
                                     <th>提货日期</th>
                                     <th>到货时间</th>
-                                    <th>运输供应商</th>
-                                    <th>货物流转信息</th>
-                                    <th>增值服务备注</th>
                                     <th>完整单据回复时间</th>
-                                    <th>备注1</th>
-                                    <th>备注2</th>
                                     <th>操作</th>
                                 </tr>
                             </thead>
@@ -1194,20 +1223,16 @@
                     <input type="text" id="filterSenderId">
                 </div>
                 <div class="form-group">
-                    <label>收件人ID:</label>
+                    <label>客户ID:</label>
                     <input type="text" id="filterCustomerId">
                 </div>
                 <div class="form-group">
-                    <label>始发地:</label>
+                    <label>起始地:</label>
                     <input type="text" id="filterOrigin">
                 </div>
                 <div class="form-group">
                     <label>目的地:</label>
                     <input type="text" id="filterDestination">
-                </div>
-                <div class="form-group">
-                    <label>抬头:</label>
-                    <input type="text" id="filterIndexTitle">
                 </div>
                 <div class="form-group">
                     <label>接收指令日期:</label>
@@ -1312,7 +1337,7 @@
                 </div>
                 <div id="senderIdHint" class="info" style="margin: -8px 0 12px 132px; font-size: 12px;"></div>
                 <div class="form-group">
-                    <label>收件人ID:</label>
+                    <label>客户ID:</label>
                     <input type="text" id="customerId" required>
                 </div>
                 <div id="customerIdHint" class="info" style="margin: -8px 0 12px 132px; font-size: 12px;"></div>
@@ -1341,7 +1366,7 @@
                     <input type="text" id="receiverPhone" required>
                 </div>
                 <div class="form-group">
-                    <label>始发地:</label>
+                    <label>起始地:</label>
                     <input type="text" id="origin" required>
                 </div>
                 <div class="form-group">

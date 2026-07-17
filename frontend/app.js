@@ -629,21 +629,18 @@ function ensureOrderIndexStructure() {
                 <th>指令人</th>
                 <th>业务类型</th>
                 <th>发件人ID</th>
-                <th>收件人ID</th>
+                <th>客户ID</th>
                 <th>接收指令日期</th>
                 <th>起始地</th>
                 <th>目的地</th>
                 <th>贸易术语</th>
                 <th>货物品名</th>
-                <th>抬头</th>
                 <th>提货时间</th>
                 <th>开始报关时间</th>
                 <th>付税时间</th>
                 <th>放行时间</th>
                 <th>到货时间</th>
                 <th>完整单据回复时间</th>
-                <th>备注1</th>
-                <th>备注2</th>
                 <th>操作</th>
             </tr>
         `;
@@ -669,7 +666,7 @@ function ensureOrderIndexStructure() {
                 <input type="text" id="filterSenderId">
             </div>
             <div class="form-group">
-                <label>收件人ID:</label>
+                <label>客户ID:</label>
                 <input type="text" id="filterCustomerId">
             </div>
             <div class="form-group">
@@ -679,10 +676,6 @@ function ensureOrderIndexStructure() {
             <div class="form-group">
                 <label>目的地:</label>
                 <input type="text" id="filterDestination">
-            </div>
-            <div class="form-group">
-                <label>抬头:</label>
-                <input type="text" id="filterIndexTitle">
             </div>
             <div class="form-group">
                 <label>接收指令日期:</label>
@@ -797,33 +790,26 @@ function renderOrderDetailView(order) {
         return;
     }
 
-    const displayDate = order.receive_date ? String(order.receive_date).split("T")[0].replace(/-/g, "/") : "";
     const serialNumber = order.serial_number || order.id || "";
     currentOrderDetailSerial = serialNumber;
+    const detailItems = [
+        ...buildCommonOrderFieldItems(order, serialNumber),
+        ["提货时间", formatDateOnly(order.pickup_date)],
+        ["开始报关时间", formatDateOnly(order.customs_start_time)],
+        ["付税时间", formatDateOnly(order.tax_payment_time)],
+        ["放行时间", formatDateOnly(order.release_time)],
+        ["到货时间", formatDateOnly(order.arrival_time)],
+        ["完整单据回复时间", formatDateOnly(order.complete_docs_send_time)]
+    ];
 
     detailContent.innerHTML = `
-        <div class="detail-grid">
-            <div><strong>流水号:</strong> ${serialNumber}</div>
-            <div><strong>公司名称:</strong> ${order.company_name || ""}</div>
-            <div><strong>指令人:</strong> ${order.orderer || ""}</div>
-            <div><strong>业务类型:</strong> ${order.business_type || ""}</div>
-            <div><strong>发件人ID:</strong> ${order.sender_id || ""}</div>
-            <div><strong>收件人ID:</strong> ${order.customer_id || ""}</div>
-            <div><strong>接收指令日期:</strong> ${displayDate}</div>
-            <div><strong>始发地:</strong> ${order.origin || ""}</div>
-            <div><strong>目的地:</strong> ${order.destination || ""}</div>
-            <div><strong>贸易术语:</strong> ${order.trade_term || ""}</div>
-            <div><strong>货物品名:</strong> ${order.product_name || ""}</div>
-            <div><strong>发货地址:</strong> ${order.shipping_address || ""}</div>
-            <div><strong>发件人:</strong> ${order.sender_name || ""}</div>
-            <div><strong>发件人电话:</strong> ${order.sender_phone || ""}</div>
-            <div><strong>收货地址:</strong> ${order.delivery_address || ""}</div>
-            <div><strong>收件人:</strong> ${order.receiver_name || ""}</div>
-            <div><strong>收件人电话:</strong> ${order.receiver_phone || ""}</div>
-            <div><strong>备注1:</strong> ${order.remark1 || ""}</div>
-            <div><strong>备注2:</strong> ${order.remark2 || ""}</div>
-        </div>
+        <div class="detail-grid">${buildDetailGridItems(detailItems)}</div>
     `;
+
+    const logisticsSection = document.getElementById("orderLogisticsSection");
+    if (logisticsSection) {
+        logisticsSection.style.display = "none";
+    }
 
     showPage("orderDetail");
     loadOrderPackageDetails(serialNumber);
@@ -845,6 +831,12 @@ function buildEmptyOrderForSerial(serialNumber) {
         destination: "",
         trade_term: "",
         product_name: "",
+        pickup_date: "",
+        customs_start_time: "",
+        tax_payment_time: "",
+        release_time: "",
+        arrival_time: "",
+        complete_docs_send_time: "",
         remark1: "",
         remark2: "",
         shipping_address: "",
@@ -961,6 +953,22 @@ function calculatePackageActualWeightTotal(items) {
     return total > 0 ? total.toFixed(2) : "";
 }
 
+function calculatePackagePiecesTotal(items) {
+    const total = (items || []).reduce((sum, item) => {
+        const pieces = parseFloat(item?.pieces);
+        return sum + (Number.isNaN(pieces) ? 0 : pieces);
+    }, 0);
+    return total > 0 ? String(total) : "";
+}
+
+function calculatePackageVolumeTotal(items) {
+    const total = (items || []).reduce((sum, item) => {
+        const volume = parseFloat(item?.volume || calculatePackageVolume(item));
+        return sum + (Number.isNaN(volume) ? 0 : volume);
+    }, 0);
+    return total > 0 ? total.toFixed(4) : "";
+}
+
 function getPackageChargeWeightValue(items) {
     const chargeWeight = (items || []).find(item => {
         const value = item?.charge_weight;
@@ -989,6 +997,38 @@ function formatPackageItemSummary(items, field) {
     return values.join("<br>") || "";
 }
 
+function buildDetailGridItems(items) {
+    return items.map(([label, value]) => `<div><strong>${label}:</strong> ${escapeHtml(value || "")}</div>`).join("");
+}
+
+function getOrderDisplayOrigin(record) {
+    return record?.order_origin || record?.origin || "";
+}
+
+function getOrderDisplayDestination(record) {
+    return record?.order_destination || record?.destination || "";
+}
+
+function getOrderDisplayProductName(record) {
+    return record?.order_product_name || record?.product_name || "";
+}
+
+function buildCommonOrderFieldItems(record, serialNumber = "") {
+    return [
+        ["流水号", serialNumber || record?.serial_number || record?.id || ""],
+        ["公司名称", record?.company_name || ""],
+        ["指令人", record?.orderer || ""],
+        ["业务类型", record?.business_type || ""],
+        ["发件人ID", record?.sender_id || ""],
+        ["客户ID", record?.customer_id || ""],
+        ["接收指令日期", formatDateOnly(record?.receive_date)],
+        ["起始地", getOrderDisplayOrigin(record)],
+        ["目的地", getOrderDisplayDestination(record)],
+        ["贸易术语", record?.trade_term || ""],
+        ["货物品名", getOrderDisplayProductName(record)]
+    ];
+}
+
 function groupPackagesBySerial(packages) {
     const grouped = new Map();
 
@@ -1000,7 +1040,15 @@ function groupPackagesBySerial(packages) {
                 company_name: pkg.company_name || "",
                 orderer: pkg.orderer || "",
                 business_type: pkg.business_type || "",
+                sender_id: pkg.sender_id || "",
                 customer_id: pkg.customer_id || "",
+                receive_date: pkg.receive_date || "",
+                origin: pkg.origin || "",
+                destination: pkg.destination || "",
+                trade_term: pkg.trade_term || "",
+                order_product_name: pkg.order_product_name || pkg.product_name || "",
+                transport_mode: pkg.transport_mode || "",
+                tracking_number: pkg.tracking_number || "",
                 packages: []
             });
         }
@@ -1021,36 +1069,24 @@ function renderOrderPackageContent(serialNumber, packageData) {
 
     const packageItems = normalizePackageItems(packageData);
     const meaningfulItems = packageItems.filter(packageItemHasContent);
-    const visiblePackageItems = meaningfulItems.length > 0 ? packageItems : [];
     currentOrderPackageData = packageItems.map(item => ({ ...item, serial_number: serialNumber }));
+    const summaryRecord = meaningfulItems[0] || packageItems[0] || {};
     const actualWeightTotal = calculatePackageActualWeightTotal(meaningfulItems);
+    const piecesTotal = calculatePackagePiecesTotal(meaningfulItems);
+    const volumeTotal = calculatePackageVolumeTotal(meaningfulItems);
     const chargeWeightValue = getPackageChargeWeightValue(meaningfulItems);
+    const summaryItems = [
+        ...buildCommonOrderFieldItems(summaryRecord, serialNumber),
+        ["运输方式", summaryRecord.transport_mode || ""],
+        ["运单号", summaryRecord.tracking_number || ""],
+        ["件数", piecesTotal],
+        ["重量", actualWeightTotal || ""],
+        ["体积", volumeTotal || ""],
+        ["计费重量", chargeWeightValue || ""]
+    ];
 
     packageContent.innerHTML = `
-        ${meaningfulItems.length === 0 ? "<div style=\"margin-bottom: 8px; color: #9CA3AF;\">暂无包装信息</div>" : ""}
-        <div class="detail-grid" style="margin-bottom: 16px;">
-            <div><strong>流水号:</strong> ${serialNumber || ""}</div>
-            <div><strong>包装数量:</strong> ${meaningfulItems.length || 1}</div>
-            <div><strong>实重:</strong> ${actualWeightTotal || ""}</div>
-            <div><strong>计费重量:</strong> ${chargeWeightValue || ""}</div>
-        </div>
-        ${visiblePackageItems.map(item => `
-            <div style="border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
-                <div class="detail-grid">
-                    <div><strong>件数:</strong> ${item.pieces || ""}</div>
-                    <div><strong>单件重量:</strong> ${item.single_weight || ""}</div>
-                    <div><strong>长:</strong> ${item.length || ""}</div>
-                    <div><strong>宽:</strong> ${item.width || ""}</div>
-                    <div><strong>高:</strong> ${item.height || ""}</div>
-                    <div><strong>体积:</strong> ${item.volume || calculatePackageVolume(item)}</div>
-                    <div><strong>实重:</strong> ${calculatePackageItemActualWeight(item) ? calculatePackageItemActualWeight(item).toFixed(2) : ""}</div>
-                    <div><strong>包装种类:</strong> ${item.package_type || ""}</div>
-                    <div><strong>货物品名:</strong> ${item.product_name || ""}</div>
-                    <div><strong>备注1:</strong> ${item.remark1 || ""}</div>
-                    <div><strong>备注2:</strong> ${item.remark2 || ""}</div>
-                </div>
-            </div>
-        `).join("")}
+        <div class="detail-grid">${buildDetailGridItems(summaryItems)}</div>
     `;
 }
 
@@ -1115,26 +1151,17 @@ function renderOrderPickupTrackingContent(serialNumber, trackingData) {
     currentOrderPickupTrackingData = trackingData ? { ...trackingData, serial_number: serialNumber } : null;
     const hasTracking = Boolean(trackingData);
     const info = trackingData || {};
+    const detailItems = [
+        ...buildCommonOrderFieldItems(info, serialNumber),
+        ["运输方式", info.transport_mode || ""],
+        ["运单号", info.tracking_number || ""],
+        ["报关口岸", info.customs_port || ""],
+        ["提货日期", formatDateOnly(info.pickup_date)],
+        ["到货时间", formatDateOnly(info.arrival_time)]
+    ];
 
     trackingContent.innerHTML = `
-        ${hasTracking ? "" : "<div style=\"margin-bottom: 8px; color: #9CA3AF;\">暂无提货运输跟踪信息</div>"}
-        <div class="detail-grid">
-            <div><strong>流水号:</strong> ${serialNumber || ""}</div>
-            <div><strong>运输方式:</strong> ${info.transport_mode || ""}</div>
-            <div><strong>运单号:</strong> ${info.tracking_number || ""}</div>
-            <div><strong>始发地:</strong> ${info.origin || ""}</div>
-            <div><strong>目的地:</strong> ${info.destination || ""}</div>
-            <div><strong>报关口岸:</strong> ${info.customs_port || ""}</div>
-            <div><strong>报关抬头:</strong> ${info.customs_title || ""}</div>
-            <div><strong>提货日期:</strong> ${formatDateOnly(info.pickup_date)}</div>
-            <div><strong>到货时间:</strong> ${formatDateOnly(info.arrival_time)}</div>
-            <div><strong>运输供应商:</strong> ${info.transport_supplier || ""}</div>
-            <div><strong>合同协议号:</strong> ${info.contract_number || ""}</div>
-            <div><strong>货物流转信息:</strong> ${info.cargo_flow_info || ""}</div>
-            <div><strong>增值服务备注:</strong> ${info.value_added_services || ""}</div>
-            <div><strong>备注1:</strong> ${info.remark1 || ""}</div>
-            <div><strong>备注2:</strong> ${info.remark2 || ""}</div>
-        </div>
+        <div class="detail-grid">${buildDetailGridItems(detailItems)}</div>
     `;
 }
 
@@ -1193,22 +1220,17 @@ function renderOrderDeliveryTrackingContent(serialNumber, deliveryData) {
     currentOrderDeliveryTrackingData = deliveryData ? { ...deliveryData, serial_number: serialNumber } : null;
     const hasDelivery = Boolean(deliveryData);
     const info = deliveryData || {};
+    const detailItems = [
+        ...buildCommonOrderFieldItems(info, serialNumber),
+        ["运输方式", info.transport_mode || ""],
+        ["运单号", info.tracking_number || ""],
+        ["提货日期", formatDateOnly(info.pickup_date)],
+        ["到货时间", formatDateOnly(info.arrival_port_time)],
+        ["完整单据回复时间", formatDateOnly(info.complete_docs_send_time)]
+    ];
 
     deliveryContent.innerHTML = `
-        ${hasDelivery ? "" : "<div style=\"margin-bottom: 8px; color: #9CA3AF;\">暂无送货运输跟踪信息</div>"}
-        <div class="detail-grid">
-            <div><strong>流水号:</strong> ${serialNumber || ""}</div>
-            <div><strong>运输方式:</strong> ${info.transport_mode || ""}</div>
-            <div><strong>运单号:</strong> ${info.tracking_number || ""}</div>
-            <div><strong>提货日期:</strong> ${formatDateOnly(info.pickup_date)}</div>
-            <div><strong>到货时间:</strong> ${formatDateOnly(info.arrival_port_time)}</div>
-            <div><strong>运输供应商:</strong> ${info.supplier || ""}</div>
-            <div><strong>货物流转信息:</strong> ${info.cargo_flow_info || ""}</div>
-            <div><strong>增值服务备注:</strong> ${info.value_added_services || ""}</div>
-            <div><strong>完整单据回复时间:</strong> ${formatDateOnly(info.complete_docs_send_time)}</div>
-            <div><strong>备注1:</strong> ${info.remark1 || ""}</div>
-            <div><strong>备注2:</strong> ${info.remark2 || ""}</div>
-        </div>
+        <div class="detail-grid">${buildDetailGridItems(detailItems)}</div>
     `;
 }
 
@@ -1218,25 +1240,22 @@ function renderOrderLogisticsContent(serialNumber, logisticsData) {
         return;
     }
 
-    const hasLogistics = Boolean(logisticsData);
     const info = logisticsData || {};
+    const detailItems = [
+        ...buildCommonOrderFieldItems(info, serialNumber),
+        ["运输方式", info.transport_mode || ""],
+        ["运单号", info.tracking_number || ""],
+        ["提货日期", formatDateOnly(info.pickup_date)],
+        ["到货时间", formatDateOnly(info.arrival_port_time)],
+        ["完整单据回复时间", formatDateOnly(info.complete_docs_send_time)],
+        ["运输供应商", info.supplier || ""],
+        ["货物流转信息", info.cargo_flow_info || ""],
+        ["增值服务备注", info.value_added_services || ""],
+        ["备注1", info.remark1 || ""],
+        ["备注2", info.remark2 || ""]
+    ];
 
-    logisticsContent.innerHTML = `
-        ${hasLogistics ? "" : "<div style=\"margin-bottom: 8px; color: #9CA3AF;\">暂无物流信息</div>"}
-        <div class="detail-grid">
-            <div><strong>流水号:</strong> ${serialNumber || ""}</div>
-            <div><strong>运输方式:</strong> ${info.transport_mode || ""}</div>
-            <div><strong>运单号:</strong> ${info.tracking_number || ""}</div>
-            <div><strong>提货日期:</strong> ${formatDateOnly(info.pickup_date)}</div>
-            <div><strong>到货时间:</strong> ${formatDateOnly(info.arrival_port_time)}</div>
-            <div><strong>完整单据回复时间:</strong> ${formatDateOnly(info.complete_docs_send_time)}</div>
-            <div><strong>运输供应商:</strong> ${info.supplier || ""}</div>
-            <div><strong>货物流转信息:</strong> ${info.cargo_flow_info || ""}</div>
-            <div><strong>增值服务备注:</strong> ${info.value_added_services || ""}</div>
-            <div><strong>备注1:</strong> ${info.remark1 || ""}</div>
-            <div><strong>备注2:</strong> ${info.remark2 || ""}</div>
-        </div>
-    `;
+    logisticsContent.innerHTML = `<div class="detail-grid">${buildDetailGridItems(detailItems)}</div>`;
 }
 
 async function loadOrderDeliveryTrackingDetails(serialNumber) {
@@ -1299,19 +1318,18 @@ function renderOrderCustomsClearanceContent(serialNumber, customsData) {
     currentOrderCustomsClearanceData = customsData ? { ...customsData, serial_number: serialNumber } : null;
     const hasCustoms = Boolean(customsData);
     const info = customsData || {};
+    const detailItems = [
+        ...buildCommonOrderFieldItems(info, serialNumber),
+        ["运输方式", info.transport_mode || ""],
+        ["运单号", info.tracking_number || ""],
+        ["开始报关时间", formatDateOnly(info.customs_start_time)],
+        ["付税时间", formatDateOnly(info.tax_payment_time)],
+        ["放行时间", formatDateOnly(info.release_time)],
+        ["报关单号", info.customs_declaration_number || ""]
+    ];
 
     customsContent.innerHTML = `
-        ${hasCustoms ? "" : "<div style=\"margin-bottom: 8px; color: #9CA3AF;\">暂无报关信息</div>"}
-        <div class="detail-grid">
-            <div><strong>流水号:</strong> ${serialNumber || ""}</div>
-            <div><strong>开始报关时间:</strong> ${formatDateOnly(info.customs_start_time)}</div>
-            <div><strong>付税时间:</strong> ${formatDateOnly(info.tax_payment_time)}</div>
-            <div><strong>放行时间:</strong> ${formatDateOnly(info.release_time)}</div>
-            <div><strong>报关单号:</strong> ${info.customs_declaration_number || ""}</div>
-            <div><strong>报关供应商:</strong> ${info.customs_supplier || ""}</div>
-            <div><strong>备注1:</strong> ${info.remark1 || ""}</div>
-            <div><strong>备注2:</strong> ${info.remark2 || ""}</div>
-        </div>
+        <div class="detail-grid">${buildDetailGridItems(detailItems)}</div>
     `;
 }
 
@@ -1867,9 +1885,7 @@ async function loadAndFilterOrders() {
                     order.origin.toLowerCase().includes(searchLower) ||
                     order.destination.toLowerCase().includes(searchLower) ||
                     (order.trade_term && order.trade_term.toLowerCase().includes(searchLower)) ||
-                    (order.product_name && order.product_name.toLowerCase().includes(searchLower)) ||
-                    (order.remark1 && order.remark1.toLowerCase().includes(searchLower)) ||
-                    (order.remark2 && order.remark2.toLowerCase().includes(searchLower))
+                    (order.product_name && order.product_name.toLowerCase().includes(searchLower))
                 );
             });
         }
@@ -1890,21 +1906,18 @@ function ensureOrderIndexStructure() {
                 <th>指令人</th>
                 <th>业务类型</th>
                 <th>发件人ID</th>
-                <th>收件人ID</th>
+                <th>客户ID</th>
                 <th>接收指令日期</th>
                 <th>起始地</th>
                 <th>目的地</th>
                 <th>贸易术语</th>
                 <th>货物品名</th>
-                <th>抬头</th>
                 <th>提货时间</th>
                 <th>开始报关时间</th>
                 <th>付税时间</th>
                 <th>放行时间</th>
                 <th>到货时间</th>
                 <th>完整单据回复时间</th>
-                <th>备注1</th>
-                <th>备注2</th>
                 <th>操作</th>
             </tr>
         `;
@@ -1930,7 +1943,7 @@ function ensureOrderIndexStructure() {
                 <input type="text" id="filterSenderId">
             </div>
             <div class="form-group">
-                <label>收件人ID:</label>
+                <label>客户ID:</label>
                 <input type="text" id="filterCustomerId">
             </div>
             <div class="form-group">
@@ -1940,10 +1953,6 @@ function ensureOrderIndexStructure() {
             <div class="form-group">
                 <label>目的地:</label>
                 <input type="text" id="filterDestination">
-            </div>
-            <div class="form-group">
-                <label>抬头:</label>
-                <input type="text" id="filterIndexTitle">
             </div>
             <div class="form-group">
                 <label>接收指令日期:</label>
@@ -1999,15 +2008,12 @@ function displayOrders(orders) {
             <td>${order.destination || ""}</td>
             <td>${order.trade_term || ""}</td>
             <td>${order.product_name || ""}</td>
-            <td>${order.index_title || ""}</td>
             <td>${formatDateOnly(order.pickup_date)}</td>
             <td>${formatDateOnly(order.customs_start_time)}</td>
             <td>${formatDateOnly(order.tax_payment_time)}</td>
             <td>${formatDateOnly(order.release_time)}</td>
             <td>${formatDateOnly(order.arrival_time)}</td>
             <td>${formatDateOnly(order.complete_docs_send_time)}</td>
-            <td>${order.remark1 || ""}</td>
-            <td>${order.remark2 || ""}</td>
             <td>
                 <button onclick="editOrder(${order.id})">编辑</button>
                 <button onclick="deleteOrder(${order.id})">删除</button>
@@ -2031,7 +2037,6 @@ function applyFilters() {
         customer_id: getFilterInputValue("filterCustomerId"),
         origin: getFilterInputValue("filterOrigin"),
         destination: getFilterInputValue("filterDestination"),
-        index_title: getFilterInputValue("filterIndexTitle"),
         pickup_date_filled_status: getFilterInputValue("filterPickupDateFilledStatus"),
         customs_start_time_filled_status: getFilterInputValue("filterCustomsStartTimeFilledStatus"),
         tax_payment_time_filled_status: getFilterInputValue("filterTaxPaymentTimeFilledStatus"),
@@ -2090,10 +2095,7 @@ async function loadAndFilterOrders() {
                     order.origin,
                     order.destination,
                     order.trade_term,
-                    order.product_name,
-                    order.index_title,
-                    order.remark1,
-                    order.remark2
+                    order.product_name
                 ].some(value => value && String(value).toLowerCase().includes(searchLower));
             });
         }
@@ -3089,19 +3091,22 @@ function ensurePackagingPageStructure() {
             <thead>
                 <tr>
                     <th>流水号</th>
-                    <th>箱型ID</th>
+                    <th>公司名称</th>
+                    <th>指令人</th>
+                    <th>业务类型</th>
+                    <th>发件人ID</th>
+                    <th>客户ID</th>
+                    <th>接收指令日期</th>
+                    <th>起始地</th>
+                    <th>目的地</th>
+                    <th>贸易术语</th>
+                    <th>货物品名</th>
+                    <th>运输方式</th>
+                    <th>运单号</th>
                     <th>件数</th>
-                    <th>单件重量</th>
-                    <th>长(cm)</th>
-                    <th>宽(cm)</th>
-                    <th>高(cm)</th>
-                    <th>体积(m³)</th>
-                    <th>实重</th>
+                    <th>重量</th>
+                    <th>体积</th>
                     <th>计费重量</th>
-                    <th>包装类型</th>
-                    <th>品名</th>
-                    <th>备注1</th>
-                    <th>备注2</th>
                     <th>操作</th>
                 </tr>
             </thead>
@@ -3207,7 +3212,12 @@ async function ensurePackageBoxTypesLoaded(forceReload = false) {
 }
 
 function buildPackageBoxTypeOptions(selectedValue = "") {
-    const options = ['<option value="">手动填写</option>'];
+    const options = ['<option value="">请选择箱型ID</option>'];
+    const normalizedSelectedValue = String(selectedValue || "").trim();
+    const matchedSelectedValue = packageBoxTypes.some(boxType => String(boxType.box_type_id || "").trim() === normalizedSelectedValue);
+    if (normalizedSelectedValue && !matchedSelectedValue) {
+        options.push(`<option value="${escapeHtml(normalizedSelectedValue)}" selected>${escapeHtml(normalizedSelectedValue)}</option>`);
+    }
     packageBoxTypes.forEach(boxType => {
         const selected = boxType.box_type_id === selectedValue ? "selected" : "";
         const label = `${escapeHtml(boxType.box_type_id)}${boxType.package_type ? ` / ${escapeHtml(boxType.package_type)}` : ""}`;
@@ -3216,9 +3226,118 @@ function buildPackageBoxTypeOptions(selectedValue = "") {
     return options.join("");
 }
 
+function normalizePackageSnapshotMetric(value) {
+    const parsed = parseFloat(value);
+    return Number.isNaN(parsed) ? null : Number(parsed.toFixed(4));
+}
+
+function shouldUseManualBoxTypeInput(item = {}) {
+    const boxTypeId = String(item?.box_type_id || "").trim();
+    if (!boxTypeId) {
+        return false;
+    }
+
+    const boxType = getBoxTypeById(boxTypeId);
+    if (!boxType) {
+        return true;
+    }
+
+    if (String(item.package_type || "").trim() !== String(boxType.package_type || "").trim()) {
+        return true;
+    }
+
+    return ["length", "width", "height"].some(field => {
+        const currentValue = normalizePackageSnapshotMetric(item[field]);
+        const snapshotValue = normalizePackageSnapshotMetric(boxType[`${field}_cm`]);
+        return currentValue !== snapshotValue;
+    });
+}
+
+function getPackageBoxTypeMode(item = {}) {
+    void item;
+    return "select";
+}
+
+function renderPackageBoxTypeControl(item) {
+    const boxTypeId = item?.box_type_id || "";
+    const mode = getPackageBoxTypeMode(item);
+    const selectStyle = mode === "manual" ? 'style="display:none;"' : "";
+    const inputStyle = mode === "select" ? 'style="display:none;"' : "";
+    const switchMode = mode === "manual" ? "select" : "manual";
+    const switchLabel = mode === "manual" ? "使用下拉" : "手动填写";
+
+    return `
+        <div class="package-box-type-mode" data-box-type-mode="${mode}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select class="package-box-type-select" ${selectStyle}>${buildPackageBoxTypeOptions(boxTypeId)}</select>
+            <input type="text" class="package-box-type-input" value="${escapeHtml(boxTypeId)}" ${inputStyle}>
+            <button type="button" class="package-box-type-switch" data-mode="${switchMode}">${switchLabel}</button>
+        </div>
+    `;
+}
+
+function getPackageBoxTypeModeValue(card) {
+    return card?.querySelector(".package-box-type-mode")?.dataset.boxTypeMode || "select";
+}
+
+function getPackageBoxTypeValue(card) {
+    if (!card) {
+        return "";
+    }
+
+    const mode = getPackageBoxTypeModeValue(card);
+    const select = card.querySelector(".package-box-type-select");
+    const input = card.querySelector(".package-box-type-input");
+    return mode === "manual" ? (input?.value || "") : (select?.value || "");
+}
+
+function setPackageBoxTypeMode(card, mode) {
+    if (!card) {
+        return;
+    }
+
+    const container = card.querySelector(".package-box-type-mode");
+    const select = card.querySelector(".package-box-type-select");
+    const input = card.querySelector(".package-box-type-input");
+    const button = card.querySelector(".package-box-type-switch");
+    if (!container || !select || !input || !button) {
+        return;
+    }
+
+    if (mode === "manual") {
+        input.value = input.value || select.value || "";
+        select.style.display = "none";
+        input.style.display = "";
+        button.dataset.mode = "select";
+        button.textContent = "使用下拉";
+    } else {
+        const manualValue = input.value || "";
+        if ([...select.options].some(option => option.value === manualValue)) {
+            select.value = manualValue;
+        }
+        select.style.display = "";
+        input.style.display = "none";
+        button.dataset.mode = "manual";
+        button.textContent = "手动填写";
+    }
+
+    container.dataset.boxTypeMode = mode;
+}
+
 function applyBoxTypeSnapshot(card, boxTypeId) {
     const boxType = getBoxTypeById(boxTypeId);
-    if (!card || !boxType) {
+    if (!card) {
+        return;
+    }
+
+    const select = card.querySelector(".package-box-type-select");
+    const input = card.querySelector(".package-box-type-input");
+    if (select) {
+        select.value = boxTypeId || "";
+    }
+    if (input) {
+        input.value = boxTypeId || "";
+    }
+    if (!boxType) {
         return;
     }
 
@@ -3238,6 +3357,18 @@ function applyBoxTypeSnapshot(card, boxTypeId) {
     });
 
     updatePackageCardVolume(card);
+}
+
+function switchPackageBoxTypeToManual(card) {
+    if (getPackageBoxTypeModeValue(card) !== "manual") {
+        setPackageBoxTypeMode(card, "manual");
+    }
+}
+
+function switchPackageBoxTypeToSelect(card) {
+    if (getPackageBoxTypeModeValue(card) !== "select") {
+        setPackageBoxTypeMode(card, "select");
+    }
 }
 
 function togglePackageItemDetails(card) {
@@ -3274,9 +3405,9 @@ function buildPackageFormItemHtml(item, index) {
                     ${order === 1 ? "" : `<button type="button" class="remove-package-item" data-package-index="${order}">删除</button>`}
                 </div>
             </div>
-            <div class="form-group">
+            <div class="form-group package-box-type-control">
                 <label>箱型ID:</label>
-                <select data-field="box_type_id" class="package-box-type-select">${buildPackageBoxTypeOptions(normalizedItem.box_type_id)}</select>
+                ${renderPackageBoxTypeControl(normalizedItem)}
             </div>
             <div class="form-group">
                 <label>件数:</label>
@@ -3351,6 +3482,7 @@ function serializePackageFormItems(form) {
         card.querySelectorAll("[data-field]").forEach(field => {
             item[field.dataset.field] = field.value;
         });
+        item.box_type_id = getPackageBoxTypeValue(card).trim();
         item.package_order = order;
         item.package_label = `包装${order}`;
         item.volume = item.volume || calculatePackageVolume(item);
@@ -3390,19 +3522,22 @@ function displayPackages(packages) {
         const row = tbody.insertRow();
         row.innerHTML = `
             <td>${escapeHtml(group.serial_number || "")}</td>
-            <td>${formatPackageSummary(group.packages, "box_type_id")}</td>
-            <td>${formatPackageSummary(group.packages, "pieces")}</td>
-            <td>${formatPackageSummary(group.packages, "single_weight", value => escapeHtml(value || ""))}</td>
-            <td>${formatPackageSummary(group.packages, "length", formatPackageDimension)}</td>
-            <td>${formatPackageSummary(group.packages, "width", formatPackageDimension)}</td>
-            <td>${formatPackageSummary(group.packages, "height", formatPackageDimension)}</td>
-            <td>${formatPackageSummary(group.packages, "volume", value => escapeHtml(value || ""))}</td>
+            <td>${escapeHtml(group.company_name || "")}</td>
+            <td>${escapeHtml(group.orderer || "")}</td>
+            <td>${escapeHtml(group.business_type || "")}</td>
+            <td>${escapeHtml(group.sender_id || "")}</td>
+            <td>${escapeHtml(group.customer_id || "")}</td>
+            <td>${escapeHtml(formatDateOnly(group.receive_date))}</td>
+            <td>${escapeHtml(getOrderDisplayOrigin(group))}</td>
+            <td>${escapeHtml(getOrderDisplayDestination(group))}</td>
+            <td>${escapeHtml(group.trade_term || "")}</td>
+            <td>${escapeHtml(getOrderDisplayProductName(group))}</td>
+            <td>${escapeHtml(group.transport_mode || "")}</td>
+            <td>${escapeHtml(group.tracking_number || "")}</td>
+            <td>${escapeHtml(calculatePackagePiecesTotal(group.packages) || "")}</td>
             <td>${escapeHtml(calculatePackageActualWeightTotal(group.packages) || "")}</td>
+            <td>${escapeHtml(calculatePackageVolumeTotal(group.packages) || "")}</td>
             <td>${escapeHtml(getPackageChargeWeightValue(group.packages) || "")}</td>
-            <td>${formatPackageSummary(group.packages, "package_type")}</td>
-            <td>${formatPackageSummary(group.packages, "product_name")}</td>
-            <td>${formatPackageSummary(group.packages, "remark1")}</td>
-            <td>${formatPackageSummary(group.packages, "remark2")}</td>
             <td><button type="button" onclick="editPackage('${escapeHtml(group.serial_number || "")}')">编辑</button></td>
         `;
     });
@@ -3424,6 +3559,17 @@ async function loadPackages() {
             const searchLower = currentPackageSearchTerm.toLowerCase();
             groupedPackages = groupedPackages.filter(group =>
                 (group.serial_number && group.serial_number.toLowerCase().includes(searchLower)) ||
+                (group.company_name && group.company_name.toLowerCase().includes(searchLower)) ||
+                (group.orderer && group.orderer.toLowerCase().includes(searchLower)) ||
+                (group.business_type && group.business_type.toLowerCase().includes(searchLower)) ||
+                (group.sender_id && group.sender_id.toLowerCase().includes(searchLower)) ||
+                (group.customer_id && group.customer_id.toLowerCase().includes(searchLower)) ||
+                (group.trade_term && group.trade_term.toLowerCase().includes(searchLower)) ||
+                (getOrderDisplayOrigin(group) && getOrderDisplayOrigin(group).toLowerCase().includes(searchLower)) ||
+                (getOrderDisplayDestination(group) && getOrderDisplayDestination(group).toLowerCase().includes(searchLower)) ||
+                (getOrderDisplayProductName(group) && getOrderDisplayProductName(group).toLowerCase().includes(searchLower)) ||
+                (group.transport_mode && group.transport_mode.toLowerCase().includes(searchLower)) ||
+                (group.tracking_number && group.tracking_number.toLowerCase().includes(searchLower)) ||
                 group.packages.some(item =>
                     (item.box_type_id && item.box_type_id.toLowerCase().includes(searchLower)) ||
                     (item.product_name && item.product_name.toLowerCase().includes(searchLower)) ||
@@ -3602,6 +3748,20 @@ async function showPackageForm(packageData = null) {
             return;
         }
 
+        const switchButton = event.target.closest(".package-box-type-switch");
+        if (switchButton) {
+            const card = switchButton.closest(".package-item-card");
+            if (!card) {
+                return;
+            }
+            if (switchButton.dataset.mode === "manual") {
+                switchPackageBoxTypeToManual(card);
+            } else {
+                switchPackageBoxTypeToSelect(card);
+            }
+            return;
+        }
+
         const removeButton = event.target.closest(".remove-package-item");
         if (removeButton) {
             const removeIndex = Number.parseInt(removeButton.dataset.packageIndex, 10);
@@ -3617,6 +3777,7 @@ async function showPackageForm(packageData = null) {
         }
 
         if (event.target.matches(".package-box-type-select")) {
+            setPackageBoxTypeMode(card, "select");
             applyBoxTypeSnapshot(card, event.target.value);
             updatePackageFormTotal(form);
         }
@@ -3628,6 +3789,9 @@ async function showPackageForm(packageData = null) {
             return;
         }
 
+        if (["package_type", "length", "width", "height"].includes(event.target.dataset.field)) {
+            switchPackageBoxTypeToManual(card);
+        }
         if (["pieces", "single_weight", "length", "width", "height"].includes(event.target.dataset.field)) {
             updatePackageCardVolume(card);
         }
@@ -4056,14 +4220,21 @@ function displayPickupTrackings(trackings) {
         const row = tbody.insertRow();
         row.innerHTML = `
             <td>${item.serial_number || ""}</td>
+            <td>${item.company_name || ""}</td>
+            <td>${item.orderer || ""}</td>
+            <td>${item.business_type || ""}</td>
+            <td>${item.sender_id || ""}</td>
+            <td>${item.customer_id || ""}</td>
+            <td>${formatDateOnly(item.receive_date)}</td>
+            <td>${getOrderDisplayOrigin(item)}</td>
+            <td>${getOrderDisplayDestination(item)}</td>
+            <td>${item.trade_term || ""}</td>
+            <td>${getOrderDisplayProductName(item)}</td>
             <td>${item.transport_mode || ""}</td>
             <td>${item.tracking_number || ""}</td>
-            <td>${item.origin || ""}</td>
-            <td>${item.destination || ""}</td>
             <td>${item.customs_port || ""}</td>
             <td>${formatDateOnly(item.pickup_date)}</td>
             <td>${formatDateOnly(item.arrival_time)}</td>
-            <td>${item.transport_supplier || ""}</td>
             <td><button onclick="editPickupTracking('${item.serial_number || ""}')">编辑</button></td>
         `;
     });
@@ -4111,20 +4282,8 @@ function showPickupTrackingForm(trackingData = null) {
                     <input type="text" id="pickupTrackingNumber">
                 </div>
                 <div class="form-group">
-                    <label>始发地:</label>
-                    <input type="text" id="pickupTrackingOrigin">
-                </div>
-                <div class="form-group">
-                    <label>目的地:</label>
-                    <input type="text" id="pickupTrackingDestination">
-                </div>
-                <div class="form-group">
                     <label>报关口岸:</label>
                     <input type="text" id="pickupTrackingCustomsPort">
-                </div>
-                <div class="form-group">
-                    <label>报关抬头:</label>
-                    <input type="text" id="pickupTrackingCustomsTitle">
                 </div>
                 <div class="form-group">
                     <label>提货日期:</label>
@@ -4150,30 +4309,15 @@ function showPickupTrackingForm(trackingData = null) {
                         <input type="date" id="pickupTrackingArrivalTimePicker" class="date-picker-trigger" aria-label="选择到货时间">
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>运输供应商:</label>
-                    <input type="text" id="pickupTrackingTransportSupplier">
-                </div>
-                <div class="form-group">
-                    <label>合同协议号:</label>
-                    <input type="text" id="pickupTrackingContractNumber">
-                </div>
-                <div class="form-group">
-                    <label>货物流转信息:</label>
-                    <textarea id="pickupTrackingCargoFlowInfo"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>增值服务备注:</label>
-                    <textarea id="pickupTrackingValueAddedServices"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>备注1:</label>
-                    <textarea id="pickupTrackingRemark1"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>备注2:</label>
-                    <textarea id="pickupTrackingRemark2"></textarea>
-                </div>
+                <input type="hidden" id="pickupTrackingOrigin">
+                <input type="hidden" id="pickupTrackingDestination">
+                <input type="hidden" id="pickupTrackingCustomsTitle">
+                <input type="hidden" id="pickupTrackingTransportSupplier">
+                <input type="hidden" id="pickupTrackingContractNumber">
+                <textarea id="pickupTrackingCargoFlowInfo" style="display:none;"></textarea>
+                <textarea id="pickupTrackingValueAddedServices" style="display:none;"></textarea>
+                <textarea id="pickupTrackingRemark1" style="display:none;"></textarea>
+                <textarea id="pickupTrackingRemark2" style="display:none;"></textarea>
                 <div class="button-group">
                     <button type="button" onclick="savePickupTracking()">保存</button>
                     <button type="button" onclick="hidePickupTrackingForm()">取消</button>
@@ -4362,8 +4506,16 @@ async function loadAndFilterPickupTrackings() {
             const searchLower = currentPickupTrackingSearchTerm.toLowerCase();
             filtered = filtered.filter(item => (
                 (item.serial_number && item.serial_number.toLowerCase().includes(searchLower)) ||
-                (item.tracking_number && item.tracking_number.toLowerCase().includes(searchLower)) ||
-                (item.transport_supplier && item.transport_supplier.toLowerCase().includes(searchLower))
+                (item.company_name && item.company_name.toLowerCase().includes(searchLower)) ||
+                (item.orderer && item.orderer.toLowerCase().includes(searchLower)) ||
+                (item.business_type && item.business_type.toLowerCase().includes(searchLower)) ||
+                (item.sender_id && item.sender_id.toLowerCase().includes(searchLower)) ||
+                (item.customer_id && item.customer_id.toLowerCase().includes(searchLower)) ||
+                (item.trade_term && item.trade_term.toLowerCase().includes(searchLower)) ||
+                (getOrderDisplayOrigin(item) && getOrderDisplayOrigin(item).toLowerCase().includes(searchLower)) ||
+                (getOrderDisplayDestination(item) && getOrderDisplayDestination(item).toLowerCase().includes(searchLower)) ||
+                (getOrderDisplayProductName(item) && getOrderDisplayProductName(item).toLowerCase().includes(searchLower)) ||
+                (item.tracking_number && item.tracking_number.toLowerCase().includes(searchLower))
             ));
         }
 
@@ -4403,16 +4555,21 @@ function displayTransfers(transfers) {
 
         row.innerHTML = `
             <td>${transfer.serial_number}</td>
+            <td>${transfer.company_name || ""}</td>
+            <td>${transfer.orderer || ""}</td>
+            <td>${transfer.business_type || ""}</td>
+            <td>${transfer.sender_id || ""}</td>
+            <td>${transfer.customer_id || ""}</td>
+            <td>${formatDate(transfer.receive_date)}</td>
+            <td>${getOrderDisplayOrigin(transfer)}</td>
+            <td>${getOrderDisplayDestination(transfer)}</td>
+            <td>${transfer.trade_term || ""}</td>
+            <td>${getOrderDisplayProductName(transfer)}</td>
             <td>${transfer.transport_mode || ""}</td>
             <td>${transfer.tracking_number || ""}</td>
             <td>${formatDate(transfer.pickup_date)}</td>
             <td>${formatDate(transfer.arrival_port_time)}</td>
-            <td>${transfer.supplier || ""}</td>
-            <td>${transfer.cargo_flow_info || ""}</td>
-            <td>${transfer.value_added_services || ""}</td>
             <td>${formatDate(transfer.complete_docs_send_time)}</td>
-            <td>${transfer.remark1 || ""}</td>
-            <td>${transfer.remark2 || ""}</td>
             <td>
                 <button onclick="editTransfer('${transfer.serial_number}')">编辑</button>
             </td>
@@ -4498,26 +4655,11 @@ function showTransferForm(transferData = null) {
                         <input type="date" id="transferCompleteDocsSendTimePicker" class="date-picker-trigger" aria-label="选择完整单据回复时间">
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>货物流转信息:</label>
-                    <textarea id="transferCargoFlowInfo"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>运输供应商:</label>
-                    <input type="text" id="transferSupplier">
-                </div>
-                <div class="form-group">
-                    <label>增值服务备注:</label>
-                    <textarea id="transferValueAddedServices"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>备注1:</label>
-                    <textarea id="transferRemark1"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>备注2:</label>
-                    <textarea id="transferRemark2"></textarea>
-                </div>
+                <textarea id="transferCargoFlowInfo" style="display:none;"></textarea>
+                <input type="hidden" id="transferSupplier">
+                <textarea id="transferValueAddedServices" style="display:none;"></textarea>
+                <textarea id="transferRemark1" style="display:none;"></textarea>
+                <textarea id="transferRemark2" style="display:none;"></textarea>
                 <div class="button-group">
                     <button type="button" onclick="saveTransfer()">保存</button>
                     <button type="button" onclick="hideTransferForm()">取消</button>
@@ -4713,10 +4855,17 @@ async function loadAndFilterTransfers() {
                 const searchLower = currentTransferSearchTerm.toLowerCase();
                 return (
                     transfer.serial_number.toLowerCase().includes(searchLower) ||
+                    (transfer.company_name && transfer.company_name.toLowerCase().includes(searchLower)) ||
+                    (transfer.orderer && transfer.orderer.toLowerCase().includes(searchLower)) ||
+                    (transfer.business_type && transfer.business_type.toLowerCase().includes(searchLower)) ||
+                    (transfer.sender_id && transfer.sender_id.toLowerCase().includes(searchLower)) ||
+                    (transfer.customer_id && transfer.customer_id.toLowerCase().includes(searchLower)) ||
+                    (transfer.trade_term && transfer.trade_term.toLowerCase().includes(searchLower)) ||
+                    (getOrderDisplayOrigin(transfer) && getOrderDisplayOrigin(transfer).toLowerCase().includes(searchLower)) ||
+                    (getOrderDisplayDestination(transfer) && getOrderDisplayDestination(transfer).toLowerCase().includes(searchLower)) ||
+                    (getOrderDisplayProductName(transfer) && getOrderDisplayProductName(transfer).toLowerCase().includes(searchLower)) ||
                     transfer.tracking_number.toLowerCase().includes(searchLower) ||
-                    (transfer.transport_mode && transfer.transport_mode.toLowerCase().includes(searchLower)) ||
-                    (transfer.contract_number && transfer.contract_number.toLowerCase().includes(searchLower)) ||
-                    (transfer.supplier && transfer.supplier.toLowerCase().includes(searchLower))
+                    (transfer.transport_mode && transfer.transport_mode.toLowerCase().includes(searchLower))
                 );
             });
         }
@@ -6021,13 +6170,22 @@ function displayCustomsClearance(records) {
 
         row.innerHTML = `
             <td>${record.serial_number || ""}</td>
+            <td>${record.company_name || ""}</td>
+            <td>${record.orderer || ""}</td>
+            <td>${record.business_type || ""}</td>
+            <td>${record.sender_id || ""}</td>
+            <td>${record.customer_id || ""}</td>
+            <td>${formatDateOnly(record.receive_date)}</td>
+            <td>${getOrderDisplayOrigin(record)}</td>
+            <td>${getOrderDisplayDestination(record)}</td>
+            <td>${record.trade_term || ""}</td>
+            <td>${getOrderDisplayProductName(record)}</td>
+            <td>${record.transport_mode || ""}</td>
+            <td>${record.tracking_number || ""}</td>
             <td>${formatDateOnly(record.customs_start_time)}</td>
             <td>${formatDateOnly(record.tax_payment_time)}</td>
             <td>${formatDateOnly(record.release_time)}</td>
             <td>${record.customs_declaration_number || ""}</td>
-            <td>${record.customs_supplier || ""}</td>
-            <td>${record.remark1 || ""}</td>
-            <td>${record.remark2 || ""}</td>
             <td>
                 <button onclick="editCustomsClearance(${record.id})">编辑</button>
             </td>
@@ -6109,18 +6267,9 @@ function showCustomsForm(recordData = null) {
                     <label>报关单号:</label>
                     <input type="text" id="customsDeclarationNumber">
                 </div>
-                <div class="form-group">
-                    <label>报关供应商:</label>
-                    <input type="text" id="customsSupplier">
-                </div>
-                <div class="form-group">
-                    <label>备注1:</label>
-                    <textarea id="customsRemark1"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>备注2:</label>
-                    <textarea id="customsRemark2"></textarea>
-                </div>
+                <input type="hidden" id="customsSupplier">
+                <textarea id="customsRemark1" style="display:none;"></textarea>
+                <textarea id="customsRemark2" style="display:none;"></textarea>
                 <div class="button-group">
                     <button type="button" onclick="saveCustomsClearance()">保存</button>
                     <button type="button" onclick="hideCustomsForm()">取消</button>
@@ -6339,8 +6488,16 @@ async function loadAndFilterCustomsClearance() {
             const searchLower = currentCustomsSearchTerm.toLowerCase();
             filteredRecords = filteredRecords.filter(record => {
                 return (record.serial_number && record.serial_number.toLowerCase().includes(searchLower)) ||
-                       (record.customs_declaration_number && record.customs_declaration_number.toLowerCase().includes(searchLower)) ||
-                       (record.customs_supplier && record.customs_supplier.toLowerCase().includes(searchLower));
+                       (record.company_name && record.company_name.toLowerCase().includes(searchLower)) ||
+                       (record.orderer && record.orderer.toLowerCase().includes(searchLower)) ||
+                       (record.business_type && record.business_type.toLowerCase().includes(searchLower)) ||
+                       (record.sender_id && record.sender_id.toLowerCase().includes(searchLower)) ||
+                       (record.customer_id && record.customer_id.toLowerCase().includes(searchLower)) ||
+                       (record.trade_term && record.trade_term.toLowerCase().includes(searchLower)) ||
+                       (getOrderDisplayOrigin(record) && getOrderDisplayOrigin(record).toLowerCase().includes(searchLower)) ||
+                       (getOrderDisplayDestination(record) && getOrderDisplayDestination(record).toLowerCase().includes(searchLower)) ||
+                       (getOrderDisplayProductName(record) && getOrderDisplayProductName(record).toLowerCase().includes(searchLower)) ||
+                       (record.customs_declaration_number && record.customs_declaration_number.toLowerCase().includes(searchLower));
             });
         }
 

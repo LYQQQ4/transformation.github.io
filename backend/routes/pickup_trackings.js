@@ -10,7 +10,18 @@ module.exports = (db) => {
       }
 
       const [rows] = await db.execute(`
-        SELECT t.*, o.company_name, o.orderer, o.business_type, o.customer_id
+        SELECT
+          t.*,
+          o.company_name,
+          o.orderer,
+          o.business_type,
+          o.sender_id,
+          o.customer_id,
+          o.receive_date,
+          o.origin AS order_origin,
+          o.destination AS order_destination,
+          o.trade_term,
+          o.product_name
         FROM pickup_transport_tracking t
         LEFT JOIN orders o ON t.serial_number = o.serial_number
         ORDER BY t.created_at DESC
@@ -25,7 +36,18 @@ module.exports = (db) => {
   router.get("/serial/:serial_number", async (req, res) => {
     try {
       const [rows] = await db.execute(`
-        SELECT t.*, o.company_name, o.orderer, o.business_type, o.customer_id
+        SELECT
+          t.*,
+          o.company_name,
+          o.orderer,
+          o.business_type,
+          o.sender_id,
+          o.customer_id,
+          o.receive_date,
+          o.origin AS order_origin,
+          o.destination AS order_destination,
+          o.trade_term,
+          o.product_name
         FROM pickup_transport_tracking t
         LEFT JOIN orders o ON t.serial_number = o.serial_number
         WHERE t.serial_number = ?

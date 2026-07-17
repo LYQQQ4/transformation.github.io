@@ -516,9 +516,6 @@ function validatePackageExcelData(data, boxTypeMap = new Map()) {
 
   if (result.data.box_type_id !== undefined) {
     result.data.box_type_id = normalizeText(result.data.box_type_id);
-    if (result.data.box_type_id && !boxTypeMap.has(result.data.box_type_id)) {
-      result.errors.push(`箱型ID不存在于包装信息库：${result.data.box_type_id}`);
-    }
   }
 
   result.data.serial_number = normalizeText(result.data.serial_number);
@@ -741,9 +738,24 @@ module.exports = (db) => {
       await ensurePackageSchema(db);
       const boxTypeMap = await fetchBoxTypeMap(db);
       const [rows] = await db.execute(`
-        SELECT p.*, o.company_name, o.orderer, o.business_type, o.customer_id
+        SELECT
+          p.*,
+          o.company_name,
+          o.orderer,
+          o.business_type,
+          o.sender_id,
+          o.customer_id,
+          o.receive_date,
+          o.origin,
+          o.destination,
+          o.trade_term,
+          o.product_name AS order_product_name,
+          COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
+          COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
         FROM \`package\` p
         LEFT JOIN orders o ON p.serial_number = o.serial_number
+        LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = p.serial_number
+        LEFT JOIN transfer t ON t.serial_number = p.serial_number
         ORDER BY p.updated_at DESC, COALESCE(p.package_order, 1) ASC, p.id ASC
         LIMIT 500
       `);
@@ -758,9 +770,24 @@ module.exports = (db) => {
       await ensurePackageSchema(db);
       const boxTypeMap = await fetchBoxTypeMap(db);
       const [rows] = await db.execute(`
-        SELECT p.*, o.company_name, o.orderer, o.business_type, o.customer_id
+        SELECT
+          p.*,
+          o.company_name,
+          o.orderer,
+          o.business_type,
+          o.sender_id,
+          o.customer_id,
+          o.receive_date,
+          o.origin,
+          o.destination,
+          o.trade_term,
+          o.product_name AS order_product_name,
+          COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
+          COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
         FROM \`package\` p
         LEFT JOIN orders o ON p.serial_number = o.serial_number
+        LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = p.serial_number
+        LEFT JOIN transfer t ON t.serial_number = p.serial_number
         WHERE p.id = ?
       `, [req.params.id]);
       if (!rows.length) {
@@ -778,9 +805,24 @@ module.exports = (db) => {
       await ensurePackageSchema(db);
       const boxTypeMap = await fetchBoxTypeMap(db);
       const [rows] = await db.execute(`
-        SELECT p.*, o.company_name, o.orderer, o.business_type, o.customer_id
+        SELECT
+          p.*,
+          o.company_name,
+          o.orderer,
+          o.business_type,
+          o.sender_id,
+          o.customer_id,
+          o.receive_date,
+          o.origin,
+          o.destination,
+          o.trade_term,
+          o.product_name AS order_product_name,
+          COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
+          COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
         FROM \`package\` p
         LEFT JOIN orders o ON p.serial_number = o.serial_number
+        LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = p.serial_number
+        LEFT JOIN transfer t ON t.serial_number = p.serial_number
         WHERE p.serial_number = ?
         ORDER BY COALESCE(p.package_order, 1) ASC, p.id ASC
       `, [req.params.serial_number]);
@@ -799,10 +841,6 @@ module.exports = (db) => {
       await ensurePackageSchema(db);
       const boxTypeMap = await fetchBoxTypeMap(db);
       const normalized = normalizePackageRow(req.body, Number.parseInt(req.body.package_order, 10) || 1, boxTypeMap);
-      if (normalized.box_type_id && !boxTypeMap.has(normalized.box_type_id)) {
-        return res.status(400).json({ error: `箱型ID不存在：${normalized.box_type_id}` });
-      }
-
       const [result] = await db.execute(
         `UPDATE \`package\`
          SET package_label = ?, package_order = ?, box_type_id = ?, product_name = ?, product_code = ?, pieces = ?, single_weight = ?, length = ?, width = ?, height = ?, volume = ?, charge_weight = ?, package_type = ?, customs_port = ?, customs_title = ?, regulatory_conditions = ?, remark1 = ?, remark2 = ?
@@ -852,16 +890,6 @@ module.exports = (db) => {
         ? req.body.package_items
         : [req.body];
       const packageItems = normalizePackageRows(sourceItems, boxTypeMap);
-
-      const boxTypeErrors = [];
-      packageItems.forEach((item, index) => {
-        if (item.box_type_id && !boxTypeMap.has(item.box_type_id)) {
-          boxTypeErrors.push(`包装${index + 1} 的箱型ID不存在：${item.box_type_id}`);
-        }
-      });
-      if (boxTypeErrors.length > 0) {
-        return res.status(400).json({ error: boxTypeErrors[0], errors: boxTypeErrors });
-      }
 
       connection = await db.getConnection();
       await connection.beginTransaction();

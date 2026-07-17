@@ -36,6 +36,73 @@ function normalizeOrderImportValue(value) {
   return String(value || "").trim();
 }
 
+const ORDER_PHONE_MAX_LENGTH = 255;
+let orderPhoneSchemaReadyPromise = null;
+
+function normalizeOrderPhoneValue(value) {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  return String(value).trim().slice(0, ORDER_PHONE_MAX_LENGTH);
+}
+
+async function ensureOrderPhoneSchema(db) {
+  if (!orderPhoneSchemaReadyPromise) {
+    orderPhoneSchemaReadyPromise = (async () => {
+      const columnDefinitions = [
+        { table: "orders", column: "sender_phone", sql: "ALTER TABLE orders MODIFY COLUMN sender_phone VARCHAR(255) NOT NULL" },
+        { table: "orders", column: "receiver_phone", sql: "ALTER TABLE orders MODIFY COLUMN receiver_phone VARCHAR(255) NOT NULL" },
+        { table: "sender_info", column: "sender_phone", sql: "ALTER TABLE sender_info MODIFY COLUMN sender_phone VARCHAR(255) DEFAULT NULL" },
+        { table: "customer_info", column: "receiver_phone", sql: "ALTER TABLE customer_info MODIFY COLUMN receiver_phone VARCHAR(255) DEFAULT NULL" },
+      ];
+
+      for (const definition of columnDefinitions) {
+        const [rows] = await db.execute(
+          `SELECT CHARACTER_MAXIMUM_LENGTH AS max_length
+           FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE()
+             AND TABLE_NAME = ?
+             AND COLUMN_NAME = ?`,
+          [definition.table, definition.column]
+        );
+
+        if (!rows.length) {
+          continue;
+        }
+
+        const currentLength = Number(rows[0].max_length || 0);
+        if (currentLength < ORDER_PHONE_MAX_LENGTH) {
+          await db.execute(definition.sql);
+        }
+      }
+    })().catch((error) => {
+      orderPhoneSchemaReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return orderPhoneSchemaReadyPromise;
+}
+
+function buildOrderSelectSql(whereClause = "") {
+  return `
+    SELECT
+      o.*,
+      p.customs_title AS index_title,
+      p.pickup_date AS pickup_date,
+      c.customs_start_time AS customs_start_time,
+      c.tax_payment_time AS tax_payment_time,
+      c.release_time AS release_time,
+      COALESCE(t.arrival_port_time, p.arrival_time) AS arrival_time,
+      t.complete_docs_send_time AS complete_docs_send_time
+    FROM orders o
+    LEFT JOIN pickup_transport_tracking p ON p.serial_number = o.serial_number
+    LEFT JOIN customs_clearance_tracking c ON c.serial_number = o.serial_number
+    LEFT JOIN transfer t ON t.serial_number = o.serial_number
+    ${whereClause}
+  `;
+}
+
 async function collectOrderUserIdErrors(userDb, customerId, senderId, options = {}) {
   const {
     requireCustomerId = true,
@@ -180,6 +247,9 @@ async function enrichOrderPayloadFromProfiles(userDb, payload) {
     normalizedPayload.sender_phone = normalizedPayload.sender_phone || senderProfile.phone || "";
   }
 
+  normalizedPayload.sender_phone = normalizeOrderPhoneValue(normalizedPayload.sender_phone);
+  normalizedPayload.receiver_phone = normalizeOrderPhoneValue(normalizedPayload.receiver_phone);
+
   return normalizedPayload;
 }
 
@@ -244,6 +314,7 @@ module.exports = (db, userDb = null) => {
   // GET all orders
   router.get("/", async (req, res) => {
     try {
+      await ensureOrderPhoneSchema(db);
       const conditions = [];
       const params = [];
 
@@ -283,24 +354,7 @@ module.exports = (db, userDb = null) => {
       appendFilledStatusCondition("complete_docs_send_time_filled_status", "t.complete_docs_send_time");
 
       const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-      const [rows] = await db.execute(
-        `SELECT
-           o.*,
-           p.customs_title AS index_title,
-           p.pickup_date AS pickup_date,
-           c.customs_start_time AS customs_start_time,
-           c.tax_payment_time AS tax_payment_time,
-           c.release_time AS release_time,
-           p.arrival_time AS arrival_time,
-           t.complete_docs_send_time AS complete_docs_send_time
-         FROM orders o
-         LEFT JOIN pickup_transport_tracking p ON p.serial_number = o.serial_number
-         LEFT JOIN customs_clearance_tracking c ON c.serial_number = o.serial_number
-         LEFT JOIN transfer t ON t.serial_number = o.serial_number
-         ${whereClause}
-         ORDER BY o.serial_number DESC`,
-        params
-      );
+      const [rows] = await db.execute(`${buildOrderSelectSql(whereClause)} ORDER BY o.serial_number DESC`, params);
       res.json({ orders: rows });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -310,7 +364,12 @@ module.exports = (db, userDb = null) => {
   // GET single order by serial_number
   router.get("/serial/:serial_number", async (req, res) => {
     try {
-      const [rows] = await db.execute("SELECT * FROM orders WHERE serial_number = ?", [req.params.serial_number]);
+      await ensureOrderPhoneSchema(db);
+      const [rows] = await db.execute(
+        `${buildOrderSelectSql("WHERE o.serial_number = ?")}
+         LIMIT 1`,
+        [req.params.serial_number]
+      );
       if (rows.length === 0) {
         res.status(404).json({ error: "Order not found" });
         return;
@@ -324,7 +383,12 @@ module.exports = (db, userDb = null) => {
   // GET single order by id
   router.get("/:id", async (req, res) => {
     try {
-      const [rows] = await db.execute("SELECT * FROM orders WHERE id = ?", [req.params.id]);
+      await ensureOrderPhoneSchema(db);
+      const [rows] = await db.execute(
+        `${buildOrderSelectSql("WHERE o.id = ?")}
+         LIMIT 1`,
+        [req.params.id]
+      );
       if (rows.length === 0) {
         res.status(404).json({ error: "Order not found" });
         return;
@@ -339,6 +403,7 @@ module.exports = (db, userDb = null) => {
   router.post("/", async (req, res) => {
     const connection = await db.getConnection();
     try {
+      await ensureOrderPhoneSchema(db);
       await connection.beginTransaction();
 
       const company_name = req.body.company_name;
@@ -460,6 +525,7 @@ module.exports = (db, userDb = null) => {
   // PUT update order
   router.put("/:id", async (req, res) => {
     try {
+      await ensureOrderPhoneSchema(db);
       const company_name = req.body.company_name;
       const orderer = req.body.orderer;
       const receive_date = req.body.receive_date;
@@ -555,6 +621,7 @@ module.exports = (db, userDb = null) => {
   // POST parse Excel file (单行预览)
   router.post("/parse-excel", upload.single("excelFile"), async (req, res) => {
     try {
+      await ensureOrderPhoneSchema(db);
       if (!req.file) {
         return res.status(400).json({ error: "没有上传文件" });
       }
@@ -626,6 +693,7 @@ module.exports = (db, userDb = null) => {
   router.post("/import-excel", upload.single("excelFile"), async (req, res) => {
     const connection = await db.getConnection();
     try {
+      await ensureOrderPhoneSchema(db);
       if (!req.file) {
         return res.status(400).json({ error: "没有上传文件" });
       }
@@ -900,16 +968,10 @@ function validateExcelData(data) {
     }
   }
 
-  // 验证电话号码格式
   const phoneFields = ["sender_phone", "receiver_phone"];
   for (const field of phoneFields) {
     if (result.data[field]) {
-      const phone = result.data[field].toString();
-      if (!/^[\d\-\+\(\)\s]{7,20}$/.test(phone)) {
-        const excelFieldName = Object.keys(fieldMapping).find(key => fieldMapping[key] === field);
-        result.errors.push(`"${excelFieldName}" 格式不正确，请检查电话号码`);
-        result.isValid = false;
-      }
+      result.data[field] = normalizeOrderPhoneValue(result.data[field]);
     }
   }
 

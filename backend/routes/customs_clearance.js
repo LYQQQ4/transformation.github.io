@@ -15,9 +15,24 @@ module.exports = (db) => {
   router.get("/", async (req, res) => {
     try {
       const [rows] = await db.execute(`
-        SELECT c.*, o.company_name, o.orderer, o.business_type, o.customer_id
+        SELECT
+          c.*,
+          o.company_name,
+          o.orderer,
+          o.business_type,
+          o.sender_id,
+          o.customer_id,
+          o.receive_date,
+          o.origin,
+          o.destination,
+          o.trade_term,
+          o.product_name,
+          COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
+          COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
         FROM customs_clearance_tracking c
         LEFT JOIN orders o ON c.serial_number = o.serial_number
+        LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = c.serial_number
+        LEFT JOIN transfer t ON t.serial_number = c.serial_number
         ORDER BY c.serial_number DESC
         LIMIT 100
       `);
@@ -31,7 +46,25 @@ module.exports = (db) => {
   router.get("/:id", async (req, res) => {
     try {
       const [rows] = await db.execute(
-        "SELECT * FROM customs_clearance_tracking WHERE id = ?",
+        `SELECT
+           c.*,
+           o.company_name,
+           o.orderer,
+           o.business_type,
+           o.sender_id,
+           o.customer_id,
+           o.receive_date,
+           o.origin,
+           o.destination,
+           o.trade_term,
+           o.product_name,
+           COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
+           COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
+         FROM customs_clearance_tracking c
+         LEFT JOIN orders o ON c.serial_number = o.serial_number
+         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = c.serial_number
+         LEFT JOIN transfer t ON t.serial_number = c.serial_number
+         WHERE c.id = ?`,
         [req.params.id]
       );
       if (rows.length === 0) {
@@ -52,9 +85,24 @@ module.exports = (db) => {
       }
 
       const [rows] = await db.execute(
-        `SELECT c.*, o.company_name, o.orderer, o.business_type, o.customer_id
+        `SELECT
+           c.*,
+           o.company_name,
+           o.orderer,
+           o.business_type,
+           o.sender_id,
+           o.customer_id,
+           o.receive_date,
+           o.origin,
+           o.destination,
+           o.trade_term,
+           o.product_name,
+           COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
+           COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
          FROM customs_clearance_tracking c
          LEFT JOIN orders o ON c.serial_number = o.serial_number
+         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = c.serial_number
+         LEFT JOIN transfer t ON t.serial_number = c.serial_number
          WHERE c.serial_number = ?`,
         [serialNumber]
       );

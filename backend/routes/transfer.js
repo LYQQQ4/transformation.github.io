@@ -42,7 +42,23 @@ module.exports = (db) => {
         return res.status(500).json({ error: "Transfer table does not exist" });
       }
 
-      const [rows] = await db.execute("SELECT * FROM transfer ORDER BY create_time DESC");
+      const [rows] = await db.execute(`
+        SELECT
+          t.*,
+          o.company_name,
+          o.orderer,
+          o.business_type,
+          o.sender_id,
+          o.customer_id,
+          o.receive_date,
+          o.origin,
+          o.destination,
+          o.trade_term,
+          o.product_name
+        FROM transfer t
+        LEFT JOIN orders o ON t.serial_number = o.serial_number
+        ORDER BY t.create_time DESC
+      `);
       res.json({ transfers: rows });
     } catch (err) {
       logTransferRouteError("list", null, err);
@@ -58,7 +74,24 @@ module.exports = (db) => {
         return res.status(400).json({ error: "serial_number is required" });
       }
 
-      const [rows] = await db.execute("SELECT * FROM transfer WHERE serial_number = ?", [serialNumber]);
+      const [rows] = await db.execute(
+        `SELECT
+           t.*,
+           o.company_name,
+           o.orderer,
+           o.business_type,
+           o.sender_id,
+           o.customer_id,
+           o.receive_date,
+           o.origin,
+           o.destination,
+           o.trade_term,
+           o.product_name
+         FROM transfer t
+         LEFT JOIN orders o ON t.serial_number = o.serial_number
+         WHERE t.serial_number = ?`,
+        [serialNumber]
+      );
       if (rows.length === 0) {
         res.status(404).json({ error: "Transfer not found" });
         return;
@@ -73,7 +106,24 @@ module.exports = (db) => {
   // GET single transfer by id
   router.get("/:id", async (req, res) => {
     try {
-      const [rows] = await db.execute("SELECT * FROM transfer WHERE id = ?", [req.params.id]);
+      const [rows] = await db.execute(
+        `SELECT
+           t.*,
+           o.company_name,
+           o.orderer,
+           o.business_type,
+           o.sender_id,
+           o.customer_id,
+           o.receive_date,
+           o.origin,
+           o.destination,
+           o.trade_term,
+           o.product_name
+         FROM transfer t
+         LEFT JOIN orders o ON t.serial_number = o.serial_number
+         WHERE t.id = ?`,
+        [req.params.id]
+      );
       if (rows.length === 0) {
         res.status(404).json({ error: "Transfer not found" });
         return;
