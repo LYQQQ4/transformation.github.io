@@ -19,7 +19,7 @@ const ORDER_IMPORT_FIELDS = [
     label: "接收指令日期",
     aliases: ["接收指令日期", "接收日期", "指令日期", "日期"],
     formId: "receiveDate",
-    required: true,
+    required: false,
   },
   {
     key: "business_type",

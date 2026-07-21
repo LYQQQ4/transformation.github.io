@@ -1,4 +1,4 @@
-const express = require("express");
+﻿const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const XLSX = require("xlsx");
@@ -30,6 +30,178 @@ function normalizeTransferSerialNumber(value) {
 function logTransferRouteError(routeName, context, error) {
   const payload = context ? ` ${JSON.stringify(context)}` : "";
   console.error(`[transfer] ${routeName}${payload}:`, error);
+}
+
+function normalizeOptionalTransferValue(value) {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  return value;
+}
+
+function padDatePart(value) {
+  return String(value).padStart(2, "0");
+}
+
+function buildLocalDateParts(year, month, day) {
+  const normalizedYear = Number(year);
+  const normalizedMonth = Number(month);
+  const normalizedDay = Number(day);
+  const date = new Date(normalizedYear, normalizedMonth - 1, normalizedDay);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== normalizedYear ||
+    date.getMonth() + 1 !== normalizedMonth ||
+    date.getDate() !== normalizedDay
+  ) {
+    return null;
+  }
+
+  return {
+    year: String(normalizedYear),
+    month: padDatePart(normalizedMonth),
+    day: padDatePart(normalizedDay),
+  };
+}
+
+function parseExcelSerialDateParts(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  const wholeDays = Math.floor(numericValue);
+  const fraction = numericValue - wholeDays;
+  const date = new Date(Date.UTC(1899, 11, 30) + wholeDays * 86400000);
+  const totalSeconds = Math.round(fraction * 86400);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return {
+    year: String(date.getUTCFullYear()),
+    month: padDatePart(date.getUTCMonth() + 1),
+    day: padDatePart(date.getUTCDate()),
+    hour: padDatePart(hours % 24),
+    minute: padDatePart(minutes),
+    second: padDatePart(seconds),
+  };
+}
+
+function normalizeOptionalDateField(value, fieldLabel, options = {}) {
+  const { includeTime = false, allowExcelSerial = false } = options;
+  const normalizedValue = normalizeOptionalTransferValue(value);
+
+  if (normalizedValue === "") {
+    return { value: null };
+  }
+
+  if (typeof normalizedValue === "number" && allowExcelSerial) {
+    const dateParts = parseExcelSerialDateParts(normalizedValue);
+    if (!dateParts) {
+      return { error: `${fieldLabel}格式不正确，请填写有效日期` };
+    }
+
+    if (!includeTime) {
+      return { value: `${dateParts.year}-${dateParts.month}-${dateParts.day}` };
+    }
+
+    return {
+      value: `${dateParts.year}-${dateParts.month}-${dateParts.day} ${dateParts.hour}:${dateParts.minute}:${dateParts.second}`
+    };
+  }
+
+  if (typeof normalizedValue !== "string") {
+    return { error: `${fieldLabel}格式不正确，请使用 YYYY-MM-DD 或 YYYY/MM/DD` };
+  }
+
+  const trimmed = normalizedValue.trim();
+  if (!trimmed) {
+    return { value: null };
+  }
+
+  const ymdMatch = trimmed.match(
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?)?$/
+  );
+  const mdyMatch = trimmed.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?)?$/
+  );
+
+  let parts = null;
+  let timeParts = { hour: "0", minute: "0", second: "0" };
+
+  if (ymdMatch) {
+    const [, year, month, day, hour = "0", minute = "0", second = "0"] = ymdMatch;
+    parts = buildLocalDateParts(year, month, day);
+    timeParts = { hour, minute, second };
+  } else if (mdyMatch) {
+    const [, month, day, year, hour = "0", minute = "0", second = "0"] = mdyMatch;
+    parts = buildLocalDateParts(year, month, day);
+    timeParts = { hour, minute, second };
+  }
+
+  if (!parts) {
+    return { error: `${fieldLabel}格式不正确，请使用 YYYY-MM-DD、YYYY/MM/DD 或 Excel 序列号` };
+  }
+
+  if (!includeTime) {
+    return { value: `${parts.year}-${parts.month}-${parts.day}` };
+  }
+
+  const normalizedHour = Number(timeParts.hour);
+  const normalizedMinute = Number(timeParts.minute);
+  const normalizedSecond = Number(timeParts.second);
+  if (
+    normalizedHour < 0 || normalizedHour > 23 ||
+    normalizedMinute < 0 || normalizedMinute > 59 ||
+    normalizedSecond < 0 || normalizedSecond > 59
+  ) {
+    return { error: `${fieldLabel}时间格式不正确，请使用 YYYY-MM-DD 或 YYYY-MM-DD HH:mm:ss` };
+  }
+
+  return {
+    value: `${parts.year}-${parts.month}-${parts.day} ${padDatePart(normalizedHour)}:${padDatePart(normalizedMinute)}:${padDatePart(normalizedSecond)}`
+  };
+}
+
+function sanitizeTransferValue(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed === "" ? null : trimmed;
+  }
+  return value;
+}
+
+function normalizeTransferPayloadDates(payload = {}) {
+  const pickupDateResult = normalizeOptionalDateField(payload.pickup_date, "提货日期");
+  const arrivalPortTimeResult = normalizeOptionalDateField(payload.arrival_port_time, "到港时间", { includeTime: true });
+  const clearanceTimeResult = normalizeOptionalDateField(payload.clearance_time, "放行时间", { includeTime: true });
+  const deliveryTimeResult = normalizeOptionalDateField(payload.delivery_time, "送达时间", { includeTime: true });
+  const completeDocsSendTimeResult = normalizeOptionalDateField(payload.complete_docs_send_time, "完整资料发送时间", { includeTime: true });
+
+  return {
+    errors: [
+      pickupDateResult.error,
+      arrivalPortTimeResult.error,
+      clearanceTimeResult.error,
+      deliveryTimeResult.error,
+      completeDocsSendTimeResult.error,
+    ].filter(Boolean),
+    values: {
+      pickup_date: pickupDateResult.value,
+      arrival_port_time: arrivalPortTimeResult.value,
+      clearance_time: clearanceTimeResult.value,
+      delivery_time: deliveryTimeResult.value,
+      complete_docs_send_time: completeDocsSendTimeResult.value,
+    },
+  };
 }
 
 module.exports = (db) => {
@@ -162,6 +334,11 @@ module.exports = (db) => {
         remark3
       } = req.body;
 
+      const normalizedDates = normalizeTransferPayloadDates(req.body);
+      if (normalizedDates.errors.length > 0) {
+        return res.status(400).json({ error: normalizedDates.errors.join("; ") });
+      }
+
       const sql = `INSERT INTO transfer (
         serial_number, transport_mode, tracking_number, contract_number,
         pickup_date, arrival_port_time, clearance_time, delivery_time,
@@ -172,10 +349,10 @@ module.exports = (db) => {
       // 将 undefined 转为 null，以便正确绑定到 SQL（mysql2 不接受 undefined）
       const sanitize = (v) => (typeof v === 'undefined' ? null : v);
       const params = [
-        sanitize(serialNumber), sanitize(transport_mode), sanitize(tracking_number), sanitize(contract_number),
-        sanitize(pickup_date), sanitize(arrival_port_time), sanitize(clearance_time), sanitize(delivery_time),
-        sanitize(complete_docs_send_time), sanitize(cargo_flow_info), sanitize(supplier), sanitize(value_added_services),
-        sanitize(billing_period), sanitize(remark1), sanitize(remark2), sanitize(remark3)
+        sanitizeTransferValue(serialNumber), sanitizeTransferValue(transport_mode), sanitizeTransferValue(tracking_number), sanitizeTransferValue(contract_number),
+        normalizedDates.values.pickup_date, normalizedDates.values.arrival_port_time, normalizedDates.values.clearance_time, normalizedDates.values.delivery_time,
+        normalizedDates.values.complete_docs_send_time, sanitizeTransferValue(cargo_flow_info), sanitizeTransferValue(supplier), sanitizeTransferValue(value_added_services),
+        sanitizeTransferValue(billing_period), sanitizeTransferValue(remark1), sanitizeTransferValue(remark2), sanitizeTransferValue(remark3)
       ];
 
       console.log('DEBUG insert transfer params:', params);
@@ -217,6 +394,11 @@ module.exports = (db) => {
         remark3
       } = req.body;
 
+      const normalizedDates = normalizeTransferPayloadDates(req.body);
+      if (normalizedDates.errors.length > 0) {
+        return res.status(400).json({ error: normalizedDates.errors.join("; ") });
+      }
+
       const sql = `UPDATE transfer SET
         transport_mode = ?, tracking_number = ?, contract_number = ?,
         pickup_date = ?, arrival_port_time = ?, clearance_time = ?, delivery_time = ?,
@@ -227,10 +409,10 @@ module.exports = (db) => {
       // 将 undefined 转为 null，以便正确绑定到 SQL（mysql2 不接受 undefined）
       const sanitize = (v) => (typeof v === 'undefined' ? null : v);
       const params = [
-        sanitize(transport_mode), sanitize(tracking_number), sanitize(contract_number),
-        sanitize(pickup_date), sanitize(arrival_port_time), sanitize(clearance_time), sanitize(delivery_time),
-        sanitize(complete_docs_send_time), sanitize(cargo_flow_info), sanitize(supplier), sanitize(value_added_services),
-        sanitize(billing_period), sanitize(remark1), sanitize(remark2), sanitize(remark3), sanitize(serialNumber)
+        sanitizeTransferValue(transport_mode), sanitizeTransferValue(tracking_number), sanitizeTransferValue(contract_number),
+        normalizedDates.values.pickup_date, normalizedDates.values.arrival_port_time, normalizedDates.values.clearance_time, normalizedDates.values.delivery_time,
+        normalizedDates.values.complete_docs_send_time, sanitizeTransferValue(cargo_flow_info), sanitizeTransferValue(supplier), sanitizeTransferValue(value_added_services),
+        sanitizeTransferValue(billing_period), sanitizeTransferValue(remark1), sanitizeTransferValue(remark2), sanitizeTransferValue(remark3), sanitizeTransferValue(serialNumber)
       ];
 
       const [result] = await db.execute(sql, params);
@@ -268,6 +450,11 @@ module.exports = (db) => {
         remark3
       } = req.body;
 
+      const normalizedDates = normalizeTransferPayloadDates(req.body);
+      if (normalizedDates.errors.length > 0) {
+        return res.status(400).json({ error: normalizedDates.errors.join("; ") });
+      }
+
       const sql = `UPDATE transfer SET
         serial_number = ?, transport_mode = ?, tracking_number = ?, contract_number = ?,
         pickup_date = ?, arrival_port_time = ?, clearance_time = ?, delivery_time = ?,
@@ -278,10 +465,10 @@ module.exports = (db) => {
       // 将 undefined 转为 null，以便正确绑定到 SQL（mysql2 不接受 undefined）
       const sanitize = (v) => (typeof v === 'undefined' ? null : v);
       const params = [
-        sanitize(serial_number), sanitize(transport_mode), sanitize(tracking_number), sanitize(contract_number),
-        sanitize(pickup_date), sanitize(arrival_port_time), sanitize(clearance_time), sanitize(delivery_time),
-        sanitize(complete_docs_send_time), sanitize(cargo_flow_info), sanitize(supplier), sanitize(value_added_services),
-        sanitize(billing_period), sanitize(remark1), sanitize(remark2), sanitize(remark3), sanitize(req.params.id)
+        sanitizeTransferValue(serial_number), sanitizeTransferValue(transport_mode), sanitizeTransferValue(tracking_number), sanitizeTransferValue(contract_number),
+        normalizedDates.values.pickup_date, normalizedDates.values.arrival_port_time, normalizedDates.values.clearance_time, normalizedDates.values.delivery_time,
+        normalizedDates.values.complete_docs_send_time, sanitizeTransferValue(cargo_flow_info), sanitizeTransferValue(supplier), sanitizeTransferValue(value_added_services),
+        sanitizeTransferValue(billing_period), sanitizeTransferValue(remark1), sanitizeTransferValue(remark2), sanitizeTransferValue(remark3), sanitizeTransferValue(req.params.id)
       ];
 
       const [result] = await db.execute(sql, params);
@@ -438,10 +625,10 @@ module.exports = (db) => {
             WHERE serial_number = ?`;
 
           const [updateResult] = await db.execute(sql, [
-            transport_mode || null, tracking_number, contract_number || null,
+            sanitizeTransferValue(transport_mode), sanitizeTransferValue(tracking_number), sanitizeTransferValue(contract_number),
             pickup_date || null, arrival_port_time || null, clearance_time || null, delivery_time || null,
-            complete_docs_send_time || null, cargo_flow_info || null, supplier || null, value_added_services || null,
-            billing_period || null, remark1 || null, remark2 || null, remark3 || null,
+            complete_docs_send_time || null, sanitizeTransferValue(cargo_flow_info), sanitizeTransferValue(supplier), sanitizeTransferValue(value_added_services),
+            sanitizeTransferValue(billing_period), sanitizeTransferValue(remark1), sanitizeTransferValue(remark2), sanitizeTransferValue(remark3),
             serialNumber
           ]);
 
@@ -589,6 +776,87 @@ function validateTransferExcelData(data) {
         // 格式化为YYYY-MM-DD HH:mm:ss
         result.data[field] = dateValue.toISOString().slice(0, 19).replace("T", " ");
       }
+    }
+  }
+
+  return result;
+}
+
+function validateTransferExcelDataOverrideMarker() {
+  return true;
+}
+
+function validateTransferExcelData(data) {
+  const result = {
+    isValid: true,
+    errors: [],
+    data: {}
+  };
+
+  const fieldMapping = {
+    "流水号": "serial_number",
+    "运输方式": "transport_mode",
+    "运单号": "tracking_number",
+    "合同协议号": "contract_number",
+    "提货日期": "pickup_date",
+    "到港时间": "arrival_port_time",
+    "放行时间": "clearance_time",
+    "送达时间": "delivery_time",
+    "完整资料发送时间": "complete_docs_send_time",
+    "货物流转信息": "cargo_flow_info",
+    "供应商": "supplier",
+    "增值服务备注": "value_added_services",
+    "账单期": "billing_period",
+    "备注1": "remark1",
+    "备注2": "remark2",
+    "备注3": "remark3"
+  };
+
+  const requiredFields = ["tracking_number"];
+
+  for (const [excelField, dbField] of Object.entries(fieldMapping)) {
+    if (data[excelField] !== undefined && data[excelField] !== null && data[excelField] !== "") {
+      result.data[dbField] = data[excelField];
+    }
+  }
+
+  for (const field of requiredFields) {
+    if (!result.data[field] || result.data[field].toString().trim() === "") {
+      const excelFieldNames = Object.keys(fieldMapping).filter((key) => fieldMapping[key] === field);
+      const excelFieldName = excelFieldNames.length > 0 ? excelFieldNames[0] : field;
+      result.errors.push(`"${excelFieldName}" 字段为空，请检查Excel文件`);
+      result.isValid = false;
+    }
+  }
+
+  const dateFields = ["pickup_date"];
+  for (const field of dateFields) {
+    const excelFieldName = Object.keys(fieldMapping).find((key) => fieldMapping[key] === field) || field;
+    const normalizedField = normalizeOptionalDateField(result.data[field], excelFieldName, { allowExcelSerial: true });
+    if (normalizedField.error) {
+      result.errors.push(normalizedField.error);
+      result.isValid = false;
+    } else if (normalizedField.value) {
+      result.data[field] = normalizedField.value;
+    } else {
+      delete result.data[field];
+    }
+  }
+
+  const datetimeFields = ["arrival_port_time", "clearance_time", "delivery_time", "complete_docs_send_time"];
+  for (const field of datetimeFields) {
+    const excelFieldName = Object.keys(fieldMapping).find((key) => fieldMapping[key] === field) || field;
+    const normalizedField = normalizeOptionalDateField(result.data[field], excelFieldName, {
+      includeTime: true,
+      allowExcelSerial: true
+    });
+    if (normalizedField.error) {
+      result.errors.push(normalizedField.error);
+      result.isValid = false;
+    } else if (normalizedField.value) {
+      result.data[field] = normalizedField.value;
+    } else {
+      delete result.data[field];
     }
   }
 

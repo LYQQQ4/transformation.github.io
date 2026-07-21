@@ -21,23 +21,82 @@ function formatDateOnly(value) {
         return "";
     }
 
-    if (typeof value === "string") {
-        const normalized = value.replace(/\//g, "-");
-        const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
-        if (match) {
-            return `${match[1]}/${match[2]}/${match[3]}`;
-        }
-    }
-
-    const date = new Date(value);
-    if (isNaN(date.getTime())) {
+    const parts = extractLocalDateParts(value);
+    if (!parts) {
         return String(value);
     }
 
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}/${month}/${day}`;
+    return `${parts.year}/${parts.month}/${parts.day}`;
+}
+
+function extractLocalDateParts(value) {
+    if (value === undefined || value === null || value === "") {
+        return null;
+    }
+
+    if (value instanceof Date) {
+        if (isNaN(value.getTime())) {
+            return null;
+        }
+        return {
+            year: String(value.getFullYear()),
+            month: String(value.getMonth() + 1).padStart(2, "0"),
+            day: String(value.getDate()).padStart(2, "0")
+        };
+    }
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+        const date = new Date(value);
+        if (isNaN(date.getTime())) {
+            return null;
+        }
+        return {
+            year: String(date.getFullYear()),
+            month: String(date.getMonth() + 1).padStart(2, "0"),
+            day: String(date.getDate()).padStart(2, "0")
+        };
+    }
+
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return null;
+        }
+
+        const normalized = trimmed.replace(/\//g, "-");
+        const plainDateMatch = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+        if (plainDateMatch) {
+            return {
+                year: plainDateMatch[1],
+                month: String(plainDateMatch[2]).padStart(2, "0"),
+                day: String(plainDateMatch[3]).padStart(2, "0")
+            };
+        }
+
+        const localDateTimeMatch = normalized.match(
+            /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?(?:\.\d+)?$/
+        );
+        if (localDateTimeMatch) {
+            return {
+                year: localDateTimeMatch[1],
+                month: String(localDateTimeMatch[2]).padStart(2, "0"),
+                day: String(localDateTimeMatch[3]).padStart(2, "0")
+            };
+        }
+
+        const date = new Date(trimmed);
+        if (isNaN(date.getTime())) {
+            return null;
+        }
+
+        return {
+            year: String(date.getFullYear()),
+            month: String(date.getMonth() + 1).padStart(2, "0"),
+            day: String(date.getDate()).padStart(2, "0")
+        };
+    }
+
+    return null;
 }
 let currentUserProfileSearchTerm = "";
 let userProfilesData = [];
@@ -231,32 +290,8 @@ function getOrderFormElement(id, form = getVisibleOrderForm()) {
 }
 
 function parseReceiveDateParts(value) {
-    if (!value) {
-        return { year: "", month: "", day: "" };
-    }
-
-    let dateStr = value;
-    if (typeof dateStr === "string" && dateStr.includes("T")) {
-        dateStr = dateStr.split("T")[0];
-    }
-    if (typeof dateStr === "string") {
-        dateStr = dateStr.replace(/\//g, "-");
-        const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if (match) {
-            return { year: match[1], month: match[2], day: match[3] };
-        }
-    }
-
-    const dateObj = new Date(dateStr);
-    if (!isNaN(dateObj.getTime())) {
-        return {
-            year: String(dateObj.getFullYear()),
-            month: String(dateObj.getMonth() + 1).padStart(2, "0"),
-            day: String(dateObj.getDate()).padStart(2, "0")
-        };
-    }
-
-    return { year: "", month: "", day: "" };
+    const parts = extractLocalDateParts(value);
+    return parts || { year: "", month: "", day: "" };
 }
 
 function updateReceiveDateHidden(form) {
@@ -527,14 +562,6 @@ function runSplitDateUpdate(updateFn, prefix, form) {
     }
 }
 
-function getCurrentDatePickerValue() {
-    const now = new Date();
-    const year = String(now.getFullYear());
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-}
-
 function syncSplitDatePickerValue(prefix, form) {
     if (!form) {
         return;
@@ -552,7 +579,9 @@ function syncSplitDatePickerValue(prefix, form) {
     if (yearInput.value.length === 4 && monthInput.value.length === 2 && dayInput.value.length === 2) {
         pickerInput.value = `${yearInput.value}-${monthInput.value}-${dayInput.value}`;
     } else {
-        pickerInput.value = getCurrentDatePickerValue();
+        // Keep picker empty when split fields are incomplete so selecting "today"
+        // still changes value and triggers the picker change event.
+        pickerInput.value = "";
     }
 }
 
@@ -762,6 +791,8 @@ function displayOrders(orders) {
                 displayDate = order.receive_date;
             }
         }
+
+        displayDate = formatDateOnly(order.receive_date);
 
         row.innerHTML = `
             <td><button class="link-button" onclick="showOrderDetails(${order.id})">${order.serial_number || order.id}</button></td>
@@ -1730,11 +1761,6 @@ async function saveOrder() {
         remark1: getOrderFormElement("orderRemark1", form).value,
         remark2: getOrderFormElement("orderRemark2", form).value
     };
-
-    if (!orderData.receive_date) {
-        showMessage("请输入完整的接收指令日期", "error");
-        return;
-    }
 
     try {
         let response;
@@ -4574,16 +4600,16 @@ function displayTransfers(transfers) {
             <td>${transfer.business_type || ""}</td>
             <td>${transfer.sender_id || ""}</td>
             <td>${transfer.customer_id || ""}</td>
-            <td>${formatDate(transfer.receive_date)}</td>
+            <td>${formatDateOnly(transfer.receive_date)}</td>
             <td>${getOrderDisplayOrigin(transfer)}</td>
             <td>${getOrderDisplayDestination(transfer)}</td>
             <td>${transfer.trade_term || ""}</td>
             <td>${getOrderDisplayProductName(transfer)}</td>
             <td>${transfer.transport_mode || ""}</td>
             <td>${transfer.tracking_number || ""}</td>
-            <td>${formatDate(transfer.pickup_date)}</td>
-            <td>${formatDate(transfer.arrival_port_time)}</td>
-            <td>${formatDate(transfer.complete_docs_send_time)}</td>
+            <td>${formatDateOnly(transfer.pickup_date)}</td>
+            <td>${formatDateOnly(transfer.arrival_port_time)}</td>
+            <td>${formatDateOnly(transfer.complete_docs_send_time)}</td>
             <td>
                 <button onclick="editTransfer('${transfer.serial_number}')">编辑</button>
             </td>

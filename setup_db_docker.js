@@ -28,7 +28,7 @@ async function setupDatabase() {
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
         company_name VARCHAR(200) NOT NULL COMMENT '公司抬头',
         orderer VARCHAR(100) NOT NULL COMMENT '指令人',
-        receive_date DATE NOT NULL COMMENT '接收指令日期',
+        receive_date DATE DEFAULT NULL COMMENT '接收指令日期',
         business_type VARCHAR(50) NOT NULL COMMENT '业务类型',
         customer_id VARCHAR(50) NOT NULL COMMENT '客户ID',
         sender_id VARCHAR(50) DEFAULT NULL COMMENT '发件人ID',

@@ -75,6 +75,18 @@ async function ensureOrderPhoneSchema(db) {
           await db.execute(definition.sql);
         }
       }
+
+      const [receiveDateColumns] = await db.execute(
+        `SELECT IS_NULLABLE AS is_nullable
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'orders'
+           AND COLUMN_NAME = 'receive_date'`
+      );
+
+      if (receiveDateColumns.length && receiveDateColumns[0].is_nullable === "NO") {
+        await db.execute("ALTER TABLE orders MODIFY COLUMN receive_date DATE DEFAULT NULL COMMENT '接收指令日期'");
+      }
     })().catch((error) => {
       orderPhoneSchemaReadyPromise = null;
       throw error;
@@ -256,6 +268,17 @@ async function enrichOrderPayloadFromProfiles(userDb, payload) {
 async function enrichOrderPayloadWithUserProfiles(userDb, payload) {
   await validateOrderUserIds(userDb, payload.customer_id, payload.sender_id);
   return enrichOrderPayloadFromProfiles(userDb, payload);
+}
+
+function normalizeOptionalDateValue(value) {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed === "" ? "" : trimmed;
+  }
+  return value;
 }
 
 function validateRequiredFields(payload, requiredFields, fieldMapping) {
@@ -444,6 +467,7 @@ module.exports = (db, userDb = null) => {
         remark1,
         remark2,
       });
+      const normalizedReceiveDate = normalizeOptionalDateValue(enrichedOrderData.receive_date) || null;
 
       // 生成serial_number：当年+当月+001，最后三位递增，每月重置
       const now = new Date();
@@ -476,7 +500,7 @@ module.exports = (db, userDb = null) => {
         // 尝试插入orders表，如果serial_number已存在会失败
         try {
           const sql = "INSERT INTO orders (company_name, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2, serial_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-          const [result] = await connection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, enrichedOrderData.receive_date, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, serialNumber]);
+          const [result] = await connection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, serialNumber]);
 
           // 同时在package表中插入记录，使用相同的serial_number，只填入serial_number，其他字段为空
           const packageSql = "INSERT INTO \`package\` (serial_number, package_label, package_order) VALUES (?, ?, ?)";
@@ -564,9 +588,10 @@ module.exports = (db, userDb = null) => {
         remark1,
         remark2,
       });
+      const normalizedReceiveDate = normalizeOptionalDateValue(enrichedOrderData.receive_date) || null;
 
       const sql = "UPDATE orders SET company_name = ?, orderer = ?, receive_date = ?, business_type = ?, customer_id = ?, sender_id = ?, shipping_address = ?, sender_name = ?, sender_phone = ?, delivery_address = ?, receiver_name = ?, receiver_phone = ?, origin = ?, destination = ?, trade_term = ?, product_name = ?, remark1 = ?, remark2 = ? WHERE id = ?";
-      const [result] = await db.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, enrichedOrderData.receive_date, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, req.params.id]);
+      const [result] = await db.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, req.params.id]);
       if (result.affectedRows === 0) {
         res.status(404).json({ error: "Order not found" });
         return;
@@ -809,7 +834,8 @@ module.exports = (db, userDb = null) => {
             // 尝试插入所有表
             try {
               const sql = "INSERT INTO orders (company_name, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2, serial_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-              const [insertResult] = await rowConnection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, enrichedOrderData.receive_date, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, serialNumber]);
+              const normalizedImportReceiveDate = normalizeOptionalDateValue(enrichedOrderData.receive_date) || null;
+              const [insertResult] = await rowConnection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedImportReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, serialNumber]);
 
               // 同时在package表中插入记录，使用相同的serial_number
               const packageSql = "INSERT INTO \`package\` (serial_number, package_label, package_order) VALUES (?, ?, ?)";
@@ -921,9 +947,12 @@ function validateExcelData(data) {
     result.isValid = false;
   }
 
-  // 验证日期格式
-  if (result.data.receive_date) {
-    const dateValue = result.data.receive_date;
+  // 日期字段允许为空，只有有值时才做格式校验
+  const normalizedReceiveDate = normalizeOptionalDateValue(result.data.receive_date);
+  result.data.receive_date = normalizedReceiveDate;
+
+  if (normalizedReceiveDate) {
+    const dateValue = normalizedReceiveDate;
 
     if (typeof dateValue === "number") {
       // Excel日期序列号转换为JavaScript日期
