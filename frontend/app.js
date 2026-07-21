@@ -47,6 +47,8 @@ let sendersData = [];
 let customersData = [];
 let packageBoxTypes = [];
 let packageBoxTypesLoaded = false;
+const LEGACY_DEFAULT_PACKAGE_BOX_TYPE_ID = "BOX-DEFAULT";
+const PACKAGE_BOX_TYPE_SNAPSHOT_FIELDS = ["package_type", "length", "width", "height", "volume"];
 
 // Utility functions
 function showMessage(message, type = "success") {
@@ -3212,14 +3214,10 @@ async function ensurePackageBoxTypesLoaded(forceReload = false) {
 }
 
 function buildPackageBoxTypeOptions(selectedValue = "") {
-    const options = ['<option value="">请选择箱型ID</option>'];
-    const normalizedSelectedValue = String(selectedValue || "").trim();
-    const matchedSelectedValue = packageBoxTypes.some(boxType => String(boxType.box_type_id || "").trim() === normalizedSelectedValue);
-    if (normalizedSelectedValue && !matchedSelectedValue) {
-        options.push(`<option value="${escapeHtml(normalizedSelectedValue)}" selected>${escapeHtml(normalizedSelectedValue)}</option>`);
-    }
-    packageBoxTypes.forEach(boxType => {
-        const selected = boxType.box_type_id === selectedValue ? "selected" : "";
+    const normalizedSelectedValue = normalizePackageBoxTypeValue(selectedValue);
+    const options = [`<option value="" ${normalizedSelectedValue ? "" : "selected"}>手动填写</option>`];
+    getSelectablePackageBoxTypes().forEach(boxType => {
+        const selected = boxType.box_type_id === normalizedSelectedValue ? "selected" : "";
         const label = `${escapeHtml(boxType.box_type_id)}${boxType.package_type ? ` / ${escapeHtml(boxType.package_type)}` : ""}`;
         options.push(`<option value="${escapeHtml(boxType.box_type_id)}" ${selected}>${label}</option>`);
     });
@@ -3231,46 +3229,89 @@ function normalizePackageSnapshotMetric(value) {
     return Number.isNaN(parsed) ? null : Number(parsed.toFixed(4));
 }
 
-function shouldUseManualBoxTypeInput(item = {}) {
-    const boxTypeId = String(item?.box_type_id || "").trim();
-    if (!boxTypeId) {
+function normalizePackageBoxTypeValue(value) {
+    const normalized = String(value || "").trim();
+    if (!normalized || normalized === LEGACY_DEFAULT_PACKAGE_BOX_TYPE_ID) {
+        return "";
+    }
+    return normalized;
+}
+
+function getSelectablePackageBoxTypes() {
+    return packageBoxTypes.filter(boxType => normalizePackageBoxTypeValue(boxType?.box_type_id));
+}
+
+function getPackageSnapshotFromValues(values = {}) {
+    return {
+        package_type: String(values.package_type || "").trim(),
+        length: normalizePackageSnapshotMetric(values.length),
+        width: normalizePackageSnapshotMetric(values.width),
+        height: normalizePackageSnapshotMetric(values.height)
+    };
+}
+
+function isPackageSnapshotMatch(snapshot, boxType) {
+    if (!snapshot.package_type || !boxType) {
         return false;
     }
 
-    const boxType = getBoxTypeById(boxTypeId);
-    if (!boxType) {
-        return true;
-    }
+    return (
+        snapshot.package_type === String(boxType.package_type || "").trim() &&
+        snapshot.length === normalizePackageSnapshotMetric(boxType.length_cm) &&
+        snapshot.width === normalizePackageSnapshotMetric(boxType.width_cm) &&
+        snapshot.height === normalizePackageSnapshotMetric(boxType.height_cm)
+    );
+}
 
-    if (String(item.package_type || "").trim() !== String(boxType.package_type || "").trim()) {
-        return true;
-    }
+function findMatchingPackageBoxType(snapshot) {
+    const matches = getSelectablePackageBoxTypes().filter(boxType => isPackageSnapshotMatch(snapshot, boxType));
+    return matches.length === 1 ? matches[0] : null;
+}
 
-    return ["length", "width", "height"].some(field => {
-        const currentValue = normalizePackageSnapshotMetric(item[field]);
-        const snapshotValue = normalizePackageSnapshotMetric(boxType[`${field}_cm`]);
-        return currentValue !== snapshotValue;
+function readPackageCardSnapshot(card) {
+    return getPackageSnapshotFromValues({
+        package_type: card?.querySelector('[data-field="package_type"]')?.value,
+        length: card?.querySelector('[data-field="length"]')?.value,
+        width: card?.querySelector('[data-field="width"]')?.value,
+        height: card?.querySelector('[data-field="height"]')?.value
     });
 }
 
-function getPackageBoxTypeMode(item = {}) {
-    void item;
-    return "select";
+function clearPackageBoxTypeSnapshot(card) {
+    if (!card) {
+        return;
+    }
+
+    PACKAGE_BOX_TYPE_SNAPSHOT_FIELDS.forEach(field => {
+        const input = card.querySelector(`[data-field="${field}"]`);
+        if (input) {
+            input.value = "";
+        }
+    });
+}
+
+function syncPackageBoxTypeSelection(card) {
+    const select = card?.querySelector(".package-box-type-select");
+    if (!select) {
+        return null;
+    }
+
+    const matchedBoxType = findMatchingPackageBoxType(readPackageCardSnapshot(card));
+    select.value = matchedBoxType ? matchedBoxType.box_type_id : "";
+    return matchedBoxType;
 }
 
 function renderPackageBoxTypeControl(item) {
-    const boxTypeId = item?.box_type_id || "";
-    const mode = getPackageBoxTypeMode(item);
+    const boxTypeId = normalizePackageBoxTypeValue(item?.box_type_id || "");
+    const mode = "select";
     const selectStyle = mode === "manual" ? 'style="display:none;"' : "";
     const inputStyle = mode === "select" ? 'style="display:none;"' : "";
     const switchMode = mode === "manual" ? "select" : "manual";
     const switchLabel = mode === "manual" ? "使用下拉" : "手动填写";
 
     return `
-        <div class="package-box-type-mode" data-box-type-mode="${mode}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <select class="package-box-type-select" ${selectStyle}>${buildPackageBoxTypeOptions(boxTypeId)}</select>
-            <input type="text" class="package-box-type-input" value="${escapeHtml(boxTypeId)}" ${inputStyle}>
-            <button type="button" class="package-box-type-switch" data-mode="${switchMode}">${switchLabel}</button>
+        <div class="package-box-type-mode" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select class="package-box-type-select">${buildPackageBoxTypeOptions(boxTypeId)}</select>
         </div>
     `;
 }
@@ -3280,14 +3321,7 @@ function getPackageBoxTypeModeValue(card) {
 }
 
 function getPackageBoxTypeValue(card) {
-    if (!card) {
-        return "";
-    }
-
-    const mode = getPackageBoxTypeModeValue(card);
-    const select = card.querySelector(".package-box-type-select");
-    const input = card.querySelector(".package-box-type-input");
-    return mode === "manual" ? (input?.value || "") : (select?.value || "");
+    return normalizePackageBoxTypeValue(card?.querySelector(".package-box-type-select")?.value || "");
 }
 
 function setPackageBoxTypeMode(card, mode) {
@@ -3323,21 +3357,27 @@ function setPackageBoxTypeMode(card, mode) {
     container.dataset.boxTypeMode = mode;
 }
 
-function applyBoxTypeSnapshot(card, boxTypeId) {
-    const boxType = getBoxTypeById(boxTypeId);
+function applyBoxTypeSnapshot(card, boxTypeId, { clearOnManual = false } = {}) {
     if (!card) {
         return;
     }
 
+    const normalizedBoxTypeId = normalizePackageBoxTypeValue(boxTypeId);
     const select = card.querySelector(".package-box-type-select");
-    const input = card.querySelector(".package-box-type-input");
     if (select) {
-        select.value = boxTypeId || "";
+        select.value = normalizedBoxTypeId || "";
     }
-    if (input) {
-        input.value = boxTypeId || "";
+    if (!normalizedBoxTypeId) {
+        if (clearOnManual) {
+            clearPackageBoxTypeSnapshot(card);
+            updatePackageCardVolume(card);
+        }
+        return;
     }
+
+    const boxType = getBoxTypeById(normalizedBoxTypeId);
     if (!boxType) {
+        syncPackageBoxTypeSelection(card);
         return;
     }
 
@@ -3357,18 +3397,7 @@ function applyBoxTypeSnapshot(card, boxTypeId) {
     });
 
     updatePackageCardVolume(card);
-}
-
-function switchPackageBoxTypeToManual(card) {
-    if (getPackageBoxTypeModeValue(card) !== "manual") {
-        setPackageBoxTypeMode(card, "manual");
-    }
-}
-
-function switchPackageBoxTypeToSelect(card) {
-    if (getPackageBoxTypeModeValue(card) !== "select") {
-        setPackageBoxTypeMode(card, "select");
-    }
+    syncPackageBoxTypeSelection(card);
 }
 
 function togglePackageItemDetails(card) {
@@ -3748,20 +3777,6 @@ async function showPackageForm(packageData = null) {
             return;
         }
 
-        const switchButton = event.target.closest(".package-box-type-switch");
-        if (switchButton) {
-            const card = switchButton.closest(".package-item-card");
-            if (!card) {
-                return;
-            }
-            if (switchButton.dataset.mode === "manual") {
-                switchPackageBoxTypeToManual(card);
-            } else {
-                switchPackageBoxTypeToSelect(card);
-            }
-            return;
-        }
-
         const removeButton = event.target.closest(".remove-package-item");
         if (removeButton) {
             const removeIndex = Number.parseInt(removeButton.dataset.packageIndex, 10);
@@ -3777,8 +3792,7 @@ async function showPackageForm(packageData = null) {
         }
 
         if (event.target.matches(".package-box-type-select")) {
-            setPackageBoxTypeMode(card, "select");
-            applyBoxTypeSnapshot(card, event.target.value);
+            applyBoxTypeSnapshot(card, event.target.value, { clearOnManual: true });
             updatePackageFormTotal(form);
         }
     });
@@ -3789,11 +3803,11 @@ async function showPackageForm(packageData = null) {
             return;
         }
 
-        if (["package_type", "length", "width", "height"].includes(event.target.dataset.field)) {
-            switchPackageBoxTypeToManual(card);
-        }
         if (["pieces", "single_weight", "length", "width", "height"].includes(event.target.dataset.field)) {
             updatePackageCardVolume(card);
+        }
+        if (["package_type", "length", "width", "height"].includes(event.target.dataset.field)) {
+            syncPackageBoxTypeSelection(card);
         }
         if (["pieces", "single_weight", "length", "width", "height"].includes(event.target.dataset.field)) {
             updatePackageFormTotal(form);

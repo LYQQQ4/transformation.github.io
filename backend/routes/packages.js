@@ -109,6 +109,14 @@ function roundMetricValue(value, digits = 4) {
   return Number(value.toFixed(digits));
 }
 
+function normalizeStoredBoxTypeId(value) {
+  const normalized = normalizeText(value);
+  if (!normalized || normalized === DEFAULT_BOX_TYPE_ID) {
+    return null;
+  }
+  return normalized;
+}
+
 function calculateVolumeCm3(length, width, height) {
   if (![length, width, height].every((value) => Number.isFinite(value))) {
     return null;
@@ -195,6 +203,7 @@ function normalizePackageRows(rows = [], boxTypeMap = new Map()) {
 }
 
 function normalizePackageRow(row = {}, order = 1, boxTypeMap = new Map()) {
+  const requestedBoxTypeId = normalizeStoredBoxTypeId(row.box_type_id);
   const normalized = {
     package_label: normalizeText(row.package_label) || buildPackageLabel(order),
     package_order: Number.parseInt(row.package_order, 10) || order,
@@ -208,7 +217,7 @@ function normalizePackageRow(row = {}, order = 1, boxTypeMap = new Map()) {
     volume: parseNullableNumber(row.volume),
     charge_weight: parseNullableNumber(row.charge_weight),
     package_type: normalizeText(row.package_type) || null,
-    box_type_id: normalizeText(row.box_type_id) || null,
+    box_type_id: requestedBoxTypeId,
     customs_port: normalizeText(row.customs_port) || null,
     customs_title: normalizeText(row.customs_title) || null,
     regulatory_conditions: normalizeText(row.regulatory_conditions) || null,
@@ -216,9 +225,11 @@ function normalizePackageRow(row = {}, order = 1, boxTypeMap = new Map()) {
     remark2: normalizeText(row.remark2) || null,
   };
 
-  normalized.box_type_id = inferBoxTypeIdFromSnapshot(normalized, boxTypeMap);
-  applyBoxTypeToPackageRow(normalized, boxTypeMap);
+  if (requestedBoxTypeId && boxTypeMap.has(requestedBoxTypeId)) {
+    applyBoxTypeToPackageRow(normalized, boxTypeMap);
+  }
   applyPackageVolumeFallback(normalized);
+  normalized.box_type_id = resolvePackageBoxTypeId(normalized, requestedBoxTypeId, boxTypeMap);
 
   return normalized;
 }
@@ -275,31 +286,48 @@ function isSameMetricValue(left, right) {
   return Number.isFinite(left) && Number.isFinite(right) && Number(left) === Number(right);
 }
 
-function inferBoxTypeIdFromSnapshot(item, boxTypeMap) {
-  if (item.box_type_id) {
-    return item.box_type_id;
+function isSelectableBoxType(boxType) {
+  return !!boxType && normalizeStoredBoxTypeId(boxType.box_type_id) !== null;
+}
+
+function doesPackageRowMatchBoxType(item, boxType) {
+  if (!isSelectableBoxType(boxType)) {
+    return false;
   }
 
   const packageType = normalizeText(item.package_type);
   if (
-    packageType &&
-    Number.isFinite(item.length) &&
-    Number.isFinite(item.width) &&
-    Number.isFinite(item.height)
+    !packageType ||
+    !Number.isFinite(item.length) ||
+    !Number.isFinite(item.width) ||
+    !Number.isFinite(item.height)
   ) {
-    const matched = [...boxTypeMap.values()].find((boxType) =>
-      boxType.box_type_id !== DEFAULT_BOX_TYPE_ID &&
-      normalizeText(boxType.package_type) === packageType &&
-      isSameMetricValue(boxType.length_cm, item.length) &&
-      isSameMetricValue(boxType.width_cm, item.width) &&
-      isSameMetricValue(boxType.height_cm, item.height)
-    );
-    if (matched) {
-      return matched.box_type_id;
+    return false;
+  }
+
+  return (
+    normalizeText(boxType.package_type) === packageType &&
+    isSameMetricValue(boxType.length_cm, item.length) &&
+    isSameMetricValue(boxType.width_cm, item.width) &&
+    isSameMetricValue(boxType.height_cm, item.height)
+  );
+}
+
+function findMatchingBoxTypes(item, boxTypeMap) {
+  return [...boxTypeMap.values()].filter((boxType) => doesPackageRowMatchBoxType(item, boxType));
+}
+
+function resolvePackageBoxTypeId(item, requestedBoxTypeId, boxTypeMap) {
+  const normalizedRequestedId = normalizeStoredBoxTypeId(requestedBoxTypeId);
+  if (normalizedRequestedId) {
+    const requestedBoxType = boxTypeMap.get(normalizedRequestedId);
+    if (doesPackageRowMatchBoxType(item, requestedBoxType)) {
+      return normalizedRequestedId;
     }
   }
 
-  return DEFAULT_BOX_TYPE_ID;
+  const matches = findMatchingBoxTypes(item, boxTypeMap);
+  return matches.length === 1 ? matches[0].box_type_id : null;
 }
 
 async function fetchBoxTypes(db) {
@@ -398,51 +426,39 @@ async function ensurePackageSchema(db) {
         );
 
         const [legacyTypes] = await connection.execute(
-          "SELECT DISTINCT package_type FROM `package` WHERE package_type IS NOT NULL AND TRIM(package_type) <> '' AND (box_type_id IS NULL OR box_type_id = '')"
+          "SELECT DISTINCT package_type FROM `package` WHERE package_type IS NOT NULL AND TRIM(package_type) <> ''"
         );
 
         for (const row of legacyTypes) {
           const packageType = normalizeText(row.package_type);
-          if (!packageType) {
+          if (!packageType || packageTypeToBoxTypeId.has(packageType)) {
             continue;
           }
-          let boxTypeId = packageTypeToBoxTypeId.get(packageType);
-          if (!boxTypeId) {
-            const sanitized = packageType
-              .toUpperCase()
-              .replace(/[^A-Z0-9]+/g, "-")
-              .replace(/^-+|-+$/g, "")
-              .slice(0, 48) || "BOX";
-            boxTypeId = sanitized;
-            let suffix = 1;
-            while (existingBoxTypeIds.has(boxTypeId)) {
-              suffix += 1;
-              boxTypeId = `${sanitized}-${suffix}`;
-            }
 
-            await connection.execute(
-              `INSERT INTO package_box_types (box_type_id, package_type, length_cm, width_cm, height_cm, volume_cm3)
-               SELECT ?, ?, NULLIF(length, 0), NULLIF(width, 0), NULLIF(height, 0), NULLIF(volume, 0)
-               FROM \`package\`
-               WHERE package_type = ?
-               ORDER BY id ASC
-               LIMIT 1`,
-              [boxTypeId, packageType, packageType]
-            );
-            existingBoxTypeIds.add(boxTypeId);
-            packageTypeToBoxTypeId.set(packageType, boxTypeId);
+          const sanitized = packageType
+            .toUpperCase()
+            .replace(/[^A-Z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 48) || "BOX";
+          let boxTypeId = sanitized;
+          let suffix = 1;
+          while (existingBoxTypeIds.has(boxTypeId)) {
+            suffix += 1;
+            boxTypeId = `${sanitized}-${suffix}`;
           }
 
           await connection.execute(
-            "UPDATE `package` SET box_type_id = ? WHERE package_type = ? AND (box_type_id IS NULL OR box_type_id = '')",
-            [boxTypeId, packageType]
+            `INSERT INTO package_box_types (box_type_id, package_type, length_cm, width_cm, height_cm, volume_cm3)
+             SELECT ?, ?, NULLIF(length, 0), NULLIF(width, 0), NULLIF(height, 0), NULLIF(volume, 0)
+             FROM \`package\`
+             WHERE package_type = ?
+             ORDER BY id ASC
+             LIMIT 1`,
+            [boxTypeId, packageType, packageType]
           );
+          existingBoxTypeIds.add(boxTypeId);
+          packageTypeToBoxTypeId.set(packageType, boxTypeId);
         }
-
-        await connection.execute(
-          "UPDATE `package` SET box_type_id = ? WHERE (box_type_id IS NULL OR box_type_id = '')",
-          [DEFAULT_BOX_TYPE_ID]
-        );
       } finally {
         connection.release();
       }
@@ -515,7 +531,10 @@ function validatePackageExcelData(data, boxTypeMap = new Map()) {
   });
 
   if (result.data.box_type_id !== undefined) {
-    result.data.box_type_id = normalizeText(result.data.box_type_id);
+    result.data.box_type_id = normalizeStoredBoxTypeId(result.data.box_type_id);
+    if (result.data.box_type_id && !boxTypeMap.has(result.data.box_type_id)) {
+      result.errors.push(`箱型ID "${result.data.box_type_id}" 不存在于包装信息库中`);
+    }
   }
 
   result.data.serial_number = normalizeText(result.data.serial_number);
@@ -549,7 +568,7 @@ function validatePackageExcelData(data, boxTypeMap = new Map()) {
   return result;
 }
 
-module.exports = (db) => {
+const createPackagesRouter = (db) => {
   router.get("/box-types", async (req, res) => {
     try {
       await ensurePackageSchema(db);
@@ -675,8 +694,8 @@ module.exports = (db) => {
       }
 
       await db.execute(
-        "UPDATE `package` SET box_type_id = ? WHERE box_type_id = ?",
-        [DEFAULT_BOX_TYPE_ID, current.box_type_id]
+        "UPDATE `package` SET box_type_id = NULL WHERE box_type_id = ?",
+        [current.box_type_id]
       );
       await db.execute("DELETE FROM package_box_types WHERE id = ?", [req.params.id]);
       return res.json({ success: true });
@@ -726,7 +745,7 @@ module.exports = (db) => {
 
       const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.setHeader("Content-Disposition", 'attachment; filename="package_import_template.xlsx"');
+      res.setHeader("Content-Disposition", "attachment; filename=\"package_import_template.xlsx\"");
       return res.send(buffer);
     } catch (error) {
       return res.status(500).json({ error: "Failed to generate import template: " + error.message });
@@ -1113,4 +1132,15 @@ module.exports = (db) => {
   });
 
   return router;
+};
+
+module.exports = createPackagesRouter;
+module.exports._test = {
+  DEFAULT_BOX_TYPE_ID,
+  normalizeStoredBoxTypeId,
+  doesPackageRowMatchBoxType,
+  findMatchingBoxTypes,
+  resolvePackageBoxTypeId,
+  normalizePackageRow,
+  validatePackageExcelData,
 };
