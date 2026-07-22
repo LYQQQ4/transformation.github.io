@@ -16,6 +16,47 @@ let currentOrderPickupTrackingData = null;
 let currentOrderDeliveryTrackingData = null;
 let currentOrderCustomsClearanceData = null;
 
+const SHARED_TRACKING_FIELD_DEFINITIONS = {
+    tracking_number: { label: "运单号" },
+    transport_supplier: {
+        label: "运输供应商",
+        getValue: (record) => record?.transport_supplier ?? record?.supplier ?? ""
+    },
+    contract_number: { label: "合同协议号" },
+    cargo_flow_info: { label: "货物流转信息" },
+    value_added_services: { label: "增值服务备注" },
+    customs_declaration_number: { label: "报关单号" },
+    customs_supplier: { label: "报关供应商" },
+    remark1: { label: "备注1" },
+    remark2: { label: "备注2" }
+};
+
+const PICKUP_TRACKING_SHARED_FORM_FIELDS = {
+    tracking_number: "#pickupTrackingNumber",
+    transport_supplier: "#pickupTrackingTransportSupplier",
+    contract_number: "#pickupTrackingContractNumber",
+    cargo_flow_info: "#pickupTrackingCargoFlowInfo",
+    value_added_services: "#pickupTrackingValueAddedServices",
+    remark1: "#pickupTrackingRemark1",
+    remark2: "#pickupTrackingRemark2"
+};
+
+const TRANSFER_TRACKING_SHARED_FORM_FIELDS = {
+    tracking_number: "#transferTrackingNumber",
+    transport_supplier: "#transferSupplier",
+    cargo_flow_info: "#transferCargoFlowInfo",
+    value_added_services: "#transferValueAddedServices",
+    remark1: "#transferRemark1",
+    remark2: "#transferRemark2"
+};
+
+const CUSTOMS_TRACKING_SHARED_FORM_FIELDS = {
+    customs_declaration_number: "#customsDeclarationNumber",
+    customs_supplier: "#customsSupplier",
+    remark1: "#customsRemark1",
+    remark2: "#customsRemark2"
+};
+
 function formatDateOnly(value) {
     if (!value) {
         return "";
@@ -1062,6 +1103,78 @@ function buildCommonOrderFieldItems(record, serialNumber = "") {
     ];
 }
 
+function getSharedTrackingFieldValue(record, fieldName) {
+    const definition = SHARED_TRACKING_FIELD_DEFINITIONS[fieldName];
+    if (!definition) {
+        return "";
+    }
+
+    const rawValue = typeof definition.getValue === "function"
+        ? definition.getValue(record || {})
+        : record?.[fieldName];
+
+    return rawValue ?? "";
+}
+
+function buildSharedTrackingDetailItems(record, fieldNames) {
+    return fieldNames
+        .filter(fieldName => SHARED_TRACKING_FIELD_DEFINITIONS[fieldName])
+        .map(fieldName => [
+            SHARED_TRACKING_FIELD_DEFINITIONS[fieldName].label,
+            getSharedTrackingFieldValue(record, fieldName)
+        ]);
+}
+
+function fillSharedFormFields(form, fieldMap, data = {}) {
+    Object.entries(fieldMap).forEach(([fieldName, selector]) => {
+        const element = form.querySelector(selector);
+        if (element) {
+            element.value = getSharedTrackingFieldValue(data, fieldName);
+        }
+    });
+}
+
+function clearSharedFormFields(form, fieldMap) {
+    Object.values(fieldMap).forEach(selector => {
+        const element = form.querySelector(selector);
+        if (element) {
+            element.value = "";
+        }
+    });
+}
+
+function collectSharedFormPayload(form, fieldMap, options = {}) {
+    const { trim = false, nullIfEmpty = false } = options;
+    return Object.entries(fieldMap).reduce((payload, [fieldName, selector]) => {
+        const element = form.querySelector(selector);
+        if (!element) {
+            return payload;
+        }
+
+        let value = element.value;
+        if (trim && typeof value === "string") {
+            value = value.trim();
+        }
+
+        payload[fieldName] = nullIfEmpty && value === "" ? null : value;
+        return payload;
+    }, {});
+}
+
+function refreshTrackingLinkedViews(serialNumber) {
+    loadPickupTrackings();
+    loadTransfers();
+    loadCustomsClearance();
+    loadPackages();
+
+    if (currentOrderDetailSerial && currentOrderDetailSerial === serialNumber) {
+        loadOrderPackageDetails(serialNumber);
+        loadOrderPickupTrackingDetails(serialNumber);
+        loadOrderDeliveryTrackingDetails(serialNumber);
+        loadOrderCustomsClearanceDetails(serialNumber);
+    }
+}
+
 function groupPackagesBySerial(packages) {
     const grouped = new Map();
 
@@ -1187,10 +1300,18 @@ function renderOrderPickupTrackingContent(serialNumber, trackingData) {
     const detailItems = [
         ...buildCommonOrderFieldItems(info, serialNumber),
         ["运输方式", info.transport_mode || ""],
-        ["运单号", info.tracking_number || ""],
         ["报关口岸", info.customs_port || ""],
         ["提货日期", formatDateOnly(info.pickup_date)],
-        ["到货时间", formatDateOnly(info.arrival_time)]
+        ["到货时间", formatDateOnly(info.arrival_time)],
+        ...buildSharedTrackingDetailItems(info, [
+            "tracking_number",
+            "transport_supplier",
+            "contract_number",
+            "cargo_flow_info",
+            "value_added_services",
+            "remark1",
+            "remark2"
+        ])
     ];
 
     trackingContent.innerHTML = `
@@ -1256,10 +1377,16 @@ function renderOrderDeliveryTrackingContent(serialNumber, deliveryData) {
     const detailItems = [
         ...buildCommonOrderFieldItems(info, serialNumber),
         ["运输方式", info.transport_mode || ""],
-        ["运单号", info.tracking_number || ""],
         ["提货日期", formatDateOnly(info.pickup_date)],
         ["到货时间", formatDateOnly(info.arrival_port_time)],
-        ["完整单据回复时间", formatDateOnly(info.complete_docs_send_time)]
+        ["完整单据回复时间", formatDateOnly(info.complete_docs_send_time)],
+        ...buildSharedTrackingDetailItems(info, [
+            "tracking_number",
+            "transport_supplier",
+            "cargo_flow_info",
+            "remark1",
+            "remark2"
+        ])
     ];
 
     deliveryContent.innerHTML = `
@@ -1277,15 +1404,17 @@ function renderOrderLogisticsContent(serialNumber, logisticsData) {
     const detailItems = [
         ...buildCommonOrderFieldItems(info, serialNumber),
         ["运输方式", info.transport_mode || ""],
-        ["运单号", info.tracking_number || ""],
         ["提货日期", formatDateOnly(info.pickup_date)],
         ["到货时间", formatDateOnly(info.arrival_port_time)],
         ["完整单据回复时间", formatDateOnly(info.complete_docs_send_time)],
-        ["运输供应商", info.supplier || ""],
-        ["货物流转信息", info.cargo_flow_info || ""],
-        ["增值服务备注", info.value_added_services || ""],
-        ["备注1", info.remark1 || ""],
-        ["备注2", info.remark2 || ""]
+        ...buildSharedTrackingDetailItems(info, [
+            "tracking_number",
+            "transport_supplier",
+            "cargo_flow_info",
+            "value_added_services",
+            "remark1",
+            "remark2"
+        ])
     ];
 
     logisticsContent.innerHTML = `<div class="detail-grid">${buildDetailGridItems(detailItems)}</div>`;
@@ -1354,11 +1483,16 @@ function renderOrderCustomsClearanceContent(serialNumber, customsData) {
     const detailItems = [
         ...buildCommonOrderFieldItems(info, serialNumber),
         ["运输方式", info.transport_mode || ""],
-        ["运单号", info.tracking_number || ""],
         ["开始报关时间", formatDateOnly(info.customs_start_time)],
         ["付税时间", formatDateOnly(info.tax_payment_time)],
         ["放行时间", formatDateOnly(info.release_time)],
-        ["报关单号", info.customs_declaration_number || ""]
+        ...buildSharedTrackingDetailItems(info, [
+            "tracking_number",
+            "customs_declaration_number",
+            "customs_supplier",
+            "remark1",
+            "remark2"
+        ])
     ];
 
     customsContent.innerHTML = `
@@ -4352,12 +4486,30 @@ function showPickupTrackingForm(trackingData = null) {
                 <input type="hidden" id="pickupTrackingOrigin">
                 <input type="hidden" id="pickupTrackingDestination">
                 <input type="hidden" id="pickupTrackingCustomsTitle">
-                <input type="hidden" id="pickupTrackingTransportSupplier">
-                <input type="hidden" id="pickupTrackingContractNumber">
-                <textarea id="pickupTrackingCargoFlowInfo" style="display:none;"></textarea>
-                <textarea id="pickupTrackingValueAddedServices" style="display:none;"></textarea>
-                <textarea id="pickupTrackingRemark1" style="display:none;"></textarea>
-                <textarea id="pickupTrackingRemark2" style="display:none;"></textarea>
+                <div class="form-group">
+                    <label>运输供应商:</label>
+                    <input type="text" id="pickupTrackingTransportSupplier">
+                </div>
+                <div class="form-group">
+                    <label>合同协议号:</label>
+                    <input type="text" id="pickupTrackingContractNumber">
+                </div>
+                <div class="form-group">
+                    <label>货物流转信息:</label>
+                    <textarea id="pickupTrackingCargoFlowInfo"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>增值服务备注:</label>
+                    <textarea id="pickupTrackingValueAddedServices"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>备注1:</label>
+                    <textarea id="pickupTrackingRemark1"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>备注2:</label>
+                    <textarea id="pickupTrackingRemark2"></textarea>
+                </div>
                 <div class="button-group">
                     <button type="button" onclick="savePickupTracking()">保存</button>
                     <button type="button" onclick="hidePickupTrackingForm()">取消</button>
@@ -4376,36 +4528,24 @@ function showPickupTrackingForm(trackingData = null) {
             return;
         }
         form.querySelector("#pickupTrackingTransportMode").value = data.transport_mode || "";
-        form.querySelector("#pickupTrackingNumber").value = data.tracking_number || "";
         form.querySelector("#pickupTrackingOrigin").value = data.origin || "";
         form.querySelector("#pickupTrackingDestination").value = data.destination || "";
         form.querySelector("#pickupTrackingCustomsPort").value = data.customs_port || "";
         form.querySelector("#pickupTrackingCustomsTitle").value = data.customs_title || "";
         setTransferDateValue("pickupTrackingPickupDate", data.pickup_date, form);
         setTransferDateValue("pickupTrackingArrivalTime", data.arrival_time, form);
-        form.querySelector("#pickupTrackingTransportSupplier").value = data.transport_supplier || "";
-        form.querySelector("#pickupTrackingContractNumber").value = data.contract_number || "";
-        form.querySelector("#pickupTrackingCargoFlowInfo").value = data.cargo_flow_info || "";
-        form.querySelector("#pickupTrackingValueAddedServices").value = data.value_added_services || "";
-        form.querySelector("#pickupTrackingRemark1").value = data.remark1 || "";
-        form.querySelector("#pickupTrackingRemark2").value = data.remark2 || "";
+        fillSharedFormFields(form, PICKUP_TRACKING_SHARED_FORM_FIELDS, data);
     };
 
     const clearFields = () => {
         form.querySelector("#pickupTrackingTransportMode").value = "";
-        form.querySelector("#pickupTrackingNumber").value = "";
         form.querySelector("#pickupTrackingOrigin").value = "";
         form.querySelector("#pickupTrackingDestination").value = "";
         form.querySelector("#pickupTrackingCustomsPort").value = "";
         form.querySelector("#pickupTrackingCustomsTitle").value = "";
         setTransferDateValue("pickupTrackingPickupDate", "", form);
         setTransferDateValue("pickupTrackingArrivalTime", "", form);
-        form.querySelector("#pickupTrackingTransportSupplier").value = "";
-        form.querySelector("#pickupTrackingContractNumber").value = "";
-        form.querySelector("#pickupTrackingCargoFlowInfo").value = "";
-        form.querySelector("#pickupTrackingValueAddedServices").value = "";
-        form.querySelector("#pickupTrackingRemark1").value = "";
-        form.querySelector("#pickupTrackingRemark2").value = "";
+        clearSharedFormFields(form, PICKUP_TRACKING_SHARED_FORM_FIELDS);
     };
 
     if (trackingData) {
@@ -4489,21 +4629,21 @@ async function savePickupTracking() {
         updateTransferDateHidden("pickupTrackingArrivalTime", form);
     }
 
+    const sharedPayload = collectSharedFormPayload(form, PICKUP_TRACKING_SHARED_FORM_FIELDS, { trim: true });
+    if (!sharedPayload.tracking_number) {
+        showMessage("运单号不能为空", "error");
+        return;
+    }
+
     const payload = {
         transport_mode: document.getElementById("pickupTrackingTransportMode").value,
-        tracking_number: document.getElementById("pickupTrackingNumber").value,
         origin: document.getElementById("pickupTrackingOrigin").value,
         destination: document.getElementById("pickupTrackingDestination").value,
         customs_port: document.getElementById("pickupTrackingCustomsPort").value,
         customs_title: document.getElementById("pickupTrackingCustomsTitle").value,
         pickup_date: document.getElementById("pickupTrackingPickupDate").value,
         arrival_time: document.getElementById("pickupTrackingArrivalTime").value,
-        transport_supplier: document.getElementById("pickupTrackingTransportSupplier").value,
-        contract_number: document.getElementById("pickupTrackingContractNumber").value,
-        cargo_flow_info: document.getElementById("pickupTrackingCargoFlowInfo").value,
-        value_added_services: document.getElementById("pickupTrackingValueAddedServices").value,
-        remark1: document.getElementById("pickupTrackingRemark1").value,
-        remark2: document.getElementById("pickupTrackingRemark2").value
+        ...sharedPayload
     };
 
     try {
@@ -4516,10 +4656,7 @@ async function savePickupTracking() {
         if (response.ok) {
             showMessage("提货运输跟踪保存成功");
             hidePickupTrackingForm();
-            loadPickupTrackings();
-            if (currentOrderDetailSerial && currentOrderDetailSerial === serialNumber) {
-                loadOrderPickupTrackingDetails(serialNumber);
-            }
+            refreshTrackingLinkedViews(serialNumber);
         } else {
             const error = await response.json();
             showMessage("保存失败: " + error.error, "error");
@@ -4695,11 +4832,23 @@ function showTransferForm(transferData = null) {
                         <input type="date" id="transferCompleteDocsSendTimePicker" class="date-picker-trigger" aria-label="选择完整单据回复时间">
                     </div>
                 </div>
-                <textarea id="transferCargoFlowInfo" style="display:none;"></textarea>
-                <input type="hidden" id="transferSupplier">
+                <div class="form-group">
+                    <label>运输供应商:</label>
+                    <input type="text" id="transferSupplier">
+                </div>
+                <div class="form-group">
+                    <label>货物流转信息:</label>
+                    <textarea id="transferCargoFlowInfo"></textarea>
+                </div>
                 <textarea id="transferValueAddedServices" style="display:none;"></textarea>
-                <textarea id="transferRemark1" style="display:none;"></textarea>
-                <textarea id="transferRemark2" style="display:none;"></textarea>
+                <div class="form-group">
+                    <label>备注1:</label>
+                    <textarea id="transferRemark1"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>备注2:</label>
+                    <textarea id="transferRemark2"></textarea>
+                </div>
                 <div class="button-group">
                     <button type="button" onclick="saveTransfer()">保存</button>
                     <button type="button" onclick="hideTransferForm()">取消</button>
@@ -4718,28 +4867,18 @@ function showTransferForm(transferData = null) {
             return;
         }
         form.querySelector("#transferTransportMode").value = data.transport_mode || "";
-        form.querySelector("#transferTrackingNumber").value = data.tracking_number || "";
         setTransferDateValue("transferPickupDate", data.pickup_date, form);
         setTransferDateValue("transferArrivalPortTime", data.arrival_port_time, form);
         setTransferDateValue("transferCompleteDocsSendTime", data.complete_docs_send_time, form);
-        form.querySelector("#transferCargoFlowInfo").value = data.cargo_flow_info || "";
-        form.querySelector("#transferSupplier").value = data.supplier || "";
-        form.querySelector("#transferValueAddedServices").value = data.value_added_services || "";
-        form.querySelector("#transferRemark1").value = data.remark1 || "";
-        form.querySelector("#transferRemark2").value = data.remark2 || "";
+        fillSharedFormFields(form, TRANSFER_TRACKING_SHARED_FORM_FIELDS, data);
     };
 
     const clearTransferFormFields = () => {
         form.querySelector("#transferTransportMode").value = "";
-        form.querySelector("#transferTrackingNumber").value = "";
         setTransferDateValue("transferPickupDate", "", form);
         setTransferDateValue("transferArrivalPortTime", "", form);
         setTransferDateValue("transferCompleteDocsSendTime", "", form);
-        form.querySelector("#transferCargoFlowInfo").value = "";
-        form.querySelector("#transferSupplier").value = "";
-        form.querySelector("#transferValueAddedServices").value = "";
-        form.querySelector("#transferRemark1").value = "";
-        form.querySelector("#transferRemark2").value = "";
+        clearSharedFormFields(form, TRANSFER_TRACKING_SHARED_FORM_FIELDS);
     };
 
     // 填充表单数据
@@ -4801,7 +4940,8 @@ function hideTransferForm() {
 async function saveTransfer() {
     const form = document.getElementById("transferFormData");
     const serialNumber = document.getElementById("transferSerialNumber").value.trim();
-    const trackingNumber = document.getElementById("transferTrackingNumber").value.trim();
+    const sharedPayload = collectSharedFormPayload(form, TRANSFER_TRACKING_SHARED_FORM_FIELDS, { trim: true });
+    const trackingNumber = sharedPayload.tracking_number || "";
 
     if (!serialNumber) {
         showMessage("流水号不能为空", "error");
@@ -4842,15 +4982,10 @@ async function saveTransfer() {
     const transferData = {
         serial_number: serialNumber,
         transport_mode: document.getElementById("transferTransportMode").value,
-        tracking_number: trackingNumber,
         pickup_date: document.getElementById("transferPickupDate").value,
         arrival_port_time: document.getElementById("transferArrivalPortTime").value,
         complete_docs_send_time: document.getElementById("transferCompleteDocsSendTime").value,
-        cargo_flow_info: document.getElementById("transferCargoFlowInfo").value,
-        supplier: document.getElementById("transferSupplier").value,
-        value_added_services: document.getElementById("transferValueAddedServices").value,
-        remark1: document.getElementById("transferRemark1").value,
-        remark2: document.getElementById("transferRemark2").value
+        ...sharedPayload
     };
 
     try {
@@ -4864,10 +4999,7 @@ async function saveTransfer() {
         if (response.ok) {
             showMessage("送货运输跟踪保存成功");
             hideTransferForm();
-            loadTransfers();
-            if (currentOrderDetailSerial && currentOrderDetailSerial === serialNumber) {
-                loadOrderDeliveryTrackingDetails(serialNumber);
-            }
+            refreshTrackingLinkedViews(serialNumber);
         } else {
             const error = await response.json();
             showMessage("保存失败: " + error.error, "error");
@@ -6307,9 +6439,18 @@ function showCustomsForm(recordData = null) {
                     <label>报关单号:</label>
                     <input type="text" id="customsDeclarationNumber">
                 </div>
-                <input type="hidden" id="customsSupplier">
-                <textarea id="customsRemark1" style="display:none;"></textarea>
-                <textarea id="customsRemark2" style="display:none;"></textarea>
+                <div class="form-group">
+                    <label>报关供应商:</label>
+                    <input type="text" id="customsSupplier">
+                </div>
+                <div class="form-group">
+                    <label>备注1:</label>
+                    <textarea id="customsRemark1"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>备注2:</label>
+                    <textarea id="customsRemark2"></textarea>
+                </div>
                 <div class="button-group">
                     <button type="button" onclick="saveCustomsClearance()">保存</button>
                     <button type="button" onclick="hideCustomsForm()">取消</button>
@@ -6332,10 +6473,7 @@ function showCustomsForm(recordData = null) {
         setTransferDateValue("customsStartTime", data.customs_start_time, form);
         setTransferDateValue("taxPaymentTime", data.tax_payment_time, form);
         setTransferDateValue("releaseTime", data.release_time, form);
-        document.getElementById("customsDeclarationNumber").value = data.customs_declaration_number || "";
-        document.getElementById("customsSupplier").value = data.customs_supplier || "";
-        document.getElementById("customsRemark1").value = data.remark1 || "";
-        document.getElementById("customsRemark2").value = data.remark2 || "";
+        fillSharedFormFields(form, CUSTOMS_TRACKING_SHARED_FORM_FIELDS, data);
     };
 
     const clearCustomsFormFields = () => {
@@ -6343,10 +6481,7 @@ function showCustomsForm(recordData = null) {
         setTransferDateValue("customsStartTime", "", form);
         setTransferDateValue("taxPaymentTime", "", form);
         setTransferDateValue("releaseTime", "", form);
-        document.getElementById("customsDeclarationNumber").value = "";
-        document.getElementById("customsSupplier").value = "";
-        document.getElementById("customsRemark1").value = "";
-        document.getElementById("customsRemark2").value = "";
+        clearSharedFormFields(form, CUSTOMS_TRACKING_SHARED_FORM_FIELDS);
     };
 
     // 填充表单数据
@@ -6429,15 +6564,13 @@ async function saveCustomsClearance() {
         updateTransferDateHidden("releaseTime", form);
     }
 
+    const sharedPayload = collectSharedFormPayload(form, CUSTOMS_TRACKING_SHARED_FORM_FIELDS, { trim: true, nullIfEmpty: true });
     const recordData = {
         serial_number: serialNumber,
         customs_start_time: document.getElementById("customsStartTime").value || null,
         tax_payment_time: document.getElementById("taxPaymentTime").value || null,
         release_time: document.getElementById("releaseTime").value || null,
-        customs_declaration_number: document.getElementById("customsDeclarationNumber").value.trim() || null,
-        customs_supplier: document.getElementById("customsSupplier").value.trim() || null,
-        remark1: document.getElementById("customsRemark1").value.trim() || null,
-        remark2: document.getElementById("customsRemark2").value.trim() || null
+        ...sharedPayload
     };
 
     try {

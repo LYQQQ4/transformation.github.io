@@ -28,7 +28,7 @@ module.exports = (db) => {
           o.trade_term,
           o.product_name,
           COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
-          COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
+          t.tracking_number AS tracking_number
         FROM customs_clearance_tracking c
         LEFT JOIN orders o ON c.serial_number = o.serial_number
         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = c.serial_number
@@ -59,7 +59,7 @@ module.exports = (db) => {
            o.trade_term,
            o.product_name,
            COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
-           COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
+           t.tracking_number AS tracking_number
          FROM customs_clearance_tracking c
          LEFT JOIN orders o ON c.serial_number = o.serial_number
          LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = c.serial_number
@@ -98,7 +98,7 @@ module.exports = (db) => {
            o.trade_term,
            o.product_name,
            COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
-           COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
+           t.tracking_number AS tracking_number
          FROM customs_clearance_tracking c
          LEFT JOIN orders o ON c.serial_number = o.serial_number
          LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = c.serial_number

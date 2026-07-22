@@ -1,5 +1,9 @@
 const express = require("express");
 const router = express.Router();
+const {
+  normalizeTransferSharedPayload,
+  sanitizeNullableString,
+} = require("../lib/tracking_fields");
 
 function normalizeOptionalTrackingValue(value) {
   if (value === undefined || value === null) {
@@ -79,9 +83,40 @@ function normalizeOptionalDateField(value, fieldLabel, options = {}) {
   }
 
   return {
-    value: `${dateParts.year}-${dateParts.month}-${dateParts.day} ${padDatePart(normalizedHour)}:${padDatePart(normalizedMinute)}:${padDatePart(normalizedSecond)}`
+    value: `${dateParts.year}-${dateParts.month}-${dateParts.day} ${padDatePart(normalizedHour)}:${padDatePart(normalizedMinute)}:${padDatePart(normalizedSecond)}`,
   };
 }
+
+const PICKUP_SELECT_COLUMNS = `
+          t.id,
+          t.serial_number,
+          t.transport_mode,
+          tr.tracking_number AS tracking_number,
+          t.origin,
+          t.destination,
+          t.customs_port,
+          t.customs_title,
+          t.pickup_date,
+          t.arrival_time,
+          t.transport_supplier,
+          t.contract_number,
+          t.cargo_flow_info,
+          t.value_added_services,
+          t.remark1,
+          t.remark2,
+          t.created_at,
+          t.updated_at,
+          o.company_name,
+          o.orderer,
+          o.business_type,
+          o.sender_id,
+          o.customer_id,
+          o.receive_date,
+          o.origin AS order_origin,
+          o.destination AS order_destination,
+          o.trade_term,
+          o.product_name
+`;
 
 module.exports = (db) => {
   router.get("/", async (req, res) => {
@@ -93,18 +128,9 @@ module.exports = (db) => {
 
       const [rows] = await db.execute(`
         SELECT
-          t.*,
-          o.company_name,
-          o.orderer,
-          o.business_type,
-          o.sender_id,
-          o.customer_id,
-          o.receive_date,
-          o.origin AS order_origin,
-          o.destination AS order_destination,
-          o.trade_term,
-          o.product_name
+${PICKUP_SELECT_COLUMNS}
         FROM pickup_transport_tracking t
+        LEFT JOIN transfer tr ON tr.serial_number = t.serial_number
         LEFT JOIN orders o ON t.serial_number = o.serial_number
         ORDER BY t.created_at DESC
         LIMIT 20
@@ -119,18 +145,9 @@ module.exports = (db) => {
     try {
       const [rows] = await db.execute(`
         SELECT
-          t.*,
-          o.company_name,
-          o.orderer,
-          o.business_type,
-          o.sender_id,
-          o.customer_id,
-          o.receive_date,
-          o.origin AS order_origin,
-          o.destination AS order_destination,
-          o.trade_term,
-          o.product_name
+${PICKUP_SELECT_COLUMNS}
         FROM pickup_transport_tracking t
+        LEFT JOIN transfer tr ON tr.serial_number = t.serial_number
         LEFT JOIN orders o ON t.serial_number = o.serial_number
         WHERE t.serial_number = ?
       `, [req.params.serial_number]);
@@ -146,23 +163,32 @@ module.exports = (db) => {
   });
 
   router.put("/serial/:serial_number", async (req, res) => {
+    const connection = await db.getConnection();
+    let transactionStarted = false;
     try {
+      const sharedFields = normalizeTransferSharedPayload(req.body);
       const {
         transport_mode,
-        tracking_number,
         origin,
         destination,
         customs_port,
         customs_title,
         pickup_date,
         arrival_time,
+      } = req.body;
+      const {
+        tracking_number,
         transport_supplier,
         contract_number,
         cargo_flow_info,
         value_added_services,
         remark1,
-        remark2
-      } = req.body;
+        remark2,
+      } = sharedFields;
+
+      if (!tracking_number) {
+        return res.status(400).json({ error: "运单号不能为空" });
+      }
 
       const pickupDateResult = normalizeOptionalDateField(pickup_date, "提货日期");
       const arrivalTimeResult = normalizeOptionalDateField(arrival_time, "到货时间", { includeTime: true });
@@ -172,58 +198,70 @@ module.exports = (db) => {
         return res.status(400).json({ error: dateErrors.join("；") });
       }
 
-      const sql = `UPDATE pickup_transport_tracking SET
-        transport_mode = ?,
-        tracking_number = ?,
-        origin = ?,
-        destination = ?,
-        customs_port = ?,
-        customs_title = ?,
-        pickup_date = ?,
-        arrival_time = ?,
-        transport_supplier = ?,
-        contract_number = ?,
-        cargo_flow_info = ?,
-        value_added_services = ?,
-        remark1 = ?,
-        remark2 = ?
-        WHERE serial_number = ?`;
+      const serialNumber = sanitizeNullableString(req.params.serial_number);
+      await connection.beginTransaction();
+      transactionStarted = true;
 
-      const sanitize = (v) => {
-        if (typeof v === "undefined" || v === null) {
-          return null;
-        }
-        if (typeof v === "string") {
-          const trimmed = v.trim();
-          return trimmed === "" ? null : trimmed;
-        }
-        return v;
-      };
-      const [result] = await db.execute(sql, [
-        sanitize(transport_mode),
-        sanitize(tracking_number),
-        sanitize(origin),
-        sanitize(destination),
-        sanitize(customs_port),
-        sanitize(customs_title),
-        pickupDateResult.value,
-        arrivalTimeResult.value,
-        sanitize(transport_supplier),
-        sanitize(contract_number),
-        sanitize(cargo_flow_info),
-        sanitize(value_added_services),
-        sanitize(remark1),
-        sanitize(remark2),
-        sanitize(req.params.serial_number)
-      ]);
+      const [transferResult] = await connection.execute(
+        "UPDATE transfer SET tracking_number = ? WHERE serial_number = ?",
+        [tracking_number, serialNumber]
+      );
+
+      if (transferResult.affectedRows === 0) {
+        await connection.rollback();
+        return res.status(404).json({ error: "Transfer not found" });
+      }
+
+      const [result] = await connection.execute(
+        `UPDATE pickup_transport_tracking SET
+          transport_mode = ?,
+          tracking_number = ?,
+          origin = ?,
+          destination = ?,
+          customs_port = ?,
+          customs_title = ?,
+          pickup_date = ?,
+          arrival_time = ?,
+          transport_supplier = ?,
+          contract_number = ?,
+          cargo_flow_info = ?,
+          value_added_services = ?,
+          remark1 = ?,
+          remark2 = ?
+         WHERE serial_number = ?`,
+        [
+          sanitizeNullableString(transport_mode),
+          tracking_number,
+          sanitizeNullableString(origin),
+          sanitizeNullableString(destination),
+          sanitizeNullableString(customs_port),
+          sanitizeNullableString(customs_title),
+          pickupDateResult.value,
+          arrivalTimeResult.value,
+          transport_supplier,
+          contract_number,
+          cargo_flow_info,
+          value_added_services,
+          remark1,
+          remark2,
+          serialNumber,
+        ]
+      );
 
       if (result.affectedRows === 0) {
+        await connection.rollback();
         return res.status(404).json({ error: "Pickup transport tracking not found" });
       }
 
+      await connection.commit();
       res.json({ message: "Pickup transport tracking updated successfully" });
     } catch (err) {
+      if (transactionStarted) {
+        await connection.rollback();
+      }
       res.status(500).json({ error: err.message });
+    } finally {
+      connection.release();
     }
   });
 

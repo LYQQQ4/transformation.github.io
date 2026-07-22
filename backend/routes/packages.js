@@ -770,7 +770,7 @@ const createPackagesRouter = (db) => {
           o.trade_term,
           o.product_name AS order_product_name,
           COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
-          COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
+          t.tracking_number AS tracking_number
         FROM \`package\` p
         LEFT JOIN orders o ON p.serial_number = o.serial_number
         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = p.serial_number
@@ -802,7 +802,7 @@ const createPackagesRouter = (db) => {
           o.trade_term,
           o.product_name AS order_product_name,
           COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
-          COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
+          t.tracking_number AS tracking_number
         FROM \`package\` p
         LEFT JOIN orders o ON p.serial_number = o.serial_number
         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = p.serial_number
@@ -837,7 +837,7 @@ const createPackagesRouter = (db) => {
           o.trade_term,
           o.product_name AS order_product_name,
           COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
-          COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number
+          t.tracking_number AS tracking_number
         FROM \`package\` p
         LEFT JOIN orders o ON p.serial_number = o.serial_number
         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = p.serial_number

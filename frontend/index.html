@@ -561,8 +561,8 @@
                         <li><a href="#" id="viewOrdersLink" class="active" onclick="showPage('viewOrders')">　　查看货物订单</a></li>
                         <li><a href="#" id="packagingLink" onclick="showPage('packaging')">　　包装信息维护</a></li>
                         <li><a href="#" id="pickupTrackingLink" onclick="showPage('pickupTracking')">　　提货运输跟踪</a></li>
-                        <li><a href="#" id="customsLink" onclick="showPage('customs')">　　报关信息维护跟踪</a></li>
                         <li><a href="#" id="logisticsLink" onclick="showPage('logistics')">　　送货运输跟踪</a></li>
+                        <li><a href="#" id="customsLink" onclick="showPage('customs')">　　报关信息维护跟踪</a></li>
                         <li><a href="#" id="billingLink" onclick="showPage('billing')">　　账单信息维护</a></li>
                     </ul>
 
@@ -659,19 +659,19 @@
                             </div>
                             <div id="orderPickupTrackingContent"></div>
                         </div>
-                        <div id="orderDeliveryTrackingSection" style="margin-top: 24px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                                <h3 style="margin: 0;">送货运输跟踪</h3>
-                                <button type="button" onclick="openTransferFormFromOrderDetail()">修改送货运输跟踪</button>
-                            </div>
-                            <div id="orderDeliveryTrackingContent"></div>
-                        </div>
                         <div id="orderCustomsClearanceSection" style="margin-top: 24px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                                 <h3 style="margin: 0;">报关信息维护跟踪</h3>
                                 <button type="button" onclick="openCustomsFormFromOrderDetail()">修改报关信息</button>
                             </div>
                             <div id="orderCustomsClearanceContent"></div>
+                        </div>
+                        <div id="orderDeliveryTrackingSection" style="margin-top: 24px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <h3 style="margin: 0;">送货运输跟踪</h3>
+                                <button type="button" onclick="openTransferFormFromOrderDetail()">修改送货运输跟踪</button>
+                            </div>
+                            <div id="orderDeliveryTrackingContent"></div>
                         </div>
                         <div id="orderLogisticsSection" style="margin-top: 24px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -778,47 +778,6 @@
                     </div>
                 </div>
 
-                <!-- 报关信息维护跟踪页面 -->
-                <div id="customsPage" class="page" style="display:none;">
-                    <div class="section">
-                        <h2>报关信息维护跟踪</h2>
-
-                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                            <button onclick="loadCustomsClearance()">加载报关信息</button>
-                            <button onclick="showCustomsForm()">修改报关信息</button>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <input type="text" id="customsSearchInput" placeholder="搜索流水号或报关单号..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 220px;">
-                                <button onclick="searchCustomsClearance()">搜索</button>
-                            </div>
-                        </div>
-                        <table id="customsTable">
-                            <thead>
-                                <tr>
-                                    <th>流水号</th>
-                                    <th>公司名称</th>
-                                    <th>指令人</th>
-                                    <th>业务类型</th>
-                                    <th>发件人ID</th>
-                                    <th>客户ID</th>
-                                    <th>接收指令日期</th>
-                                    <th>起始地</th>
-                                    <th>目的地</th>
-                                    <th>贸易术语</th>
-                                    <th>货物品名</th>
-                                    <th>运输方式</th>
-                                    <th>运单号</th>
-                                    <th>开始报关时间</th>
-                                    <th>付税时间</th>
-                                    <th>放行时间</th>
-                                    <th>报关单号</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-
                 <!-- 送货运输跟踪页面 -->
                 <div id="logisticsPage" class="page" style="display:none;">
                     <div class="section">
@@ -865,6 +824,47 @@
                                     <th>提货日期</th>
                                     <th>到货时间</th>
                                     <th>完整单据回复时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 报关信息维护跟踪页面 -->
+                <div id="customsPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>报关信息维护跟踪</h2>
+
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <button onclick="loadCustomsClearance()">加载报关信息</button>
+                            <button onclick="showCustomsForm()">修改报关信息</button>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" id="customsSearchInput" placeholder="搜索流水号或报关单号..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 220px;">
+                                <button onclick="searchCustomsClearance()">搜索</button>
+                            </div>
+                        </div>
+                        <table id="customsTable">
+                            <thead>
+                                <tr>
+                                    <th>流水号</th>
+                                    <th>公司名称</th>
+                                    <th>指令人</th>
+                                    <th>业务类型</th>
+                                    <th>发件人ID</th>
+                                    <th>客户ID</th>
+                                    <th>接收指令日期</th>
+                                    <th>起始地</th>
+                                    <th>目的地</th>
+                                    <th>贸易术语</th>
+                                    <th>货物品名</th>
+                                    <th>运输方式</th>
+                                    <th>运单号</th>
+                                    <th>开始报关时间</th>
+                                    <th>付税时间</th>
+                                    <th>放行时间</th>
+                                    <th>报关单号</th>
                                     <th>操作</th>
                                 </tr>
                             </thead>

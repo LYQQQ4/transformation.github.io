@@ -2,6 +2,10 @@
 const router = express.Router();
 const multer = require("multer");
 const XLSX = require("xlsx");
+const {
+  buildTransferSharedSelect,
+  normalizeTransferSharedPayload,
+} = require("../lib/tracking_fields");
 
 // 配置multer用于文件上传
 const upload = multer({
@@ -204,6 +208,32 @@ function normalizeTransferPayloadDates(payload = {}) {
   };
 }
 
+const TRANSFER_SELECT_COLUMNS = `
+          t.id,
+          t.serial_number,
+          t.transport_mode,
+          ${buildTransferSharedSelect("t")},
+          t.pickup_date,
+          t.arrival_port_time,
+          t.clearance_time,
+          t.delivery_time,
+          t.complete_docs_send_time,
+          t.billing_period,
+          t.remark3,
+          t.create_time,
+          t.update_time,
+          o.company_name,
+          o.orderer,
+          o.business_type,
+          o.sender_id,
+          o.customer_id,
+          o.receive_date,
+          o.origin,
+          o.destination,
+          o.trade_term,
+          o.product_name
+`;
+
 module.exports = (db) => {
   // GET all transfers
   router.get("/", async (req, res) => {
@@ -216,17 +246,7 @@ module.exports = (db) => {
 
       const [rows] = await db.execute(`
         SELECT
-          t.*,
-          o.company_name,
-          o.orderer,
-          o.business_type,
-          o.sender_id,
-          o.customer_id,
-          o.receive_date,
-          o.origin,
-          o.destination,
-          o.trade_term,
-          o.product_name
+${TRANSFER_SELECT_COLUMNS}
         FROM transfer t
         LEFT JOIN orders o ON t.serial_number = o.serial_number
         ORDER BY t.create_time DESC
@@ -248,17 +268,7 @@ module.exports = (db) => {
 
       const [rows] = await db.execute(
         `SELECT
-           t.*,
-           o.company_name,
-           o.orderer,
-           o.business_type,
-           o.sender_id,
-           o.customer_id,
-           o.receive_date,
-           o.origin,
-           o.destination,
-           o.trade_term,
-           o.product_name
+${TRANSFER_SELECT_COLUMNS}
          FROM transfer t
          LEFT JOIN orders o ON t.serial_number = o.serial_number
          WHERE t.serial_number = ?`,
@@ -280,17 +290,7 @@ module.exports = (db) => {
     try {
       const [rows] = await db.execute(
         `SELECT
-           t.*,
-           o.company_name,
-           o.orderer,
-           o.business_type,
-           o.sender_id,
-           o.customer_id,
-           o.receive_date,
-           o.origin,
-           o.destination,
-           o.trade_term,
-           o.product_name
+${TRANSFER_SELECT_COLUMNS}
          FROM transfer t
          LEFT JOIN orders o ON t.serial_number = o.serial_number
          WHERE t.id = ?`,
@@ -318,25 +318,23 @@ module.exports = (db) => {
 
       const {
         transport_mode,
-        tracking_number,
-        contract_number,
         pickup_date,
         arrival_port_time,
         clearance_time,
         delivery_time,
         complete_docs_send_time,
-        cargo_flow_info,
-        supplier,
-        value_added_services,
         billing_period,
-        remark1,
-        remark2,
         remark3
       } = req.body;
+      const sharedFields = normalizeTransferSharedPayload(req.body);
 
       const normalizedDates = normalizeTransferPayloadDates(req.body);
       if (normalizedDates.errors.length > 0) {
         return res.status(400).json({ error: normalizedDates.errors.join("; ") });
+      }
+
+      if (!sharedFields.tracking_number) {
+        return res.status(400).json({ error: "运单号不能为空" });
       }
 
       const sql = `INSERT INTO transfer (
@@ -349,10 +347,10 @@ module.exports = (db) => {
       // 将 undefined 转为 null，以便正确绑定到 SQL（mysql2 不接受 undefined）
       const sanitize = (v) => (typeof v === 'undefined' ? null : v);
       const params = [
-        sanitizeTransferValue(serialNumber), sanitizeTransferValue(transport_mode), sanitizeTransferValue(tracking_number), sanitizeTransferValue(contract_number),
+        sanitizeTransferValue(serialNumber), sanitizeTransferValue(transport_mode), sharedFields.tracking_number, sharedFields.contract_number,
         normalizedDates.values.pickup_date, normalizedDates.values.arrival_port_time, normalizedDates.values.clearance_time, normalizedDates.values.delivery_time,
-        normalizedDates.values.complete_docs_send_time, sanitizeTransferValue(cargo_flow_info), sanitizeTransferValue(supplier), sanitizeTransferValue(value_added_services),
-        sanitizeTransferValue(billing_period), sanitizeTransferValue(remark1), sanitizeTransferValue(remark2), sanitizeTransferValue(remark3)
+        normalizedDates.values.complete_docs_send_time, sharedFields.cargo_flow_info, sharedFields.transport_supplier, sharedFields.value_added_services,
+        sanitizeTransferValue(billing_period), sharedFields.remark1, sharedFields.remark2, sanitizeTransferValue(remark3)
       ];
 
       console.log('DEBUG insert transfer params:', params);
@@ -378,25 +376,23 @@ module.exports = (db) => {
 
       const {
         transport_mode,
-        tracking_number,
-        contract_number,
         pickup_date,
         arrival_port_time,
         clearance_time,
         delivery_time,
         complete_docs_send_time,
-        cargo_flow_info,
-        supplier,
-        value_added_services,
         billing_period,
-        remark1,
-        remark2,
         remark3
       } = req.body;
+      const sharedFields = normalizeTransferSharedPayload(req.body);
 
       const normalizedDates = normalizeTransferPayloadDates(req.body);
       if (normalizedDates.errors.length > 0) {
         return res.status(400).json({ error: normalizedDates.errors.join("; ") });
+      }
+
+      if (!sharedFields.tracking_number) {
+        return res.status(400).json({ error: "运单号不能为空" });
       }
 
       const sql = `UPDATE transfer SET
@@ -409,10 +405,10 @@ module.exports = (db) => {
       // 将 undefined 转为 null，以便正确绑定到 SQL（mysql2 不接受 undefined）
       const sanitize = (v) => (typeof v === 'undefined' ? null : v);
       const params = [
-        sanitizeTransferValue(transport_mode), sanitizeTransferValue(tracking_number), sanitizeTransferValue(contract_number),
+        sanitizeTransferValue(transport_mode), sharedFields.tracking_number, sharedFields.contract_number,
         normalizedDates.values.pickup_date, normalizedDates.values.arrival_port_time, normalizedDates.values.clearance_time, normalizedDates.values.delivery_time,
-        normalizedDates.values.complete_docs_send_time, sanitizeTransferValue(cargo_flow_info), sanitizeTransferValue(supplier), sanitizeTransferValue(value_added_services),
-        sanitizeTransferValue(billing_period), sanitizeTransferValue(remark1), sanitizeTransferValue(remark2), sanitizeTransferValue(remark3), sanitizeTransferValue(serialNumber)
+        normalizedDates.values.complete_docs_send_time, sharedFields.cargo_flow_info, sharedFields.transport_supplier, sharedFields.value_added_services,
+        sanitizeTransferValue(billing_period), sharedFields.remark1, sharedFields.remark2, sanitizeTransferValue(remark3), sanitizeTransferValue(serialNumber)
       ];
 
       const [result] = await db.execute(sql, params);
@@ -434,25 +430,23 @@ module.exports = (db) => {
       const {
         serial_number,
         transport_mode,
-        tracking_number,
-        contract_number,
         pickup_date,
         arrival_port_time,
         clearance_time,
         delivery_time,
         complete_docs_send_time,
-        cargo_flow_info,
-        supplier,
-        value_added_services,
         billing_period,
-        remark1,
-        remark2,
         remark3
       } = req.body;
+      const sharedFields = normalizeTransferSharedPayload(req.body);
 
       const normalizedDates = normalizeTransferPayloadDates(req.body);
       if (normalizedDates.errors.length > 0) {
         return res.status(400).json({ error: normalizedDates.errors.join("; ") });
+      }
+
+      if (!sharedFields.tracking_number) {
+        return res.status(400).json({ error: "运单号不能为空" });
       }
 
       const sql = `UPDATE transfer SET
@@ -465,10 +459,10 @@ module.exports = (db) => {
       // 将 undefined 转为 null，以便正确绑定到 SQL（mysql2 不接受 undefined）
       const sanitize = (v) => (typeof v === 'undefined' ? null : v);
       const params = [
-        sanitizeTransferValue(serial_number), sanitizeTransferValue(transport_mode), sanitizeTransferValue(tracking_number), sanitizeTransferValue(contract_number),
+        sanitizeTransferValue(serial_number), sanitizeTransferValue(transport_mode), sharedFields.tracking_number, sharedFields.contract_number,
         normalizedDates.values.pickup_date, normalizedDates.values.arrival_port_time, normalizedDates.values.clearance_time, normalizedDates.values.delivery_time,
-        normalizedDates.values.complete_docs_send_time, sanitizeTransferValue(cargo_flow_info), sanitizeTransferValue(supplier), sanitizeTransferValue(value_added_services),
-        sanitizeTransferValue(billing_period), sanitizeTransferValue(remark1), sanitizeTransferValue(remark2), sanitizeTransferValue(remark3), sanitizeTransferValue(req.params.id)
+        normalizedDates.values.complete_docs_send_time, sharedFields.cargo_flow_info, sharedFields.transport_supplier, sharedFields.value_added_services,
+        sanitizeTransferValue(billing_period), sharedFields.remark1, sharedFields.remark2, sanitizeTransferValue(remark3), sanitizeTransferValue(req.params.id)
       ];
 
       const [result] = await db.execute(sql, params);
@@ -600,21 +594,24 @@ module.exports = (db) => {
 
           const {
             transport_mode,
-            tracking_number,
-            contract_number,
             pickup_date,
             arrival_port_time,
             clearance_time,
             delivery_time,
             complete_docs_send_time,
-            cargo_flow_info,
-            supplier,
-            value_added_services,
             billing_period,
-            remark1,
-            remark2,
             remark3
           } = validationResult.data;
+          const sharedFields = normalizeTransferSharedPayload(validationResult.data);
+
+          if (!sharedFields.tracking_number) {
+            results.failed++;
+            results.errors.push({
+              row: rowNumber,
+              errors: ["运单号不能为空"]
+            });
+            continue;
+          }
 
           // 更新数据库
           const sql = `UPDATE transfer SET
@@ -625,10 +622,10 @@ module.exports = (db) => {
             WHERE serial_number = ?`;
 
           const [updateResult] = await db.execute(sql, [
-            sanitizeTransferValue(transport_mode), sanitizeTransferValue(tracking_number), sanitizeTransferValue(contract_number),
+            sanitizeTransferValue(transport_mode), sharedFields.tracking_number, sharedFields.contract_number,
             pickup_date || null, arrival_port_time || null, clearance_time || null, delivery_time || null,
-            complete_docs_send_time || null, sanitizeTransferValue(cargo_flow_info), sanitizeTransferValue(supplier), sanitizeTransferValue(value_added_services),
-            sanitizeTransferValue(billing_period), sanitizeTransferValue(remark1), sanitizeTransferValue(remark2), sanitizeTransferValue(remark3),
+            complete_docs_send_time || null, sharedFields.cargo_flow_info, sharedFields.transport_supplier, sharedFields.value_added_services,
+            sanitizeTransferValue(billing_period), sharedFields.remark1, sharedFields.remark2, sanitizeTransferValue(remark3),
             serialNumber
           ]);
 
@@ -718,7 +715,8 @@ function validateTransferExcelData(data) {
     "送达时间": "delivery_time",
     "完整资料发送时间": "complete_docs_send_time",
     "货物流转信息": "cargo_flow_info",
-    "供应商": "supplier",
+    "供应商": "transport_supplier",
+    "运输供应商": "transport_supplier",
     "增值服务备注": "value_added_services",
     "账单期": "billing_period",
     "备注1": "remark1",
@@ -804,7 +802,8 @@ function validateTransferExcelData(data) {
     "送达时间": "delivery_time",
     "完整资料发送时间": "complete_docs_send_time",
     "货物流转信息": "cargo_flow_info",
-    "供应商": "supplier",
+    "供应商": "transport_supplier",
+    "运输供应商": "transport_supplier",
     "增值服务备注": "value_added_services",
     "账单期": "billing_period",
     "备注1": "remark1",
