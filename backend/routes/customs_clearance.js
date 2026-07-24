@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const { sanitizeNullableString } = require("../lib/tracking_fields");
+const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
 
 function normalizeCustomsSerialNumber(value) {
   return String(value || "").trim();
@@ -11,7 +13,6 @@ function logCustomsRouteError(routeName, context, error) {
 }
 
 module.exports = (db) => {
-  // 获取所有报关信息跟踪记录
   router.get("/", async (req, res) => {
     try {
       const [rows] = await db.execute(`
@@ -42,7 +43,6 @@ module.exports = (db) => {
     }
   });
 
-  // 根据ID获取单条报关信息跟踪记录
   router.get("/:id", async (req, res) => {
     try {
       const [rows] = await db.execute(
@@ -76,7 +76,6 @@ module.exports = (db) => {
     }
   });
 
-  // 根据流水号获取报关信息跟踪记录
   router.get("/serial/:serial_number", async (req, res) => {
     try {
       const serialNumber = normalizeCustomsSerialNumber(req.params.serial_number);
@@ -116,24 +115,28 @@ module.exports = (db) => {
     }
   });
 
-  // 创建新的报关信息跟踪记录
   router.post("/", async (req, res) => {
+    const connection = await db.getConnection();
+    let transactionStarted = false;
     try {
       const {
         serial_number,
+        transport_mode,
         customs_start_time,
         tax_payment_time,
         release_time,
         customs_declaration_number,
         customs_supplier,
         remark1,
-        remark2
+        remark2,
       } = req.body;
 
-      // 验证必填字段
       if (!serial_number) {
         return res.status(400).json({ error: "流水号不能为空" });
       }
+
+      await connection.beginTransaction();
+      transactionStarted = true;
 
       const sql = `
         INSERT INTO customs_clearance_tracking (
@@ -148,7 +151,7 @@ module.exports = (db) => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
-      const [result] = await db.execute(sql, [
+      const [result] = await connection.execute(sql, [
         serial_number,
         customs_start_time || null,
         tax_payment_time || null,
@@ -156,36 +159,53 @@ module.exports = (db) => {
         customs_declaration_number || null,
         customs_supplier || null,
         remark1 || null,
-        remark2 || null
+        remark2 || null,
       ]);
 
+      await syncTrackingFieldsBySerial(connection, serial_number, {
+        transport_mode: sanitizeNullableString(transport_mode),
+        remark1: sanitizeNullableString(remark1),
+        remark2: sanitizeNullableString(remark2),
+        excludeTables: ["customs_clearance_tracking"],
+      });
+
+      await connection.commit();
       res.status(201).json({
         message: "报关信息跟踪记录创建成功",
-        id: result.insertId
+        id: result.insertId,
       });
     } catch (err) {
+      if (transactionStarted) {
+        await connection.rollback();
+      }
       res.status(500).json({ error: err.message });
+    } finally {
+      connection.release();
     }
   });
 
-  // 更新报关信息跟踪记录
   router.put("/:id", async (req, res) => {
+    const connection = await db.getConnection();
+    let transactionStarted = false;
     try {
       const {
         serial_number,
+        transport_mode,
         customs_start_time,
         tax_payment_time,
         release_time,
         customs_declaration_number,
         customs_supplier,
         remark1,
-        remark2
+        remark2,
       } = req.body;
 
-      // 验证必填字段
       if (!serial_number) {
         return res.status(400).json({ error: "流水号不能为空" });
       }
+
+      await connection.beginTransaction();
+      transactionStarted = true;
 
       const sql = `
         UPDATE customs_clearance_tracking SET
@@ -200,7 +220,7 @@ module.exports = (db) => {
         WHERE id = ?
       `;
 
-      const [result] = await db.execute(sql, [
+      const [result] = await connection.execute(sql, [
         serial_number,
         customs_start_time || null,
         tax_payment_time || null,
@@ -209,21 +229,36 @@ module.exports = (db) => {
         customs_supplier || null,
         remark1 || null,
         remark2 || null,
-        req.params.id
+        req.params.id,
       ]);
 
       if (result.affectedRows === 0) {
+        await connection.rollback();
         return res.status(404).json({ error: "记录未找到" });
       }
 
+      await syncTrackingFieldsBySerial(connection, serial_number, {
+        transport_mode: sanitizeNullableString(transport_mode),
+        remark1: sanitizeNullableString(remark1),
+        remark2: sanitizeNullableString(remark2),
+        excludeTables: ["customs_clearance_tracking"],
+      });
+
+      await connection.commit();
       res.json({ message: "报关信息跟踪记录更新成功" });
     } catch (err) {
+      if (transactionStarted) {
+        await connection.rollback();
+      }
       res.status(500).json({ error: err.message });
+    } finally {
+      connection.release();
     }
   });
 
-  // 根据流水号更新报关信息跟踪记录
   router.put("/serial/:serial_number", async (req, res) => {
+    const connection = await db.getConnection();
+    let transactionStarted = false;
     try {
       const serialNumber = normalizeCustomsSerialNumber(req.params.serial_number);
       if (!serialNumber || serialNumber === "undefined") {
@@ -231,14 +266,18 @@ module.exports = (db) => {
       }
 
       const {
+        transport_mode,
         customs_start_time,
         tax_payment_time,
         release_time,
         customs_declaration_number,
         customs_supplier,
         remark1,
-        remark2
+        remark2,
       } = req.body;
+
+      await connection.beginTransaction();
+      transactionStarted = true;
 
       const sql = `
         UPDATE customs_clearance_tracking SET
@@ -252,7 +291,7 @@ module.exports = (db) => {
         WHERE serial_number = ?
       `;
 
-      const [result] = await db.execute(sql, [
+      const [result] = await connection.execute(sql, [
         customs_start_time || null,
         tax_payment_time || null,
         release_time || null,
@@ -260,21 +299,34 @@ module.exports = (db) => {
         customs_supplier || null,
         remark1 || null,
         remark2 || null,
-        serialNumber
+        serialNumber,
       ]);
 
       if (result.affectedRows === 0) {
+        await connection.rollback();
         return res.status(404).json({ error: "记录未找到" });
       }
 
+      await syncTrackingFieldsBySerial(connection, serialNumber, {
+        transport_mode: sanitizeNullableString(transport_mode),
+        remark1: sanitizeNullableString(remark1),
+        remark2: sanitizeNullableString(remark2),
+        excludeTables: ["customs_clearance_tracking"],
+      });
+
+      await connection.commit();
       res.json({ message: "报关信息跟踪记录更新成功" });
     } catch (err) {
       logCustomsRouteError("updateBySerial", { serial_number: req.params.serial_number, body: req.body }, err);
+      if (transactionStarted) {
+        await connection.rollback();
+      }
       res.status(500).json({ error: err.message });
+    } finally {
+      connection.release();
     }
   });
 
-  // 删除报关信息跟踪记录
   router.delete("/:id", async (req, res) => {
     try {
       const [result] = await db.execute(

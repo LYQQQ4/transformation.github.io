@@ -6,6 +6,7 @@ const {
   buildTransferSharedSelect,
   normalizeTransferSharedPayload,
 } = require("../lib/tracking_fields");
+const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
 
 // 配置multer用于文件上传
 const upload = multer({
@@ -309,6 +310,8 @@ ${TRANSFER_SELECT_COLUMNS}
 
   // POST create new transfer (with auto-generated serial number)
   router.post("/", async (req, res) => {
+    const connection = await db.getConnection();
+    let transactionStarted = false;
     try {
       // Generate serial number if not provided
       let serialNumber = req.body.serial_number;
@@ -353,8 +356,21 @@ ${TRANSFER_SELECT_COLUMNS}
         sanitizeTransferValue(billing_period), sharedFields.remark1, sharedFields.remark2, sanitizeTransferValue(remark3)
       ];
 
-      console.log('DEBUG insert transfer params:', params);
-      const [result] = await db.execute(sql, params);
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      const [result] = await connection.execute(sql, params);
+
+      await syncTrackingFieldsBySerial(connection, serialNumber, {
+        transport_mode: sanitizeTransferValue(transport_mode),
+        transport_supplier: sharedFields.transport_supplier,
+        cargo_flow_info: sharedFields.cargo_flow_info,
+        remark1: sharedFields.remark1,
+        remark2: sharedFields.remark2,
+        excludeTables: ["transfer"],
+      });
+
+      await connection.commit();
 
       res.json({
         message: "Transfer created successfully",
@@ -362,12 +378,19 @@ ${TRANSFER_SELECT_COLUMNS}
         serial_number: serialNumber
       });
     } catch (err) {
+      if (transactionStarted) {
+        await connection.rollback();
+      }
       res.status(500).json({ error: err.message });
+    } finally {
+      connection.release();
     }
   });
 
   // PUT update transfer by serial_number
   router.put("/serial/:serial_number", async (req, res) => {
+    const connection = await db.getConnection();
+    let transactionStarted = false;
     try {
       const serialNumber = normalizeTransferSerialNumber(req.params.serial_number);
       if (!serialNumber || serialNumber === "undefined") {
@@ -411,21 +434,43 @@ ${TRANSFER_SELECT_COLUMNS}
         sanitizeTransferValue(billing_period), sharedFields.remark1, sharedFields.remark2, sanitizeTransferValue(remark3), sanitizeTransferValue(serialNumber)
       ];
 
-      const [result] = await db.execute(sql, params);
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      const [result] = await connection.execute(sql, params);
 
       if (result.affectedRows === 0) {
+        await connection.rollback();
         res.status(404).json({ error: "Transfer not found" });
         return;
       }
+
+      await syncTrackingFieldsBySerial(connection, serialNumber, {
+        transport_mode: sanitizeTransferValue(transport_mode),
+        transport_supplier: sharedFields.transport_supplier,
+        cargo_flow_info: sharedFields.cargo_flow_info,
+        remark1: sharedFields.remark1,
+        remark2: sharedFields.remark2,
+        excludeTables: ["transfer"],
+      });
+
+      await connection.commit();
       res.json({ message: "Transfer updated successfully" });
     } catch (err) {
       logTransferRouteError("updateBySerial", { serial_number: req.params.serial_number, body: req.body }, err);
+      if (transactionStarted) {
+        await connection.rollback();
+      }
       res.status(500).json({ error: err.message });
+    } finally {
+      connection.release();
     }
   });
 
   // PUT update transfer
   router.put("/:id", async (req, res) => {
+    const connection = await db.getConnection();
+    let transactionStarted = false;
     try {
       const {
         serial_number,
@@ -465,15 +510,35 @@ ${TRANSFER_SELECT_COLUMNS}
         sanitizeTransferValue(billing_period), sharedFields.remark1, sharedFields.remark2, sanitizeTransferValue(remark3), sanitizeTransferValue(req.params.id)
       ];
 
-      const [result] = await db.execute(sql, params);
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      const [result] = await connection.execute(sql, params);
 
       if (result.affectedRows === 0) {
+        await connection.rollback();
         res.status(404).json({ error: "Transfer not found" });
         return;
       }
+
+      await syncTrackingFieldsBySerial(connection, sanitizeTransferValue(serial_number), {
+        transport_mode: sanitizeTransferValue(transport_mode),
+        transport_supplier: sharedFields.transport_supplier,
+        cargo_flow_info: sharedFields.cargo_flow_info,
+        remark1: sharedFields.remark1,
+        remark2: sharedFields.remark2,
+        excludeTables: ["transfer"],
+      });
+
+      await connection.commit();
       res.json({ message: "Transfer updated successfully" });
     } catch (err) {
+      if (transactionStarted) {
+        await connection.rollback();
+      }
       res.status(500).json({ error: err.message });
+    } finally {
+      connection.release();
     }
   });
 
@@ -621,13 +686,41 @@ ${TRANSFER_SELECT_COLUMNS}
             billing_period = ?, remark1 = ?, remark2 = ?, remark3 = ?
             WHERE serial_number = ?`;
 
-          const [updateResult] = await db.execute(sql, [
-            sanitizeTransferValue(transport_mode), sharedFields.tracking_number, sharedFields.contract_number,
-            pickup_date || null, arrival_port_time || null, clearance_time || null, delivery_time || null,
-            complete_docs_send_time || null, sharedFields.cargo_flow_info, sharedFields.transport_supplier, sharedFields.value_added_services,
-            sanitizeTransferValue(billing_period), sharedFields.remark1, sharedFields.remark2, sanitizeTransferValue(remark3),
-            serialNumber
-          ]);
+          const rowConnection = await db.getConnection();
+          let rowTransactionStarted = false;
+          let updateResult;
+          try {
+            await rowConnection.beginTransaction();
+            rowTransactionStarted = true;
+
+            [updateResult] = await rowConnection.execute(sql, [
+              sanitizeTransferValue(transport_mode), sharedFields.tracking_number, sharedFields.contract_number,
+              pickup_date || null, arrival_port_time || null, clearance_time || null, delivery_time || null,
+              complete_docs_send_time || null, sharedFields.cargo_flow_info, sharedFields.transport_supplier, sharedFields.value_added_services,
+              sanitizeTransferValue(billing_period), sharedFields.remark1, sharedFields.remark2, sanitizeTransferValue(remark3),
+              serialNumber
+            ]);
+
+            if (updateResult.affectedRows > 0) {
+              await syncTrackingFieldsBySerial(rowConnection, serialNumber, {
+                transport_mode: sanitizeTransferValue(transport_mode),
+                transport_supplier: sharedFields.transport_supplier,
+                cargo_flow_info: sharedFields.cargo_flow_info,
+                remark1: sharedFields.remark1,
+                remark2: sharedFields.remark2,
+                excludeTables: ["transfer"],
+              });
+            }
+
+            await rowConnection.commit();
+          } catch (rowError) {
+            if (rowTransactionStarted) {
+              await rowConnection.rollback();
+            }
+            throw rowError;
+          } finally {
+            rowConnection.release();
+          }
 
           if (updateResult.affectedRows > 0) {
             results.success++;

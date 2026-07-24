@@ -4,6 +4,7 @@ const {
   normalizeTransferSharedPayload,
   sanitizeNullableString,
 } = require("../lib/tracking_fields");
+const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
 
 function normalizeOptionalTrackingValue(value) {
   if (value === undefined || value === null) {
@@ -252,6 +253,15 @@ ${PICKUP_SELECT_COLUMNS}
         await connection.rollback();
         return res.status(404).json({ error: "Pickup transport tracking not found" });
       }
+
+      await syncTrackingFieldsBySerial(connection, serialNumber, {
+        transport_mode: sanitizeNullableString(transport_mode),
+        transport_supplier,
+        cargo_flow_info,
+        remark1,
+        remark2,
+        excludeTables: ["pickup_transport_tracking"],
+      });
 
       await connection.commit();
       res.json({ message: "Pickup transport tracking updated successfully" });

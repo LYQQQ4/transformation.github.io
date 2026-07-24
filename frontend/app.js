@@ -17,6 +17,7 @@ let currentOrderDeliveryTrackingData = null;
 let currentOrderCustomsClearanceData = null;
 
 const SHARED_TRACKING_FIELD_DEFINITIONS = {
+    transport_mode: { label: "运输方式" },
     tracking_number: { label: "运单号" },
     transport_supplier: {
         label: "运输供应商",
@@ -51,6 +52,7 @@ const TRANSFER_TRACKING_SHARED_FORM_FIELDS = {
 };
 
 const CUSTOMS_TRACKING_SHARED_FORM_FIELDS = {
+    transport_mode: "#customsTransportMode",
     customs_declaration_number: "#customsDeclarationNumber",
     customs_supplier: "#customsSupplier",
     remark1: "#customsRemark1",
@@ -6436,6 +6438,10 @@ function showCustomsForm(recordData = null) {
                     </div>
                 </div>
                 <div class="form-group">
+                    <label>运输方式:</label>
+                    <input type="text" id="customsTransportMode">
+                </div>
+                <div class="form-group">
                     <label>报关单号:</label>
                     <input type="text" id="customsDeclarationNumber">
                 </div>
@@ -6609,10 +6615,7 @@ async function saveCustomsClearance() {
         if (response.ok) {
             showMessage("报关信息保存成功");
             hideCustomsForm();
-            loadCustomsClearance();
-            if (currentOrderDetailSerial && currentOrderDetailSerial === serialNumber) {
-                loadOrderCustomsClearanceDetails(serialNumber);
-            }
+            refreshTrackingLinkedViews(serialNumber);
         } else {
             const error = await response.json();
             showMessage("保存失败: " + error.error, "error");
