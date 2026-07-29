@@ -15,6 +15,7 @@ const {
   enrichOrderBillingFields,
   ensureBillingInfoSchema,
 } = require("../lib/reporting");
+const { createHttpError, requireAdminAccess } = require("../lib/request_auth");
 const { validateUserProfileId } = require("../lib/user_profiles");
 
 // 配置multer用于文件上传
@@ -620,9 +621,15 @@ module.exports = (db, userDb = null) => {
   });
 
   // DELETE order
-  router.delete("/:id", async (req, res) => {
+  router.delete("/delete-management/:id", async (req, res) => {
     const connection = await db.getConnection();
     try {
+      await requireAdminAccess(userDb, req, "删单管理");
+      const deleteSource = String(req.headers["x-order-delete-source"] || "").trim();
+      if (deleteSource !== "delete-management") {
+        throw createHttpError(403, "请通过删单管理页面执行删除操作");
+      }
+
       await connection.beginTransaction();
 
       // 首先获取订单的serial_number
@@ -646,6 +653,7 @@ module.exports = (db, userDb = null) => {
 
       // 删除相关的包装信息（package表）
       await connection.execute("DELETE FROM \`package\` WHERE serial_number = ?", [serialNumber]);
+      await connection.execute("DELETE FROM billing_info WHERE serial_number = ?", [serialNumber]);
 
       // 最后删除订单信息（orders表）
       const [result] = await connection.execute("DELETE FROM orders WHERE id = ?", [req.params.id]);
@@ -654,13 +662,17 @@ module.exports = (db, userDb = null) => {
       res.json({ message: "Order and related package and transfer information deleted successfully" });
     } catch (err) {
       await connection.rollback();
-      res.status(500).json({ error: err.message });
+      res.status(err.statusCode || 500).json({ error: err.message });
     } finally {
       connection.release();
     }
   });
 
   // POST parse Excel file (单行预览)
+  router.delete("/:id", async (req, res) => {
+    res.status(403).json({ error: "删除入口已迁移至删单管理页面，请使用专用删单接口" });
+  });
+
   router.post("/parse-excel", upload.single("excelFile"), async (req, res) => {
     try {
       await ensureOrderPhoneSchema(db);

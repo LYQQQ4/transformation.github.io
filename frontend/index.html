@@ -568,6 +568,7 @@
 
                     <h2>系统管理</h2>
                     <ul>
+                        <li><a href="#" id="deleteOrdersLink" onclick="showPage('deleteOrders')" style="display:none;">　　删单管理</a></li>
                         <li><a href="#" id="productDBLink" onclick="showPage('productDB')">　　产品信息库</a></li>
                         <li><a href="#" id="packagingDBLink" onclick="showPage('packagingDB')">　　包装信息库</a></li>
                         <li><a href="#" id="userManagementLink" onclick="showPage('userManagement')">　　用户管理</a></li>
@@ -603,7 +604,7 @@
                         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
                             <button onclick="showOrderForm()">新增货物订单</button>
                             <button onclick="loadOrders()">加载订单</button>
-                            <button onclick="showFilterForm()">筛选</button>
+                            <button onclick="showFilterForm('viewOrders')">筛选</button>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <input type="text" id="searchInput" placeholder="搜索订单..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 200px;">
                                 <button onclick="searchOrders()">搜索</button>
@@ -632,6 +633,51 @@
                                     <th>新增账单完成时间</th>
                                     <th>账期</th>
                                     <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 删单管理页面 -->
+                <div id="deleteOrdersPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>删单管理</h2>
+                        <div style="margin-bottom: 16px; padding: 12px 16px; border: 1px solid #FECACA; background-color: #FEF2F2; color: #991B1B; border-radius: 8px;">
+                            危险操作区域。仅管理员可执行删单，删除后将同时移除订单及其关联包装、运输、报关、账单数据，请谨慎确认。
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <button onclick="loadDeleteOrders()">加载订单</button>
+                            <button onclick="showFilterForm('deleteOrders')">筛选</button>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" id="deleteOrdersSearchInput" placeholder="搜索待删除订单..." style="padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; width: 220px;">
+                                <button onclick="searchDeleteOrders()">搜索</button>
+                            </div>
+                        </div>
+                        <table id="deleteOrdersTable">
+                            <thead>
+                                <tr>
+                                    <th>流水号</th>
+                                    <th>公司名称</th>
+                                    <th>指令人</th>
+                                    <th>业务类型</th>
+                                    <th>发件人ID</th>
+                                    <th>客户ID</th>
+                                    <th>接收指令日期</th>
+                                    <th>起始地</th>
+                                    <th>目的地</th>
+                                    <th>贸易术语</th>
+                                    <th>货物品名</th>
+                                    <th>提货时间</th>
+                                    <th>开始报关时间</th>
+                                    <th>付税时间</th>
+                                    <th>放行时间</th>
+                                    <th>到货时间</th>
+                                    <th>完整单据回复时间</th>
+                                    <th>新增账单完成时间</th>
+                                    <th>账期</th>
+                                    <th>危险操作</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>

@@ -218,6 +218,7 @@ function showMainApp() {
     if (currentUserEl) {
         currentUserEl.textContent = currentUser ? currentUser.username : "未知用户";
     }
+    updateDeleteOrdersMenuVisibility();
     // 默认显示查看货物订单页面
     showPage("viewOrders");
 }
@@ -310,6 +311,7 @@ async function register() {
 function logout() {
     currentUser = null;
     localStorage.removeItem("currentUser");
+    updateDeleteOrdersMenuVisibility();
     showMessage("已退出登录");
     showAuthSection();
 }
@@ -700,8 +702,31 @@ function initTransferDateInputs(form) {
 }
 
 // Global variables for filtering and searching
-let currentFilters = {};
-let currentSearchTerm = "";
+const ORDER_PAGE_VIEW = "viewOrders";
+const ORDER_PAGE_DELETE = "deleteOrders";
+let activeOrderPageContext = ORDER_PAGE_VIEW;
+const orderPageState = {
+    [ORDER_PAGE_VIEW]: {
+        filters: {},
+        searchTerm: "",
+        tableId: "ordersTable",
+        searchInputId: "searchInput",
+        allowsEdit: true,
+        allowsDelete: false,
+        actionHeader: "操作",
+        loadButtonHandler: "loadOrders()"
+    },
+    [ORDER_PAGE_DELETE]: {
+        filters: {},
+        searchTerm: "",
+        tableId: "deleteOrdersTable",
+        searchInputId: "deleteOrdersSearchInput",
+        allowsEdit: false,
+        allowsDelete: true,
+        actionHeader: "危险操作",
+        loadButtonHandler: "loadDeleteOrders()"
+    }
+};
 let currentPackageSearchTerm = "";
 let currentPickupTrackingSearchTerm = "";
 let currentTransferSearchTerm = "";
@@ -720,9 +745,48 @@ function buildOrderFilledStatusFilterHtml(label, selectId) {
     `;
 }
 
-function ensureOrderIndexStructure() {
-    const tableHead = document.querySelector("#ordersTable thead");
-    if (tableHead && !tableHead.textContent.includes("完整单据回复时间")) {
+function getOrderPageState(pageName = activeOrderPageContext) {
+    return orderPageState[pageName] || orderPageState[ORDER_PAGE_VIEW];
+}
+
+function isAdminUser() {
+    return String(currentUser?.role || "").trim() === "admin";
+}
+
+function getAuthHeaders(extraHeaders = {}) {
+    const headers = { ...extraHeaders };
+    if (currentUser?.id) {
+        headers["x-user-id"] = String(currentUser.id);
+    }
+    return headers;
+}
+
+function updateDeleteOrdersMenuVisibility() {
+    const deleteOrdersLink = document.getElementById("deleteOrdersLink");
+    if (!deleteOrdersLink) {
+        return;
+    }
+    deleteOrdersLink.style.display = isAdminUser() ? "block" : "none";
+}
+
+function buildOrderActionButtons(order, pageName = activeOrderPageContext) {
+    const state = getOrderPageState(pageName);
+    const actions = [];
+
+    if (state.allowsEdit) {
+        actions.push(`<button onclick="editOrder(${order.id})">编辑</button>`);
+    }
+    if (state.allowsDelete) {
+        actions.push(`<button onclick="deleteOrderFromManagement(${order.id})">删除</button>`);
+    }
+
+    return actions.join("");
+}
+
+function ensureOrderIndexStructure(pageName = activeOrderPageContext) {
+    const state = getOrderPageState(pageName);
+    const tableHead = document.querySelector(`#${state.tableId} thead`);
+    if (tableHead && !tableHead.textContent.includes("新增账单完成时间")) {
         tableHead.innerHTML = `
             <tr>
                 <th>流水号</th>
@@ -806,19 +870,21 @@ function getFilterInputValue(id) {
 }
 
 // Order functions
-async function loadOrders() {
+async function loadOrders(pageName = ORDER_PAGE_VIEW) {
     try {
-        ensureOrderIndexStructure();
-        const query = buildOrderFilterQuery();
+        activeOrderPageContext = pageName;
+        ensureOrderIndexStructure(pageName);
+        const query = buildOrderFilterQuery(pageName);
         const response = await fetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
         const data = await response.json();
-        displayOrders(data.orders);
+        displayOrders(data.orders, pageName);
     } catch (error) {
         showMessage("加载订单失败: " + error.message, "error");
     }
 }
 
-function displayOrders(orders) {
+function displayOrders(orders, pageName = activeOrderPageContext) {
+    const state = getOrderPageState(pageName);
     // 按照流水号从高到低排序
     orders.sort((a, b) => {
         const aSerial = parseInt(a.serial_number || a.id) || 0;
@@ -826,7 +892,7 @@ function displayOrders(orders) {
         return bSerial - aSerial; // 降序排列
     });
 
-    const tbody = document.querySelector("#ordersTable tbody");
+    const tbody = document.querySelector(`#${state.tableId} tbody`);
     tbody.innerHTML = "";
     orders.forEach(order => {
         const row = tbody.insertRow();
@@ -876,11 +942,16 @@ function displayOrders(orders) {
             <td>${order.destination}</td>
             <td>${order.trade_term || ""}</td>
             <td>${order.product_name || ""}</td>
-            <td>${order.remark1 || ""}</td>
-            <td>${order.remark2 || ""}</td>
+            <td>${formatDateOnly(order.pickup_date)}</td>
+            <td>${formatDateOnly(order.customs_start_time)}</td>
+            <td>${formatDateOnly(order.tax_payment_time)}</td>
+            <td>${formatDateOnly(order.release_time)}</td>
+            <td>${formatDateOnly(order.arrival_time)}</td>
+            <td>${formatDateOnly(order.complete_docs_send_time)}</td>
+            <td>${formatDateOnly(order.billing_completed_time)}</td>
+            <td>${order.billing_period || ""}</td>
             <td>
-                <button onclick="editOrder(${order.id})">编辑</button>
-                <button onclick="deleteOrder(${order.id})">删除</button>
+                ${buildOrderActionButtons(order, pageName)}
             </td>
         `;
     });
@@ -2382,262 +2453,55 @@ async function editOrder(id) {
     }
 }
 
-async function deleteOrder(id) {
-    if (confirm("确定删除此订单吗？")) {
-        try {
-            const response = await fetch(`${API_BASE}/orders/${id}`, { method: "DELETE" });
-            if (response.ok) {
-                showMessage("订单删除成功");
-                loadOrders();
-            } else {
-                const error = await response.json();
-                showMessage("删除失败: " + error.error, "error");
-            }
-        } catch (error) {
-            showMessage("删除失败: " + error.message, "error");
-        }
+async function deleteOrderFromManagement(id) {
+    if (!isAdminUser()) {
+        showMessage("仅管理员可执行删单", "error");
+        return;
     }
-}
 
-// Filter and search functions
-function showFilterForm() {
-    document.getElementById("filterModal").style.display = "block";
+    const dangerConfirm = confirm("危险操作：删除后将移除订单及其关联数据，且无法恢复。是否继续？");
+    if (!dangerConfirm) {
+        return;
+    }
+
+    const finalConfirm = confirm("请再次确认：仅在删单管理页面执行删除。确定删除该订单吗？");
+    if (!finalConfirm) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/orders/delete-management/${id}`, {
+            method: "DELETE",
+            headers: getAuthHeaders({
+                "x-order-delete-source": "delete-management"
+            })
+        });
+        const result = await response.json();
+
+        if (response.ok) {
+            showMessage("订单删除成功");
+            loadDeleteOrders();
+        } else {
+            showMessage("删除失败: " + (result.error || "未知错误"), "error");
+        }
+    } catch (error) {
+        showMessage("删除失败: " + error.message, "error");
+    }
 }
 
 function hideFilterForm() {
     document.getElementById("filterModal").style.display = "none";
 }
 
-function applyFilters() {
-    // Get filter values
-    currentFilters = {
-        company_name: document.getElementById("filterCompanyName").value.trim(),
-        orderer: document.getElementById("filterOrderer").value.trim(),
-        business_type: document.getElementById("filterBusinessType").value.trim(),
-        sender_id: document.getElementById("filterSenderId").value.trim(),
-        customer_id: document.getElementById("filterCustomerId").value.trim(),
-        origin: document.getElementById("filterOrigin").value.trim(),
-        destination: document.getElementById("filterDestination").value.trim(),
-        dateFilledStatus: document.getElementById("filterDateFilledStatus").value
-    };
-
-    Object.keys(currentFilters).forEach(key => {
-        if (currentFilters[key] === "" || currentFilters[key] === "all") {
-            delete currentFilters[key];
-        }
-    });
-
-    // Load and filter orders
-    loadAndFilterOrders();
-    hideFilterForm();
-}
-
-function clearFilters() {
-    // Clear filter form
-    document.getElementById("filterFormData").reset();
-    const dateFilledStatus = document.getElementById("filterDateFilledStatus");
-    if (dateFilledStatus) {
-        dateFilledStatus.value = "all";
-    }
-    // Clear current filters
-    currentFilters = {};
-    // Clear search term as well
-    currentSearchTerm = "";
-    document.getElementById("searchInput").value = "";
-    // Reload all orders
-    loadOrders();
-    hideFilterForm();
-}
-
-function searchOrders() {
-    currentSearchTerm = document.getElementById("searchInput").value.trim();
-    loadAndFilterOrders();
-}
-
-function buildOrderFilterQuery() {
-    const params = new URLSearchParams();
-
-    Object.entries(currentFilters || {}).forEach(([key, value]) => {
-        if (value !== undefined && value !== null && value !== "") {
-            params.set(key, value);
-        }
-    });
-
-    return params.toString();
-}
-
-async function loadAndFilterOrders() {
-    try {
-        const query = buildOrderFilterQuery();
-        const response = await fetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
-        const data = await response.json();
-
-        let filteredOrders = data.orders;
-
-        // Apply search term (if any)
-        if (currentSearchTerm) {
-            filteredOrders = filteredOrders.filter(order => {
-                const searchLower = currentSearchTerm.toLowerCase();
-                return (
-                    (order.serial_number && order.serial_number.toString().toLowerCase().includes(searchLower)) ||
-                    order.company_name.toLowerCase().includes(searchLower) ||
-                    order.orderer.toLowerCase().includes(searchLower) ||
-                    order.business_type.toLowerCase().includes(searchLower) ||
-                    order.customer_id.toLowerCase().includes(searchLower) ||
-                    (order.sender_id && order.sender_id.toLowerCase().includes(searchLower)) ||
-                    order.origin.toLowerCase().includes(searchLower) ||
-                    order.destination.toLowerCase().includes(searchLower) ||
-                    (order.trade_term && order.trade_term.toLowerCase().includes(searchLower)) ||
-                    (order.product_name && order.product_name.toLowerCase().includes(searchLower))
-                );
-            });
-        }
-
-        displayOrders(filteredOrders);
-    } catch (error) {
-        showMessage("加载订单失败: " + error.message, "error");
-    }
-}
-
-function ensureOrderIndexStructure() {
-    const tableHead = document.querySelector("#ordersTable thead");
-    if (tableHead && !tableHead.textContent.includes("新增账单完成时间")) {
-        tableHead.innerHTML = `
-            <tr>
-                <th>流水号</th>
-                <th>公司名称</th>
-                <th>指令人</th>
-                <th>业务类型</th>
-                <th>发件人ID</th>
-                <th>客户ID</th>
-                <th>接收指令日期</th>
-                <th>起始地</th>
-                <th>目的地</th>
-                <th>贸易术语</th>
-                <th>货物品名</th>
-                <th>提货时间</th>
-                <th>开始报关时间</th>
-                <th>付税时间</th>
-                <th>放行时间</th>
-                <th>到货时间</th>
-                <th>完整单据回复时间</th>
-                <th>新增账单完成时间</th>
-                <th>账期</th>
-                <th>操作</th>
-            </tr>
-        `;
-    }
-
-    const filterForm = document.getElementById("filterFormData");
-    if (filterForm && !document.getElementById("filterBillingCompletedTimeFilledStatus")) {
-        filterForm.innerHTML = `
-            <div class="form-group">
-                <label>公司名称:</label>
-                <input type="text" id="filterCompanyName">
-            </div>
-            <div class="form-group">
-                <label>指令人:</label>
-                <input type="text" id="filterOrderer">
-            </div>
-            <div class="form-group">
-                <label>业务类型:</label>
-                <input type="text" id="filterBusinessType">
-            </div>
-            <div class="form-group">
-                <label>发件人ID:</label>
-                <input type="text" id="filterSenderId">
-            </div>
-            <div class="form-group">
-                <label>客户ID:</label>
-                <input type="text" id="filterCustomerId">
-            </div>
-            <div class="form-group">
-                <label>起始地:</label>
-                <input type="text" id="filterOrigin">
-            </div>
-            <div class="form-group">
-                <label>目的地:</label>
-                <input type="text" id="filterDestination">
-            </div>
-            <div class="form-group">
-                <label>接收指令日期:</label>
-                <select id="filterDateFilledStatus">
-                    <option value="all">全部</option>
-                    <option value="filled">已填</option>
-                    <option value="unfilled">未填</option>
-                </select>
-            </div>
-            ${buildOrderFilledStatusFilterHtml("提货时间", "filterPickupDateFilledStatus")}
-            ${buildOrderFilledStatusFilterHtml("开始报关时间", "filterCustomsStartTimeFilledStatus")}
-            ${buildOrderFilledStatusFilterHtml("付税时间", "filterTaxPaymentTimeFilledStatus")}
-            ${buildOrderFilledStatusFilterHtml("放行时间", "filterReleaseTimeFilledStatus")}
-            ${buildOrderFilledStatusFilterHtml("到货时间", "filterArrivalTimeFilledStatus")}
-            ${buildOrderFilledStatusFilterHtml("完整单据回复时间", "filterCompleteDocsSendTimeFilledStatus")}
-            ${buildOrderFilledStatusFilterHtml("新增账单完成时间", "filterBillingCompletedTimeFilledStatus")}
-            <div class="button-group">
-                <button type="button" onclick="applyFilters()">应用筛选</button>
-                <button type="button" onclick="clearFilters()">清除筛选</button>
-                <button type="button" onclick="hideFilterForm()">取消</button>
-            </div>
-        `;
-    }
-}
-
-function displayOrders(orders) {
-    ensureOrderIndexStructure();
-
-    orders.sort((a, b) => {
-        const aSerial = parseInt(a.serial_number || a.id) || 0;
-        const bSerial = parseInt(b.serial_number || b.id) || 0;
-        return bSerial - aSerial;
-    });
-
-    const tbody = document.querySelector("#ordersTable tbody");
-    if (!tbody) {
-        return;
-    }
-
-    tbody.innerHTML = "";
-    orders.forEach(order => {
-        const row = tbody.insertRow();
-        const displayDate = formatDateOnly(order.receive_date);
-
-        row.innerHTML = `
-            <td><button class="link-button" onclick="showOrderDetails(${order.id})">${order.serial_number || order.id}</button></td>
-            <td>${order.company_name || ""}</td>
-            <td>${order.orderer || ""}</td>
-            <td>${order.business_type || ""}</td>
-            <td>${order.sender_id || ""}</td>
-            <td>${order.customer_id || ""}</td>
-            <td>${displayDate}</td>
-            <td>${order.origin || ""}</td>
-            <td>${order.destination || ""}</td>
-            <td>${order.trade_term || ""}</td>
-            <td>${order.product_name || ""}</td>
-            <td>${formatDateOnly(order.pickup_date)}</td>
-            <td>${formatDateOnly(order.customs_start_time)}</td>
-            <td>${formatDateOnly(order.tax_payment_time)}</td>
-            <td>${formatDateOnly(order.release_time)}</td>
-            <td>${formatDateOnly(order.arrival_time)}</td>
-            <td>${formatDateOnly(order.complete_docs_send_time)}</td>
-            <td>${formatDateOnly(order.billing_completed_time)}</td>
-            <td>${order.billing_period || ""}</td>
-            <td>
-                <button onclick="editOrder(${order.id})">编辑</button>
-                <button onclick="deleteOrder(${order.id})">删除</button>
-            </td>
-        `;
-    });
-}
-
-function showFilterForm() {
-    ensureOrderIndexStructure();
+function showFilterForm(pageName = activeOrderPageContext) {
+    activeOrderPageContext = pageName;
+    ensureOrderIndexStructure(pageName);
     document.getElementById("filterModal").style.display = "block";
 }
 
-function applyFilters() {
-    ensureOrderIndexStructure();
-    currentFilters = {
+function applyFilters(pageName = activeOrderPageContext) {
+    const state = getOrderPageState(pageName);
+    state.filters = {
         company_name: getFilterInputValue("filterCompanyName"),
         orderer: getFilterInputValue("filterOrderer"),
         business_type: getFilterInputValue("filterBusinessType"),
@@ -2655,45 +2519,73 @@ function applyFilters() {
         dateFilledStatus: document.getElementById("filterDateFilledStatus")?.value || "all"
     };
 
-    Object.keys(currentFilters).forEach(key => {
-        if (currentFilters[key] === "" || currentFilters[key] === "all") {
-            delete currentFilters[key];
+    Object.keys(state.filters).forEach((key) => {
+        if (state.filters[key] === "" || state.filters[key] === "all") {
+            delete state.filters[key];
         }
     });
 
-    loadAndFilterOrders();
+    loadAndFilterOrders(pageName);
     hideFilterForm();
 }
 
-function clearFilters() {
-    ensureOrderIndexStructure();
+function clearFilters(pageName = activeOrderPageContext) {
+    const state = getOrderPageState(pageName);
     document.getElementById("filterFormData")?.reset();
     const dateFilledStatus = document.getElementById("filterDateFilledStatus");
     if (dateFilledStatus) {
         dateFilledStatus.value = "all";
     }
-    currentFilters = {};
-    currentSearchTerm = "";
-    const searchInput = document.getElementById("searchInput");
+    state.filters = {};
+    state.searchTerm = "";
+
+    const searchInput = document.getElementById(state.searchInputId);
     if (searchInput) {
         searchInput.value = "";
     }
-    loadOrders();
+
+    loadOrders(pageName);
     hideFilterForm();
 }
 
-async function loadAndFilterOrders() {
+function searchOrders() {
+    const state = getOrderPageState(ORDER_PAGE_VIEW);
+    state.searchTerm = document.getElementById(state.searchInputId)?.value.trim() || "";
+    loadAndFilterOrders(ORDER_PAGE_VIEW);
+}
+
+function searchDeleteOrders() {
+    const state = getOrderPageState(ORDER_PAGE_DELETE);
+    state.searchTerm = document.getElementById(state.searchInputId)?.value.trim() || "";
+    loadAndFilterOrders(ORDER_PAGE_DELETE);
+}
+
+function buildOrderFilterQuery(pageName = activeOrderPageContext) {
+    const params = new URLSearchParams();
+    const state = getOrderPageState(pageName);
+
+    Object.entries(state.filters || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+            params.set(key, value);
+        }
+    });
+
+    return params.toString();
+}
+
+async function loadAndFilterOrders(pageName = activeOrderPageContext) {
     try {
-        ensureOrderIndexStructure();
-        const query = buildOrderFilterQuery();
+        activeOrderPageContext = pageName;
+        ensureOrderIndexStructure(pageName);
+        const query = buildOrderFilterQuery(pageName);
         const response = await fetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
         const data = await response.json();
+        const state = getOrderPageState(pageName);
 
         let filteredOrders = data.orders || [];
-
-        if (currentSearchTerm) {
-            const searchLower = currentSearchTerm.toLowerCase();
-            filteredOrders = filteredOrders.filter(order => {
+        if (state.searchTerm) {
+            const searchLower = state.searchTerm.toLowerCase();
+            filteredOrders = filteredOrders.filter((order) => {
                 return [
                     order.serial_number,
                     order.company_name,
@@ -2707,14 +2599,23 @@ async function loadAndFilterOrders() {
                     order.product_name,
                     order.billing_completed_time,
                     order.billing_period
-                ].some(value => value && String(value).toLowerCase().includes(searchLower));
+                ].some((value) => value && String(value).toLowerCase().includes(searchLower));
             });
         }
 
-        displayOrders(filteredOrders);
+        displayOrders(filteredOrders, pageName);
     } catch (error) {
         showMessage("加载订单失败: " + error.message, "error");
     }
+}
+
+async function loadDeleteOrders() {
+    if (!isAdminUser()) {
+        showMessage("仅管理员可进入删单管理", "error");
+        showPage("viewOrders");
+        return;
+    }
+    await loadOrders(ORDER_PAGE_DELETE);
 }
 
 // User functions
@@ -6647,7 +6548,21 @@ function showPage(pageName) {
     if (pageName === "viewOrders") {
         document.getElementById("viewOrdersPage").style.display = "block";
         document.getElementById("viewOrdersLink").classList.add("active");
-        loadOrders();
+        activeOrderPageContext = ORDER_PAGE_VIEW;
+        loadOrders(ORDER_PAGE_VIEW);
+    } else if (pageName === "deleteOrders") {
+        if (!isAdminUser()) {
+            showMessage("仅管理员可进入删单管理", "error");
+            document.getElementById("viewOrdersPage").style.display = "block";
+            document.getElementById("viewOrdersLink").classList.add("active");
+            activeOrderPageContext = ORDER_PAGE_VIEW;
+            loadOrders(ORDER_PAGE_VIEW);
+            return;
+        }
+        document.getElementById("deleteOrdersPage").style.display = "block";
+        document.getElementById("deleteOrdersLink").classList.add("active");
+        activeOrderPageContext = ORDER_PAGE_DELETE;
+        loadDeleteOrders();
     } else if (pageName === "orderDetail") {
         document.getElementById("orderDetailPage").style.display = "block";
         document.getElementById("viewOrdersLink").classList.add("active");
@@ -6708,6 +6623,15 @@ window.onload = function() {
         searchInput.addEventListener("keypress", function(event) {
             if (event.key === "Enter") {
                 searchOrders();
+            }
+        });
+    }
+
+    const deleteOrdersSearchInput = document.getElementById("deleteOrdersSearchInput");
+    if (deleteOrdersSearchInput) {
+        deleteOrdersSearchInput.addEventListener("keypress", function(event) {
+            if (event.key === "Enter") {
+                searchDeleteOrders();
             }
         });
     }
