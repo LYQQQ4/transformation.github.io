@@ -10,6 +10,11 @@ const {
   getPreEnrichRequiredOrderImportFields,
   getRequiredOrderImportFields,
 } = require("../lib/order_import_schema");
+const {
+  buildFilledStatusSql,
+  enrichOrderBillingFields,
+  ensureBillingInfoSchema,
+} = require("../lib/reporting");
 const { validateUserProfileId } = require("../lib/user_profiles");
 
 // 配置multer用于文件上传
@@ -106,11 +111,15 @@ function buildOrderSelectSql(whereClause = "") {
       c.tax_payment_time AS tax_payment_time,
       c.release_time AS release_time,
       COALESCE(t.arrival_port_time, p.arrival_time) AS arrival_time,
-      t.complete_docs_send_time AS complete_docs_send_time
+      t.complete_docs_send_time AS complete_docs_send_time,
+      t.billing_period AS billing_period_raw,
+      b.billing_completed_time AS billing_completed_time,
+      b.billing_items AS billing_items_raw
     FROM orders o
     LEFT JOIN pickup_transport_tracking p ON p.serial_number = o.serial_number
     LEFT JOIN customs_clearance_tracking c ON c.serial_number = o.serial_number
     LEFT JOIN transfer t ON t.serial_number = o.serial_number
+    LEFT JOIN billing_info b ON b.serial_number = o.serial_number
     ${whereClause}
   `;
 }
@@ -338,6 +347,7 @@ module.exports = (db, userDb = null) => {
   router.get("/", async (req, res) => {
     try {
       await ensureOrderPhoneSchema(db);
+      await ensureBillingInfoSchema(db);
       const conditions = [];
       const params = [];
 
@@ -375,10 +385,15 @@ module.exports = (db, userDb = null) => {
       appendFilledStatusCondition("release_time_filled_status", "c.release_time");
       appendFilledStatusCondition("arrival_time_filled_status", "p.arrival_time");
       appendFilledStatusCondition("complete_docs_send_time_filled_status", "t.complete_docs_send_time");
+      const billingCompletedTimeFilledStatus = String(req.query.billing_completed_time_filled_status || "all").trim();
+      const billingCompletedTimeCondition = buildFilledStatusSql("b.billing_completed_time", billingCompletedTimeFilledStatus);
+      if (billingCompletedTimeCondition) {
+        conditions.push(billingCompletedTimeCondition);
+      }
 
       const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       const [rows] = await db.execute(`${buildOrderSelectSql(whereClause)} ORDER BY o.serial_number DESC`, params);
-      res.json({ orders: rows });
+      res.json({ orders: rows.map((row) => enrichOrderBillingFields(row)) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -388,6 +403,7 @@ module.exports = (db, userDb = null) => {
   router.get("/serial/:serial_number", async (req, res) => {
     try {
       await ensureOrderPhoneSchema(db);
+      await ensureBillingInfoSchema(db);
       const [rows] = await db.execute(
         `${buildOrderSelectSql("WHERE o.serial_number = ?")}
          LIMIT 1`,
@@ -397,7 +413,7 @@ module.exports = (db, userDb = null) => {
         res.status(404).json({ error: "Order not found" });
         return;
       }
-      res.json({ order: rows[0] });
+      res.json({ order: enrichOrderBillingFields(rows[0]) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -407,6 +423,7 @@ module.exports = (db, userDb = null) => {
   router.get("/:id", async (req, res) => {
     try {
       await ensureOrderPhoneSchema(db);
+      await ensureBillingInfoSchema(db);
       const [rows] = await db.execute(
         `${buildOrderSelectSql("WHERE o.id = ?")}
          LIMIT 1`,
@@ -416,7 +433,7 @@ module.exports = (db, userDb = null) => {
         res.status(404).json({ error: "Order not found" });
         return;
       }
-      res.json({ order: rows[0] });
+      res.json({ order: enrichOrderBillingFields(rows[0]) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

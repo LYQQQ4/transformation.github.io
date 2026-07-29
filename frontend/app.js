@@ -902,7 +902,9 @@ function renderOrderDetailView(order) {
         ["付税时间", formatDateOnly(order.tax_payment_time)],
         ["放行时间", formatDateOnly(order.release_time)],
         ["到货时间", formatDateOnly(order.arrival_time)],
-        ["完整单据回复时间", formatDateOnly(order.complete_docs_send_time)]
+        ["完整单据回复时间", formatDateOnly(order.complete_docs_send_time)],
+        ["新增账单完成时间", formatDateOnly(order.billing_completed_time)],
+        ["账期", order.billing_period || ""]
     ];
 
     detailContent.innerHTML = `
@@ -942,6 +944,8 @@ function buildEmptyOrderForSerial(serialNumber) {
         release_time: "",
         arrival_time: "",
         complete_docs_send_time: "",
+        billing_completed_time: "",
+        billing_period: "",
         remark1: "",
         remark2: "",
         shipping_address: "",
@@ -2497,7 +2501,7 @@ async function loadAndFilterOrders() {
 
 function ensureOrderIndexStructure() {
     const tableHead = document.querySelector("#ordersTable thead");
-    if (tableHead && !tableHead.textContent.includes("完整单据回复时间")) {
+    if (tableHead && !tableHead.textContent.includes("新增账单完成时间")) {
         tableHead.innerHTML = `
             <tr>
                 <th>流水号</th>
@@ -2517,13 +2521,15 @@ function ensureOrderIndexStructure() {
                 <th>放行时间</th>
                 <th>到货时间</th>
                 <th>完整单据回复时间</th>
+                <th>新增账单完成时间</th>
+                <th>账期</th>
                 <th>操作</th>
             </tr>
         `;
     }
 
     const filterForm = document.getElementById("filterFormData");
-    if (filterForm && !document.getElementById("filterCompleteDocsSendTimeFilledStatus")) {
+    if (filterForm && !document.getElementById("filterBillingCompletedTimeFilledStatus")) {
         filterForm.innerHTML = `
             <div class="form-group">
                 <label>公司名称:</label>
@@ -2567,6 +2573,7 @@ function ensureOrderIndexStructure() {
             ${buildOrderFilledStatusFilterHtml("放行时间", "filterReleaseTimeFilledStatus")}
             ${buildOrderFilledStatusFilterHtml("到货时间", "filterArrivalTimeFilledStatus")}
             ${buildOrderFilledStatusFilterHtml("完整单据回复时间", "filterCompleteDocsSendTimeFilledStatus")}
+            ${buildOrderFilledStatusFilterHtml("新增账单完成时间", "filterBillingCompletedTimeFilledStatus")}
             <div class="button-group">
                 <button type="button" onclick="applyFilters()">应用筛选</button>
                 <button type="button" onclick="clearFilters()">清除筛选</button>
@@ -2613,6 +2620,8 @@ function displayOrders(orders) {
             <td>${formatDateOnly(order.release_time)}</td>
             <td>${formatDateOnly(order.arrival_time)}</td>
             <td>${formatDateOnly(order.complete_docs_send_time)}</td>
+            <td>${formatDateOnly(order.billing_completed_time)}</td>
+            <td>${order.billing_period || ""}</td>
             <td>
                 <button onclick="editOrder(${order.id})">编辑</button>
                 <button onclick="deleteOrder(${order.id})">删除</button>
@@ -2642,6 +2651,7 @@ function applyFilters() {
         release_time_filled_status: getFilterInputValue("filterReleaseTimeFilledStatus"),
         arrival_time_filled_status: getFilterInputValue("filterArrivalTimeFilledStatus"),
         complete_docs_send_time_filled_status: getFilterInputValue("filterCompleteDocsSendTimeFilledStatus"),
+        billing_completed_time_filled_status: getFilterInputValue("filterBillingCompletedTimeFilledStatus"),
         dateFilledStatus: document.getElementById("filterDateFilledStatus")?.value || "all"
     };
 
@@ -2694,7 +2704,9 @@ async function loadAndFilterOrders() {
                     order.origin,
                     order.destination,
                     order.trade_term,
-                    order.product_name
+                    order.product_name,
+                    order.billing_completed_time,
+                    order.billing_period
                 ].some(value => value && String(value).toLowerCase().includes(searchLower));
             });
         }
