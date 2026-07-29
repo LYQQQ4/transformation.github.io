@@ -569,6 +569,7 @@
                     <h2>系统管理</h2>
                     <ul>
                         <li><a href="#" id="deleteOrdersLink" onclick="showPage('deleteOrders')" style="display:none;">　　删单管理</a></li>
+                        <li><a href="#" id="reportManagementLink" onclick="showPage('reportManagement')" style="display:none;">　　报表管理</a></li>
                         <li><a href="#" id="productDBLink" onclick="showPage('productDB')">　　产品信息库</a></li>
                         <li><a href="#" id="packagingDBLink" onclick="showPage('packagingDB')">　　包装信息库</a></li>
                         <li><a href="#" id="userManagementLink" onclick="showPage('userManagement')">　　用户管理</a></li>
@@ -682,6 +683,33 @@
                             </thead>
                             <tbody></tbody>
                         </table>
+                    </div>
+                </div>
+
+                <!-- 报表管理页面 -->
+                <div id="reportManagementPage" class="page" style="display:none;">
+                    <div class="section">
+                        <h2>报表管理</h2>
+                        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <label style="width: auto; margin-right: 0;">流水号:</label>
+                                <input type="text" id="reportSerialInput" placeholder="支持模糊查询流水号" style="width: 220px;">
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <label style="width: auto; margin-right: 0;">报表类型:</label>
+                                <select id="reportTypeSelect" style="width: 180px;">
+                                    <option value="total">总报表</option>
+                                </select>
+                            </div>
+                            <button type="button" onclick="queryReports()">查询报表</button>
+                        </div>
+                        <div id="reportManagementMessage" class="info" style="margin-bottom: 16px;"></div>
+                        <div style="overflow-x: auto;">
+                            <table id="reportManagementTable">
+                                <thead></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 

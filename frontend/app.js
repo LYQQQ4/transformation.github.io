@@ -731,6 +731,7 @@ let currentPackageSearchTerm = "";
 let currentPickupTrackingSearchTerm = "";
 let currentTransferSearchTerm = "";
 let currentGuestSearchTerm = "";
+const REPORT_TYPE_TOTAL = "total";
 
 function buildOrderFilledStatusFilterHtml(label, selectId) {
     return `
@@ -763,10 +764,114 @@ function getAuthHeaders(extraHeaders = {}) {
 
 function updateDeleteOrdersMenuVisibility() {
     const deleteOrdersLink = document.getElementById("deleteOrdersLink");
-    if (!deleteOrdersLink) {
+    if (deleteOrdersLink) {
+        deleteOrdersLink.style.display = isAdminUser() ? "block" : "none";
+    }
+
+    const reportManagementLink = document.getElementById("reportManagementLink");
+    if (reportManagementLink) {
+        reportManagementLink.style.display = isAdminUser() ? "block" : "none";
+    }
+}
+
+function showReportManagementMessage(message = "", type = "info") {
+    const messageEl = document.getElementById("reportManagementMessage");
+    if (!messageEl) {
         return;
     }
-    deleteOrdersLink.style.display = isAdminUser() ? "block" : "none";
+    messageEl.textContent = message;
+    messageEl.className = type;
+}
+
+function getReportRequestUrl(reportType, serialNumber) {
+    const params = new URLSearchParams();
+    params.set("report_type", reportType || REPORT_TYPE_TOTAL);
+    if (serialNumber) {
+        params.set("serial_number", serialNumber);
+    }
+    return `${API_BASE}/reports/summary?${params.toString()}`;
+}
+
+function formatReportCellValue(columnKey, value) {
+    if (value === undefined || value === null || value === "") {
+        return "";
+    }
+
+    const dateColumns = new Set([
+        "receive_date",
+        "pickup_date",
+        "arrival_time",
+        "customs_start_time",
+        "tax_payment_time",
+        "release_time",
+        "arrival_port_time",
+        "clearance_time",
+        "delivery_time",
+        "complete_docs_send_time",
+        "billing_completed_time"
+    ]);
+
+    if (dateColumns.has(columnKey)) {
+        return formatDateOnly(value);
+    }
+
+    return String(value);
+}
+
+function renderReportTable(columns = [], rows = []) {
+    const thead = document.querySelector("#reportManagementTable thead");
+    const tbody = document.querySelector("#reportManagementTable tbody");
+
+    if (!thead || !tbody) {
+        return;
+    }
+
+    if (!columns.length) {
+        thead.innerHTML = "";
+        tbody.innerHTML = "";
+        return;
+    }
+
+    thead.innerHTML = `<tr>${columns.map((column) => `<th>${escapeHtml(column.label || column.key)}</th>`).join("")}</tr>`;
+    tbody.innerHTML = rows.map((row) => {
+        return `<tr>${columns.map((column) => {
+            const value = formatReportCellValue(column.key, row?.[column.key]);
+            return `<td>${escapeHtml(value)}</td>`;
+        }).join("")}</tr>`;
+    }).join("");
+}
+
+async function queryReports() {
+    if (!isAdminUser()) {
+        showMessage("仅管理员可使用报表管理", "error");
+        showPage("viewOrders");
+        return;
+    }
+
+    const reportType = document.getElementById("reportTypeSelect")?.value || REPORT_TYPE_TOTAL;
+    const serialNumber = document.getElementById("reportSerialInput")?.value.trim() || "";
+
+    try {
+        showReportManagementMessage("正在查询报表...", "info");
+        const response = await fetch(getReportRequestUrl(reportType, serialNumber), {
+            headers: getAuthHeaders()
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "查询报表失败");
+        }
+
+        renderReportTable(data.columns || [], data.rows || []);
+        if ((data.rows || []).length === 0) {
+            showReportManagementMessage("未查询到符合条件的报表数据", "info");
+        } else {
+            showReportManagementMessage(`已查询到 ${(data.rows || []).length} 条记录`, "success");
+        }
+    } catch (error) {
+        renderReportTable([], []);
+        showReportManagementMessage("查询报表失败: " + error.message, "error");
+    }
 }
 
 function buildOrderActionButtons(order, pageName = activeOrderPageContext) {
@@ -6563,6 +6668,18 @@ function showPage(pageName) {
         document.getElementById("deleteOrdersLink").classList.add("active");
         activeOrderPageContext = ORDER_PAGE_DELETE;
         loadDeleteOrders();
+    } else if (pageName === "reportManagement") {
+        if (!isAdminUser()) {
+            showMessage("仅管理员可进入报表管理", "error");
+            document.getElementById("viewOrdersPage").style.display = "block";
+            document.getElementById("viewOrdersLink").classList.add("active");
+            activeOrderPageContext = ORDER_PAGE_VIEW;
+            loadOrders(ORDER_PAGE_VIEW);
+            return;
+        }
+        document.getElementById("reportManagementPage").style.display = "block";
+        document.getElementById("reportManagementLink").classList.add("active");
+        showReportManagementMessage("请选择流水号和报表类型后查询", "info");
     } else if (pageName === "orderDetail") {
         document.getElementById("orderDetailPage").style.display = "block";
         document.getElementById("viewOrdersLink").classList.add("active");
@@ -6632,6 +6749,15 @@ window.onload = function() {
         deleteOrdersSearchInput.addEventListener("keypress", function(event) {
             if (event.key === "Enter") {
                 searchDeleteOrders();
+            }
+        });
+    }
+
+    const reportSerialInput = document.getElementById("reportSerialInput");
+    if (reportSerialInput) {
+        reportSerialInput.addEventListener("keypress", function(event) {
+            if (event.key === "Enter") {
+                queryReports();
             }
         });
     }

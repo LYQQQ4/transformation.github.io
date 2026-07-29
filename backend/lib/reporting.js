@@ -148,9 +148,9 @@ function buildTotalReportSummaryRows(rows = []) {
     return summary;
   });
 
-  const columns = TOTAL_REPORT_FIELD_DEFINITIONS.filter((field) => {
-    return field.key === "serial_number" || hasDataMap.get(field.key);
-  }).map((field) => ({ key: field.key, label: field.label }));
+  const columns = TOTAL_REPORT_FIELD_DEFINITIONS
+    .filter((field) => field.key === "serial_number" || hasDataMap.get(field.key))
+    .map((field) => ({ key: field.key, label: field.label }));
 
   return {
     columns,

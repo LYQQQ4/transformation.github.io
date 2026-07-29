@@ -134,6 +134,7 @@ const userPool = mysql.createPool(userDbConfig);
   app.use("/api/products", require("./routes/products")(pool));
   app.use("/api/customs-clearance", require("./routes/customs_clearance")(pool));
   app.use("/api/billing", require("./routes/billing")(pool));
+  app.use("/api/reports", require("./routes/reports")(pool, userPool));
 
   // Serve static files from frontend - AFTER API routes
   app.use(express.static(path.join(__dirname, "../frontend")));
