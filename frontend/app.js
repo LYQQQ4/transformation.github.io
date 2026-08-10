@@ -1690,6 +1690,368 @@ function openBillingPageFromOrderDetail() {
     showPage("billing");
 }
 
+const BILLING_TEMPLATE_API = window.BillingTemplates || null;
+const BILLING_TEMPLATE_FALLBACK_KEY = BILLING_TEMPLATE_API?.LEGACY_BILLING_TEMPLATE_KEY || "legacy";
+
+function getBillingTemplateFieldDefinitions(templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
+    if (!BILLING_TEMPLATE_API) {
+        return BILLING_FEE_FIELDS;
+    }
+
+    return BILLING_TEMPLATE_API.getBillingFieldDefinitions(templateKey);
+}
+
+function getBillingTemplateContext(record = {}, forcedTemplateKey = "") {
+    if (!BILLING_TEMPLATE_API) {
+        return {
+            key: BILLING_TEMPLATE_FALLBACK_KEY,
+            template: {
+                label: "历史通用",
+                title: "历史通用账单格式",
+                amountLabel: "金额"
+            },
+            source: "legacy_empty"
+        };
+    }
+
+    return BILLING_TEMPLATE_API.resolveBillingTemplate(
+        {
+            ...record,
+            cost_items: Array.isArray(record?.cost_items) ? record.cost_items : [],
+            billing_items: Array.isArray(record?.billing_items) ? record.billing_items : []
+        },
+        forcedTemplateKey
+            ? { forceTemplateKey: forcedTemplateKey }
+            : { preferredTemplateKey: record?.billing_template_key || "" }
+    );
+}
+
+function normalizeBillingFeeItems(items, templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
+    if (!BILLING_TEMPLATE_API) {
+        return Array.isArray(items) ? items : [];
+    }
+
+    return BILLING_TEMPLATE_API.normalizeBillingItems(items, templateKey, {
+        preserveUnknown: templateKey === BILLING_TEMPLATE_FALLBACK_KEY
+    });
+}
+
+function normalizeBillingRecord(record = null, forcedTemplateKey = "") {
+    const templateContext = getBillingTemplateContext(record || {}, forcedTemplateKey);
+    const templateKey = templateContext.key || BILLING_TEMPLATE_FALLBACK_KEY;
+
+    return {
+        serial_number: record?.serial_number || "",
+        company_name: record?.company_name || "",
+        orderer: record?.orderer || "",
+        business_type: record?.business_type || "",
+        sender_id: record?.sender_id || "",
+        customer_id: record?.customer_id || "",
+        receive_date: record?.receive_date || "",
+        origin: record?.origin || "",
+        destination: record?.destination || "",
+        trade_term: record?.trade_term || "",
+        product_name: record?.product_name || "",
+        transport_mode: record?.transport_mode || "",
+        tracking_number: record?.tracking_number || "",
+        pieces_total: record?.pieces_total || "",
+        weight_total: record?.weight_total || "",
+        volume_total: record?.volume_total || "",
+        charge_weight: record?.charge_weight || "",
+        billing_completed_time: record?.billing_completed_time || "",
+        billing_template_key: templateKey,
+        billing_template_label: templateContext.template.label,
+        billing_template_title: templateContext.template.title,
+        billing_amount_label: templateContext.template.amountLabel,
+        billing_template_source: templateContext.source,
+        cost_items: normalizeBillingFeeItems(record?.cost_items, templateKey),
+        billing_items: normalizeBillingFeeItems(record?.billing_items, templateKey)
+    };
+}
+
+function buildBillingBaseInfoItems(record) {
+    return [
+        ...buildCommonOrderFieldItems(record, record?.serial_number || ""),
+        ["运输方式", record?.transport_mode || ""],
+        ["账单模板", record?.billing_template_title || record?.billing_template_label || ""],
+        ["运单号", record?.tracking_number || ""],
+        ["件数", record?.pieces_total || ""],
+        ["重量", record?.weight_total || ""],
+        ["体积", record?.volume_total || ""],
+        ["计费重量", record?.charge_weight || ""],
+        ["账单完成时间", formatDateOnly(record?.billing_completed_time)]
+    ];
+}
+
+function buildBillingTemplateNotice(record) {
+    if (!record) {
+        return "";
+    }
+
+    if (record.billing_template_source === "transport_mode") {
+        return "";
+    }
+
+    if (record.billing_template_source === "business_type") {
+        return `
+            <div class="info" style="margin-top: 16px;">
+                当前运输方式未直接识别，已按业务类型切换到“${escapeHtml(record.billing_template_label || "")}”账单格式。
+            </div>
+        `;
+    }
+
+    if (record.billing_template_source === "items") {
+        return `
+            <div class="info" style="margin-top: 16px;">
+                当前运输方式缺失或不明确，已根据历史账单内容识别为“${escapeHtml(record.billing_template_label || "")}”格式。
+            </div>
+        `;
+    }
+
+    return `
+        <div class="info" style="margin-top: 16px;">
+            当前记录未能安全识别到五类账单格式，已按历史通用格式兼容回显。请先核对运输方式，必要时选择正确模板后再保存。
+        </div>
+    `;
+}
+
+function buildBillingTemplateOptionsHtml(selectedKey) {
+    if (!BILLING_TEMPLATE_API) {
+        return `<option value="${BILLING_TEMPLATE_FALLBACK_KEY}">历史通用</option>`;
+    }
+
+    const templateKeys = [...BILLING_TEMPLATE_API.BILLING_TEMPLATE_ORDER];
+    if (!templateKeys.includes(selectedKey) && selectedKey === BILLING_TEMPLATE_FALLBACK_KEY) {
+        templateKeys.push(BILLING_TEMPLATE_FALLBACK_KEY);
+    }
+
+    return templateKeys.map((templateKey) => {
+        const template = BILLING_TEMPLATE_API.getBillingTemplate(templateKey);
+        const selected = templateKey === selectedKey ? "selected" : "";
+        return `<option value="${escapeHtml(templateKey)}" ${selected}>${escapeHtml(template.label)}</option>`;
+    }).join("");
+}
+
+function buildBillingFeeTableHtml(title, tableType, items, options = {}) {
+    const {
+        editable = false,
+        collapsed = true,
+        serialNumber = "",
+        templateKey = BILLING_TEMPLATE_FALLBACK_KEY
+    } = options;
+    const sectionId = `${tableType}Section_${serialNumber || "general"}`;
+    const fieldDefinitions = getBillingTemplateFieldDefinitions(templateKey);
+    const bodyHtml = items.map((item, rowIndex) => `
+        <tr data-billing-row="${tableType}" data-row-index="${rowIndex}" data-category="${escapeHtml(item.category || "")}">
+            <td>${escapeHtml(item.category)}</td>
+            ${fieldDefinitions.map((field) => {
+                const value = item?.[field.key] ?? "";
+                if (!editable) {
+                    return `<td>${escapeHtml(value)}</td>`;
+                }
+                return `<td><input type="text" data-table-type="${tableType}" data-row-index="${rowIndex}" data-field="${field.key}" value="${escapeHtml(value)}"></td>`;
+            }).join("")}
+        </tr>
+    `).join("");
+
+    return `
+        <div style="margin-top: 16px;">
+            <button type="button" class="link-button" onclick="toggleBillingSection('${sectionId}')">${title}</button>
+            <div id="${sectionId}" style="display:${collapsed ? "none" : "block"}; margin-top: 12px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>费用类别</th>
+                            ${fieldDefinitions.map(field => `<th>${field.label}</th>`).join("")}
+                        </tr>
+                    </thead>
+                    <tbody>${bodyHtml}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function serializeBillingFeeItems(container, tableType, templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
+    const fieldDefinitions = getBillingTemplateFieldDefinitions(templateKey);
+    const rows = Array.from(container.querySelectorAll(`[data-billing-row="${tableType}"]`));
+    const items = rows.map((row) => {
+        const item = { category: row.dataset.category || "" };
+
+        fieldDefinitions.forEach((field) => {
+            const input = row.querySelector(`[data-field="${field.key}"]`);
+            item[field.key] = input ? input.value : "";
+        });
+
+        return item;
+    });
+
+    return normalizeBillingFeeItems(items, templateKey);
+}
+
+function getBillingDetailContainer(detailKey) {
+    return detailKey === "billingPage"
+        ? document.getElementById("billingDetailContainer")
+        : document.getElementById("orderBillingContent");
+}
+
+function switchBillingTemplate(detailKey) {
+    const container = getBillingDetailContainer(detailKey);
+    if (!container) {
+        return;
+    }
+
+    const nextTemplateKey = document.getElementById(`billingTemplateKey_${detailKey}`)?.value || BILLING_TEMPLATE_FALLBACK_KEY;
+    const currentTemplateKey = container.dataset.billingTemplateKey || BILLING_TEMPLATE_FALLBACK_KEY;
+    const billingCompletedTimeInput = document.getElementById(`billingCompletedTime_${detailKey}`);
+    let draftRecord = {};
+
+    try {
+        draftRecord = JSON.parse(container.dataset.billingRecordJson || "{}");
+    } catch (error) {
+        draftRecord = {};
+    }
+
+    draftRecord = {
+        ...draftRecord,
+        billing_completed_time: billingCompletedTimeInput ? billingCompletedTimeInput.value : (draftRecord.billing_completed_time || ""),
+        cost_items: serializeBillingFeeItems(container, "cost_items", currentTemplateKey),
+        billing_items: serializeBillingFeeItems(container, "billing_items", currentTemplateKey),
+        billing_template_key: nextTemplateKey
+    };
+
+    let renderOptions = {};
+    try {
+        renderOptions = JSON.parse(container.dataset.renderOptions || "{}");
+    } catch (error) {
+        renderOptions = {};
+    }
+
+    renderBillingDetail(container, draftRecord, {
+        ...renderOptions,
+        containerId: detailKey,
+        forcedTemplateKey: nextTemplateKey
+    });
+}
+
+function renderBillingDetail(container, record, options = {}) {
+    if (!container) {
+        return;
+    }
+
+    const {
+        editable = true,
+        showSaveButton = true,
+        collapsed = true,
+        containerId = "",
+        forcedTemplateKey = ""
+    } = options;
+    const normalized = normalizeBillingRecord(record, forcedTemplateKey);
+    const detailKey = containerId || normalized.serial_number || "billing";
+    const baseItems = buildBillingBaseInfoItems(normalized);
+    const allowTemplateSwitch = editable && (
+        normalized.billing_template_source === "legacy_fallback" ||
+        normalized.billing_template_source === "legacy_items" ||
+        normalized.billing_template_source === "legacy_empty"
+    );
+
+    container.innerHTML = `
+        <div class="detail-grid">${buildDetailGridItems(baseItems)}</div>
+        ${buildBillingTemplateNotice(normalized)}
+        <div style="margin-top: 16px;">
+            <div class="form-group">
+                <label>账单模板:</label>
+                ${allowTemplateSwitch
+                    ? `<select id="billingTemplateKey_${detailKey}" onchange="switchBillingTemplate('${detailKey}')">${buildBillingTemplateOptionsHtml(normalized.billing_template_key)}</select>`
+                    : `<input type="text" value="${escapeHtml(normalized.billing_template_title || normalized.billing_template_label || "")}" readonly>`}
+            </div>
+            <div class="form-group">
+                <label>账单完成时间:</label>
+                ${editable
+                    ? `<input type="date" id="billingCompletedTime_${detailKey}" value="${escapeHtml((normalized.billing_completed_time || "").split("T")[0])}">`
+                    : `<span>${escapeHtml(formatDateOnly(normalized.billing_completed_time))}</span>`}
+            </div>
+        </div>
+        ${buildBillingFeeTableHtml(`成本信息（${normalized.billing_template_label || ""}）`, "cost_items", normalized.cost_items, {
+            editable,
+            collapsed,
+            serialNumber: detailKey,
+            templateKey: normalized.billing_template_key
+        })}
+        ${buildBillingFeeTableHtml(`账单信息（${normalized.billing_template_label || ""}）`, "billing_items", normalized.billing_items, {
+            editable,
+            collapsed,
+            serialNumber: detailKey,
+            templateKey: normalized.billing_template_key
+        })}
+        ${showSaveButton ? `<div class="button-group"><button type="button" onclick="saveBillingRecord('${detailKey}')">保存账单信息</button></div>` : ""}
+    `;
+
+    container.dataset.serialNumber = normalized.serial_number || "";
+    container.dataset.detailKey = detailKey;
+    container.dataset.billingTemplateKey = normalized.billing_template_key || BILLING_TEMPLATE_FALLBACK_KEY;
+    container.dataset.billingRecordJson = JSON.stringify(normalized);
+    container.dataset.renderOptions = JSON.stringify({
+        editable,
+        showSaveButton,
+        collapsed,
+        containerId: detailKey
+    });
+    currentOrderBillingData = normalized;
+}
+
+async function saveBillingRecord(detailKey) {
+    const container = getBillingDetailContainer(detailKey);
+    if (!container) {
+        return;
+    }
+
+    const serialNumber = container.dataset.serialNumber || currentOrderBillingData?.serial_number || currentBillingSerialNumber;
+    if (!serialNumber) {
+        showMessage("未找到账单流水号", "error");
+        return;
+    }
+
+    const templateKey = container.dataset.billingTemplateKey || BILLING_TEMPLATE_FALLBACK_KEY;
+    const billingCompletedTimeInput = document.getElementById(`billingCompletedTime_${detailKey}`);
+    const payload = {
+        billing_template_key: templateKey,
+        billing_completed_time: billingCompletedTimeInput ? billingCompletedTimeInput.value : null,
+        cost_items: serializeBillingFeeItems(container, "cost_items", templateKey),
+        billing_items: serializeBillingFeeItems(container, "billing_items", templateKey)
+    };
+
+    try {
+        const response = await fetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "保存账单信息失败");
+        }
+
+        const nextRecord = normalizeBillingRecord(data.record);
+        currentOrderBillingData = nextRecord;
+        renderBillingDetail(container, nextRecord, {
+            editable: true,
+            showSaveButton: true,
+            collapsed: false,
+            containerId: detailKey
+        });
+        showMessage("账单信息保存成功");
+        if (detailKey === "billingPage") {
+            loadBillingRecords();
+        }
+        if (currentOrderDetailSerial && currentOrderDetailSerial === serialNumber) {
+            loadOrderBillingDetails(serialNumber);
+        }
+    } catch (error) {
+        showMessage("保存账单信息失败: " + error.message, "error");
+    }
+}
+
 function getOrderDisplayOrigin(record) {
     return record?.order_origin || record?.origin || "";
 }
