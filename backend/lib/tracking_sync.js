@@ -15,22 +15,22 @@ async function executeSyncUpdate(connection, options) {
     required = false,
   } = options;
 
-  const assignments = [];
-  const values = [];
+  const assignmentValueMap = new Map();
 
   fieldMappings.forEach(({ payloadKey, columnName }) => {
     if (!hasOwnField(payload, payloadKey)) {
       return;
     }
 
-    assignments.push(buildUpdateAssignment(columnName));
-    values.push(payload[payloadKey]);
+    assignmentValueMap.set(columnName, payload[payloadKey]);
   });
 
+  const assignments = Array.from(assignmentValueMap.keys()).map(buildUpdateAssignment);
   if (assignments.length === 0) {
     return;
   }
 
+  const values = Array.from(assignmentValueMap.values());
   values.push(serialNumber);
 
   const [result] = await connection.execute(
@@ -53,9 +53,15 @@ async function syncTrackingFieldsBySerial(connection, serialNumber, payload = {}
       payload,
       required: true,
       fieldMappings: [
+        { payloadKey: "tracking_number", columnName: "tracking_number" },
         { payloadKey: "transport_mode", columnName: "transport_mode" },
+        { payloadKey: "pickup_date", columnName: "pickup_date" },
+        { payloadKey: "arrival_time", columnName: "arrival_time" },
+        { payloadKey: "arrival_port_time", columnName: "arrival_time" },
         { payloadKey: "transport_supplier", columnName: "transport_supplier" },
+        { payloadKey: "contract_number", columnName: "contract_number" },
         { payloadKey: "cargo_flow_info", columnName: "cargo_flow_info" },
+        { payloadKey: "value_added_services", columnName: "value_added_services" },
         { payloadKey: "remark1", columnName: "remark1" },
         { payloadKey: "remark2", columnName: "remark2" },
       ],
@@ -69,9 +75,15 @@ async function syncTrackingFieldsBySerial(connection, serialNumber, payload = {}
       payload,
       required: true,
       fieldMappings: [
+        { payloadKey: "tracking_number", columnName: "tracking_number" },
         { payloadKey: "transport_mode", columnName: "transport_mode" },
+        { payloadKey: "pickup_date", columnName: "pickup_date" },
+        { payloadKey: "arrival_time", columnName: "arrival_port_time" },
+        { payloadKey: "arrival_port_time", columnName: "arrival_port_time" },
         { payloadKey: "transport_supplier", columnName: "supplier" },
+        { payloadKey: "contract_number", columnName: "contract_number" },
         { payloadKey: "cargo_flow_info", columnName: "cargo_flow_info" },
+        { payloadKey: "value_added_services", columnName: "value_added_services" },
         { payloadKey: "remark1", columnName: "remark1" },
         { payloadKey: "remark2", columnName: "remark2" },
       ],

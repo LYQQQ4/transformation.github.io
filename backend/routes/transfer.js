@@ -362,9 +362,14 @@ ${TRANSFER_SELECT_COLUMNS}
       const [result] = await connection.execute(sql, params);
 
       await syncTrackingFieldsBySerial(connection, serialNumber, {
+        tracking_number: sharedFields.tracking_number,
         transport_mode: sanitizeTransferValue(transport_mode),
+        pickup_date: normalizedDates.values.pickup_date,
+        arrival_port_time: normalizedDates.values.arrival_port_time,
         transport_supplier: sharedFields.transport_supplier,
+        contract_number: sharedFields.contract_number,
         cargo_flow_info: sharedFields.cargo_flow_info,
+        value_added_services: sharedFields.value_added_services,
         remark1: sharedFields.remark1,
         remark2: sharedFields.remark2,
         excludeTables: ["transfer"],
@@ -446,9 +451,14 @@ ${TRANSFER_SELECT_COLUMNS}
       }
 
       await syncTrackingFieldsBySerial(connection, serialNumber, {
+        tracking_number: sharedFields.tracking_number,
         transport_mode: sanitizeTransferValue(transport_mode),
+        pickup_date: normalizedDates.values.pickup_date,
+        arrival_port_time: normalizedDates.values.arrival_port_time,
         transport_supplier: sharedFields.transport_supplier,
+        contract_number: sharedFields.contract_number,
         cargo_flow_info: sharedFields.cargo_flow_info,
+        value_added_services: sharedFields.value_added_services,
         remark1: sharedFields.remark1,
         remark2: sharedFields.remark2,
         excludeTables: ["transfer"],
@@ -522,9 +532,14 @@ ${TRANSFER_SELECT_COLUMNS}
       }
 
       await syncTrackingFieldsBySerial(connection, sanitizeTransferValue(serial_number), {
+        tracking_number: sharedFields.tracking_number,
         transport_mode: sanitizeTransferValue(transport_mode),
+        pickup_date: normalizedDates.values.pickup_date,
+        arrival_port_time: normalizedDates.values.arrival_port_time,
         transport_supplier: sharedFields.transport_supplier,
+        contract_number: sharedFields.contract_number,
         cargo_flow_info: sharedFields.cargo_flow_info,
+        value_added_services: sharedFields.value_added_services,
         remark1: sharedFields.remark1,
         remark2: sharedFields.remark2,
         excludeTables: ["transfer"],
@@ -703,9 +718,14 @@ ${TRANSFER_SELECT_COLUMNS}
 
             if (updateResult.affectedRows > 0) {
               await syncTrackingFieldsBySerial(rowConnection, serialNumber, {
+                tracking_number: sharedFields.tracking_number,
                 transport_mode: sanitizeTransferValue(transport_mode),
+                pickup_date: pickup_date || null,
+                arrival_port_time: arrival_port_time || null,
                 transport_supplier: sharedFields.transport_supplier,
+                contract_number: sharedFields.contract_number,
                 cargo_flow_info: sharedFields.cargo_flow_info,
+                value_added_services: sharedFields.value_added_services,
                 remark1: sharedFields.remark1,
                 remark2: sharedFields.remark2,
                 excludeTables: ["transfer"],

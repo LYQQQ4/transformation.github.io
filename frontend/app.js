@@ -2138,20 +2138,26 @@ function collectSharedFormPayload(form, fieldMap, options = {}) {
     }, {});
 }
 
-function refreshTrackingLinkedViews(serialNumber) {
-    loadPickupTrackings();
-    loadTransfers();
-    loadCustomsClearance();
-    loadPackages();
-    loadBillingRecords();
+async function refreshTrackingLinkedViews(serialNumber) {
+    const refreshTasks = [
+        loadPickupTrackings(),
+        loadTransfers(),
+        loadCustomsClearance(),
+        loadPackages(),
+        loadBillingRecords()
+    ];
 
     if (currentOrderDetailSerial && currentOrderDetailSerial === serialNumber) {
-        loadOrderPackageDetails(serialNumber);
-        loadOrderPickupTrackingDetails(serialNumber);
-        loadOrderDeliveryTrackingDetails(serialNumber);
-        loadOrderCustomsClearanceDetails(serialNumber);
-        loadOrderBillingDetails(serialNumber);
+        refreshTasks.push(
+            loadOrderPackageDetails(serialNumber),
+            loadOrderPickupTrackingDetails(serialNumber),
+            loadOrderDeliveryTrackingDetails(serialNumber),
+            loadOrderCustomsClearanceDetails(serialNumber),
+            loadOrderBillingDetails(serialNumber)
+        );
     }
+
+    await Promise.allSettled(refreshTasks);
 }
 
 function groupPackagesBySerial(packages) {
@@ -5473,7 +5479,7 @@ async function savePickupTracking() {
         if (response.ok) {
             showMessage("提货运输跟踪保存成功");
             hidePickupTrackingForm();
-            refreshTrackingLinkedViews(serialNumber);
+            await refreshTrackingLinkedViews(serialNumber);
         } else {
             const error = await response.json();
             showMessage("保存失败: " + error.error, "error");
@@ -5816,7 +5822,7 @@ async function saveTransfer() {
         if (response.ok) {
             showMessage("送货运输跟踪保存成功");
             hideTransferForm();
-            refreshTrackingLinkedViews(serialNumber);
+            await refreshTrackingLinkedViews(serialNumber);
         } else {
             const error = await response.json();
             showMessage("保存失败: " + error.error, "error");
@@ -7478,7 +7484,7 @@ async function saveCustomsClearance() {
         if (response.ok) {
             showMessage("报关信息保存成功");
             hideCustomsForm();
-            refreshTrackingLinkedViews(serialNumber);
+            await refreshTrackingLinkedViews(serialNumber);
         } else {
             const error = await response.json();
             showMessage("保存失败: " + error.error, "error");

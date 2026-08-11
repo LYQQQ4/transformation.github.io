@@ -255,9 +255,14 @@ ${PICKUP_SELECT_COLUMNS}
       }
 
       await syncTrackingFieldsBySerial(connection, serialNumber, {
+        tracking_number,
         transport_mode: sanitizeNullableString(transport_mode),
+        pickup_date: pickupDateResult.value,
+        arrival_time: arrivalTimeResult.value,
         transport_supplier,
+        contract_number,
         cargo_flow_info,
+        value_added_services,
         remark1,
         remark2,
         excludeTables: ["pickup_transport_tracking"],
