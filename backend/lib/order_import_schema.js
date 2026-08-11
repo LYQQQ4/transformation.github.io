@@ -5,7 +5,7 @@ const ORDER_IMPORT_FIELDS = [
     aliases: ["公司名称", "公司抬头"],
     formId: "companyName",
     required: true,
-    allowAutoFillFromProfile: true,
+    allowAutoFillFromProfile: false,
   },
   {
     key: "orderer",

@@ -792,6 +792,15 @@ function getReportRequestUrl(reportType, serialNumber) {
     return `${API_BASE}/reports/summary?${params.toString()}`;
 }
 
+function getReportExportUrl(reportType, serialNumber) {
+    const params = new URLSearchParams();
+    params.set("report_type", reportType || REPORT_TYPE_TOTAL);
+    if (serialNumber) {
+        params.set("serial_number", serialNumber);
+    }
+    return `${API_BASE}/reports/export?${params.toString()}`;
+}
+
 function formatReportCellValue(columnKey, value) {
     if (value === undefined || value === null || value === "") {
         return "";
@@ -871,6 +880,52 @@ async function queryReports() {
     } catch (error) {
         renderReportTable([], []);
         showReportManagementMessage("查询报表失败: " + error.message, "error");
+    }
+}
+
+async function exportReports() {
+    if (!isAdminUser()) {
+        showMessage("仅管理员可使用报表管理", "error");
+        showPage("viewOrders");
+        return;
+    }
+
+    const reportType = document.getElementById("reportTypeSelect")?.value || REPORT_TYPE_TOTAL;
+    const serialNumber = document.getElementById("reportSerialInput")?.value.trim() || "";
+
+    try {
+        showReportManagementMessage("正在导出报表...", "info");
+        const response = await fetch(getReportExportUrl(reportType, serialNumber), {
+            headers: getAuthHeaders()
+        });
+
+        if (!response.ok) {
+            let errorMessage = "导出报表失败";
+            try {
+                const error = await response.json();
+                errorMessage = error.error || errorMessage;
+            } catch {
+                // Keep the generic error when the server response is not JSON.
+            }
+            throw new Error(errorMessage);
+        }
+
+        const blob = await response.blob();
+        if (!blob.size) {
+            throw new Error("导出的报表为空");
+        }
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "report_export.xlsx";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showReportManagementMessage("报表导出成功", "success");
+    } catch (error) {
+        showReportManagementMessage("导出报表失败: " + error.message, "error");
     }
 }
 
@@ -2860,8 +2915,15 @@ async function saveOrder() {
         showMessage("未找到订单表单", "error");
         return;
     }
+    const companyNameElement = getOrderFormElement("companyName", form);
+    const companyName = companyNameElement?.value.trim() || "";
+    if (!companyName) {
+        showMessage("公司抬头不能为空，请手动填写", "error");
+        companyNameElement?.focus();
+        return;
+    }
     const orderData = {
-        company_name: getOrderFormElement("companyName", form).value,
+        company_name: companyName,
         orderer: getOrderFormElement("orderer", form).value,
         receive_date: getReceiveDateValue(form),
         business_type: getOrderFormElement("businessType", form).value,

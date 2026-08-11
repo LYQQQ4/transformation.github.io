@@ -43,11 +43,14 @@ function testReportManagementUiExists() {
   assert.ok(html.includes('id="reportManagementPage"'), "report management page should exist");
   assert.ok(html.includes('id="reportTypeSelect"'), "report type selector should exist");
   assert.ok(html.includes('id="reportManagementTable"'), "report result table should exist");
+  assert.ok(html.includes('onclick="exportReports()"'), "report export button should exist");
 }
 
 function testFrontendHandlersExist() {
   const appJs = read("frontend/app.js");
   assert.ok(appJs.includes("function queryReports()"), "queryReports handler should exist");
+  assert.ok(appJs.includes("function exportReports()"), "exportReports handler should exist");
+  assert.ok(appJs.includes("getReportExportUrl"), "report export URL builder should exist");
   assert.ok(appJs.includes('pageName === "reportManagement"'), "showPage should handle report management");
   assert.ok(appJs.includes("getReportRequestUrl"), "report request URL builder should exist");
 }
@@ -58,6 +61,8 @@ function testBackendRouteMounted() {
 
   assert.ok(serverJs.includes('app.use("/api/reports", require("./routes/reports")(pool, userPool));'));
   assert.ok(reportsRouteJs.includes('router.get("/summary"'));
+  assert.ok(reportsRouteJs.includes('router.get("/export"'));
+  assert.ok(reportsRouteJs.includes("XLSX.utils.aoa_to_sheet"));
   assert.ok(reportsRouteJs.includes('requireAdminAccess(userDb, req, "报表管理")'));
 }
 

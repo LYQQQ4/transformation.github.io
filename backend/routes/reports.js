@@ -1,9 +1,24 @@
 const express = require("express");
+const XLSX = require("xlsx");
 
 const router = express.Router();
 
 const { requireAdminAccess } = require("../lib/request_auth");
 const { buildTotalReportSummaryRows, ensureBillingInfoSchema } = require("../lib/reporting");
+
+const REPORT_DATE_COLUMNS = new Set([
+  "receive_date",
+  "pickup_date",
+  "arrival_time",
+  "customs_start_time",
+  "tax_payment_time",
+  "release_time",
+  "arrival_port_time",
+  "clearance_time",
+  "delivery_time",
+  "complete_docs_send_time",
+  "billing_completed_time",
+]);
 
 function normalizeReportType(value) {
   return String(value || "total").trim().toLowerCase();
@@ -68,6 +83,59 @@ function buildReportBaseSql(whereClause = "") {
   `;
 }
 
+function buildReportFilter(req) {
+  const serialNumber = normalizeSerialNumberKeyword(req.query.serial_number);
+  const conditions = [];
+  const params = [];
+
+  if (serialNumber) {
+    conditions.push("o.serial_number LIKE ?");
+    params.push(`%${serialNumber}%`);
+  }
+
+  return {
+    serialNumber,
+    whereClause: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
+    params,
+  };
+}
+
+function formatReportExportValue(columnKey, value) {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+
+  if (!REPORT_DATE_COLUMNS.has(columnKey)) {
+    return value;
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}/${String(value.getMonth() + 1).padStart(2, "0")}/${String(value.getDate()).padStart(2, "0")}`;
+  }
+
+  const dateMatch = String(value).match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (dateMatch) {
+    return `${dateMatch[1]}/${dateMatch[2].padStart(2, "0")}/${dateMatch[3].padStart(2, "0")}`;
+  }
+
+  return String(value);
+}
+
+async function loadReportSummary(db, reportType, filter) {
+  if (reportType !== "total") {
+    const error = new Error("当前仅支持总报表");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const [rows] = await db.execute(
+    `${buildReportBaseSql(filter.whereClause)} ORDER BY o.serial_number DESC`,
+    filter.params
+  );
+
+  return buildTotalReportSummaryRows(rows);
+}
+
 module.exports = (db, userDb) => {
   router.get("/summary", async (req, res) => {
     try {
@@ -75,32 +143,42 @@ module.exports = (db, userDb) => {
       await ensureBillingInfoSchema(db);
 
       const reportType = normalizeReportType(req.query.report_type);
-      if (reportType !== "total") {
-        return res.status(400).json({ error: "当前仅支持总报表" });
-      }
-
-      const serialNumber = normalizeSerialNumberKeyword(req.query.serial_number);
-      const conditions = [];
-      const params = [];
-
-      if (serialNumber) {
-        conditions.push("o.serial_number LIKE ?");
-        params.push(`%${serialNumber}%`);
-      }
-
-      const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-      const [rows] = await db.execute(
-        `${buildReportBaseSql(whereClause)} ORDER BY o.serial_number DESC`,
-        params
-      );
-
-      const summary = buildTotalReportSummaryRows(rows);
+      const filter = buildReportFilter(req);
+      const summary = await loadReportSummary(db, reportType, filter);
       return res.json({
         report_type: "total",
-        serial_number: serialNumber,
+        serial_number: filter.serialNumber,
         columns: summary.columns,
         rows: summary.rows,
       });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({ error: error.message });
+    }
+  });
+
+  router.get("/export", async (req, res) => {
+    try {
+      await requireAdminAccess(userDb, req, "报表管理");
+      await ensureBillingInfoSchema(db);
+
+      const reportType = normalizeReportType(req.query.report_type);
+      const filter = buildReportFilter(req);
+      const summary = await loadReportSummary(db, reportType, filter);
+      const headerRow = summary.columns.map((column) => column.label || column.key);
+      const dataRows = summary.rows.map((row) =>
+        summary.columns.map((column) => formatReportExportValue(column.key, row[column.key]))
+      );
+      const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+      worksheet["!cols"] = summary.columns.map((column) => ({
+        wch: Math.min(Math.max(String(column.label || column.key).length + 2, 12), 30),
+      }));
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "报表");
+      const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", "attachment; filename=\"report_export.xlsx\"");
+      return res.send(buffer);
     } catch (error) {
       return res.status(error.statusCode || 500).json({ error: error.message });
     }

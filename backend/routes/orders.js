@@ -257,7 +257,6 @@ async function enrichOrderPayloadFromProfiles(userDb, payload) {
   const senderProfile = profiles[normalizeOrderImportValue(normalizedPayload.sender_id)];
 
   if (customerProfile) {
-    normalizedPayload.company_name = normalizedPayload.company_name || customerProfile.company_name || "";
     normalizedPayload.delivery_address = normalizedPayload.delivery_address || customerProfile.address || "";
     normalizedPayload.receiver_name = normalizedPayload.receiver_name || customerProfile.contact_name || "";
     normalizedPayload.receiver_phone = normalizedPayload.receiver_phone || customerProfile.phone || "";
@@ -445,9 +444,13 @@ module.exports = (db, userDb = null) => {
     const connection = await db.getConnection();
     try {
       await ensureOrderPhoneSchema(db);
+      const company_name = String(req.body?.company_name ?? "").trim();
+      if (!company_name) {
+        res.status(400).json({ error: "公司抬头不能为空，请手动填写" });
+        return;
+      }
       await connection.beginTransaction();
 
-      const company_name = req.body.company_name;
       const orderer = req.body.orderer;
       const receive_date = req.body.receive_date;
       const business_type = req.body.business_type;
@@ -568,7 +571,11 @@ module.exports = (db, userDb = null) => {
   router.put("/:id", async (req, res) => {
     try {
       await ensureOrderPhoneSchema(db);
-      const company_name = req.body.company_name;
+      const company_name = String(req.body?.company_name ?? "").trim();
+      if (!company_name) {
+        res.status(400).json({ error: "公司抬头不能为空，请手动填写" });
+        return;
+      }
       const orderer = req.body.orderer;
       const receive_date = req.body.receive_date;
       const business_type = req.body.business_type;
