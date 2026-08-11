@@ -359,14 +359,10 @@
   }
 
   function applyCustomerProfileToOrder(form, profile) {
-    const company = form.querySelector("#companyName");
     const address = form.querySelector("#deliveryAddress");
     const name = form.querySelector("#receiverName");
     const phone = form.querySelector("#receiverPhone");
 
-    if (company) {
-      company.value = profile.company_name || "";
-    }
     if (address) {
       address.value = profile.address || "";
     }

@@ -48,11 +48,13 @@ function testReportManagementUiExists() {
 
 function testFrontendHandlersExist() {
   const appJs = read("frontend/app.js");
+  const userProfilesJs = read("frontend/user_profiles.js");
   assert.ok(appJs.includes("function queryReports()"), "queryReports handler should exist");
   assert.ok(appJs.includes("function exportReports()"), "exportReports handler should exist");
   assert.ok(appJs.includes("getReportExportUrl"), "report export URL builder should exist");
   assert.ok(appJs.includes('pageName === "reportManagement"'), "showPage should handle report management");
   assert.ok(appJs.includes("getReportRequestUrl"), "report request URL builder should exist");
+  assert.ok(!userProfilesJs.includes("company.value = profile.company_name"), "customer ID changes must not fill company title");
 }
 
 function testBackendRouteMounted() {
