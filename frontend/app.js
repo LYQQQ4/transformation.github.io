@@ -2107,6 +2107,400 @@ async function saveBillingRecord(detailKey) {
     }
 }
 
+function isBillingFeeItemFilled(item, templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
+    const fieldDefinitions = getBillingTemplateFieldDefinitions(templateKey);
+    return fieldDefinitions.some((field) => String(item?.[field.key] || "").trim() !== "");
+}
+
+function getBillingSectionMeta(tableType) {
+    if (tableType === "cost_items") {
+        return {
+            title: "成本信息",
+            editLabel: "编辑成本信息",
+            emptyText: "当前未填写成本信息"
+        };
+    }
+
+    return {
+        title: "账单信息",
+        editLabel: "编辑账单信息",
+        emptyText: "当前未填写账单信息"
+    };
+}
+
+function buildBillingFeeSectionCardHtml(tableType, items, options = {}) {
+    const {
+        editable = false,
+        detailKey = "",
+        templateKey = BILLING_TEMPLATE_FALLBACK_KEY
+    } = options;
+    const meta = getBillingSectionMeta(tableType);
+    const normalizedItems = Array.isArray(items) ? items : [];
+    const filledItems = normalizedItems.filter((item) => isBillingFeeItemFilled(item, templateKey));
+    const previewCategories = filledItems.slice(0, 3).map((item) => escapeHtml(item.category || "")).join("、");
+    const previewText = filledItems.length > 0
+        ? `已填写 ${filledItems.length} / ${normalizedItems.length} 项${previewCategories ? `，包含：${previewCategories}${filledItems.length > 3 ? " 等" : ""}` : ""}`
+        : meta.emptyText;
+
+    return `
+        <div style="margin-top: 16px; padding: 16px; background-color: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div>
+                    <h4 style="margin: 0; color: #111827; font-size: 16px; font-weight: 600;">${meta.title}</h4>
+                    <div class="info" style="margin-top: 8px;">${previewText}</div>
+                </div>
+                ${editable
+                    ? `<button type="button" onclick="showBillingFeeModal('${escapeHtml(detailKey)}', '${tableType}')">${meta.editLabel}</button>`
+                    : ""}
+            </div>
+        </div>
+    `;
+}
+
+function buildBillingFeeEditorTableHtml(tableType, items, options = {}) {
+    const {
+        editable = false,
+        templateKey = BILLING_TEMPLATE_FALLBACK_KEY
+    } = options;
+    const fieldDefinitions = getBillingTemplateFieldDefinitions(templateKey);
+    const bodyHtml = (Array.isArray(items) ? items : []).map((item, rowIndex) => `
+        <tr data-billing-row="${tableType}" data-row-index="${rowIndex}" data-category="${escapeHtml(item.category || "")}">
+            <td>${escapeHtml(item.category)}</td>
+            ${fieldDefinitions.map((field) => {
+                const value = item?.[field.key] ?? "";
+                if (!editable) {
+                    return `<td>${escapeHtml(value)}</td>`;
+                }
+                return `<td><input type="text" data-table-type="${tableType}" data-row-index="${rowIndex}" data-field="${field.key}" value="${escapeHtml(value)}"></td>`;
+            }).join("")}
+        </tr>
+    `).join("");
+
+    return `
+        <div data-billing-modal-editor="true" style="margin-top: 16px; overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>费用类别</th>
+                        ${fieldDefinitions.map((field) => `<th>${field.label}</th>`).join("")}
+                    </tr>
+                </thead>
+                <tbody>${bodyHtml}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function serializeBillingFeeItems(container, tableType, templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
+    const fieldDefinitions = getBillingTemplateFieldDefinitions(templateKey);
+    const rows = Array.from(container.querySelectorAll(`[data-billing-row="${tableType}"]`));
+    const items = rows.map((row) => {
+        const item = { category: row.dataset.category || "" };
+
+        fieldDefinitions.forEach((field) => {
+            const input = row.querySelector(`[data-field="${field.key}"]`);
+            item[field.key] = input ? input.value : "";
+        });
+
+        return item;
+    });
+
+    return normalizeBillingFeeItems(items, templateKey);
+}
+
+function getBillingDetailContainer(detailKey) {
+    return detailKey === "billingPage"
+        ? document.getElementById("billingDetailContainer")
+        : document.getElementById("orderBillingContent");
+}
+
+function getBillingStoredRecord(container) {
+    if (!container) {
+        return {};
+    }
+
+    try {
+        return JSON.parse(container.dataset.billingRecordJson || "{}");
+    } catch (error) {
+        return {};
+    }
+}
+
+function getBillingRenderOptions(container, detailKey) {
+    let renderOptions = {};
+
+    if (container) {
+        try {
+            renderOptions = JSON.parse(container.dataset.renderOptions || "{}");
+        } catch (error) {
+            renderOptions = {};
+        }
+    }
+
+    return {
+        editable: renderOptions.editable !== false,
+        showSaveButton: renderOptions.showSaveButton !== false,
+        collapsed: renderOptions.collapsed === true,
+        containerId: detailKey
+    };
+}
+
+function buildBillingDraftRecord(detailKey) {
+    const container = getBillingDetailContainer(detailKey);
+    if (!container) {
+        return null;
+    }
+
+    const storedRecord = getBillingStoredRecord(container);
+    const selectedTemplateKey = document.getElementById(`billingTemplateKey_${detailKey}`)?.value
+        || container.dataset.billingTemplateKey
+        || storedRecord.billing_template_key
+        || BILLING_TEMPLATE_FALLBACK_KEY;
+    const billingCompletedTimeInput = document.getElementById(`billingCompletedTime_${detailKey}`);
+
+    return normalizeBillingRecord(
+        {
+            ...storedRecord,
+            billing_template_key: selectedTemplateKey,
+            billing_completed_time: billingCompletedTimeInput
+                ? billingCompletedTimeInput.value
+                : (storedRecord.billing_completed_time || ""),
+            cost_items: Array.isArray(storedRecord.cost_items) ? storedRecord.cost_items : [],
+            billing_items: Array.isArray(storedRecord.billing_items) ? storedRecord.billing_items : []
+        },
+        selectedTemplateKey
+    );
+}
+
+function getBillingModalRecordMeta(record) {
+    return [
+        ["流水号", record?.serial_number || ""],
+        ["账单模板", record?.billing_template_title || record?.billing_template_label || ""],
+        ["账单完成时间", formatDateOnly(record?.billing_completed_time)]
+    ].filter(([, value]) => String(value || "").trim() !== "");
+}
+
+function hideBillingFeeModal() {
+    const modal = document.getElementById("billingFeeModal");
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function showBillingFeeModal(detailKey, tableType) {
+    const draftRecord = buildBillingDraftRecord(detailKey);
+    if (!draftRecord) {
+        showMessage("未找到账单编辑上下文", "error");
+        return;
+    }
+
+    hideBillingFeeModal();
+
+    const meta = getBillingSectionMeta(tableType);
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.id = "billingFeeModal";
+    modal.dataset.detailKey = detailKey;
+    modal.dataset.tableType = tableType;
+    modal.onclick = function(event) {
+        if (event.target === modal) {
+            hideBillingFeeModal();
+        }
+    };
+
+    const modalMeta = getBillingModalRecordMeta(draftRecord);
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 1120px; width: 96%;">
+            <div class="modal-header">
+                <h3>${meta.editLabel}</h3>
+                <button class="modal-close" onclick="hideBillingFeeModal()">&times;</button>
+            </div>
+            ${modalMeta.length > 0 ? `<div class="detail-grid">${buildDetailGridItems(modalMeta)}</div>` : ""}
+            ${buildBillingFeeEditorTableHtml(tableType, draftRecord[tableType], {
+                editable: true,
+                templateKey: draftRecord.billing_template_key
+            })}
+            <div class="button-group">
+                <button type="button" onclick="saveBillingFeeModal()">保存</button>
+                <button type="button" onclick="hideBillingFeeModal()">取消</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    modal.style.display = "block";
+}
+
+async function persistBillingDraftRecord(detailKey, draftRecord) {
+    const container = getBillingDetailContainer(detailKey);
+    if (!container || !draftRecord) {
+        return null;
+    }
+
+    const serialNumber = draftRecord.serial_number || container.dataset.serialNumber || currentOrderBillingData?.serial_number || currentBillingSerialNumber;
+    if (!serialNumber) {
+        showMessage("未找到账单流水号", "error");
+        return null;
+    }
+
+    const templateKey = draftRecord.billing_template_key || BILLING_TEMPLATE_FALLBACK_KEY;
+    const payload = {
+        billing_template_key: templateKey,
+        billing_completed_time: draftRecord.billing_completed_time || null,
+        cost_items: normalizeBillingFeeItems(draftRecord.cost_items, templateKey),
+        billing_items: normalizeBillingFeeItems(draftRecord.billing_items, templateKey)
+    };
+
+    try {
+        const response = await fetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "保存账单信息失败");
+        }
+
+        const nextRecord = normalizeBillingRecord(data.record);
+        currentOrderBillingData = nextRecord;
+        renderBillingDetail(container, nextRecord, getBillingRenderOptions(container, detailKey));
+        showMessage("账单信息保存成功");
+
+        if (detailKey === "billingPage") {
+            loadBillingRecords();
+        }
+        if (currentOrderDetailSerial && currentOrderDetailSerial === serialNumber) {
+            loadOrderBillingDetails(serialNumber);
+        }
+
+        return nextRecord;
+    } catch (error) {
+        showMessage("保存账单信息失败: " + error.message, "error");
+        return null;
+    }
+}
+
+async function saveBillingFeeModal() {
+    const modal = document.getElementById("billingFeeModal");
+    if (!modal) {
+        return;
+    }
+
+    const detailKey = modal.dataset.detailKey || "";
+    const tableType = modal.dataset.tableType || "";
+    if (!detailKey || !tableType) {
+        hideBillingFeeModal();
+        return;
+    }
+
+    const draftRecord = buildBillingDraftRecord(detailKey);
+    if (!draftRecord) {
+        return;
+    }
+
+    const editorContainer = modal.querySelector('[data-billing-modal-editor="true"]');
+    const templateKey = draftRecord.billing_template_key || BILLING_TEMPLATE_FALLBACK_KEY;
+    draftRecord[tableType] = serializeBillingFeeItems(editorContainer || modal, tableType, templateKey);
+
+    const savedRecord = await persistBillingDraftRecord(detailKey, draftRecord);
+    if (savedRecord) {
+        hideBillingFeeModal();
+    }
+}
+
+function switchBillingTemplate(detailKey) {
+    const container = getBillingDetailContainer(detailKey);
+    if (!container) {
+        return;
+    }
+
+    const nextTemplateKey = document.getElementById(`billingTemplateKey_${detailKey}`)?.value || BILLING_TEMPLATE_FALLBACK_KEY;
+    const draftRecord = buildBillingDraftRecord(detailKey);
+    if (!draftRecord) {
+        return;
+    }
+
+    renderBillingDetail(container, draftRecord, {
+        ...getBillingRenderOptions(container, detailKey),
+        containerId: detailKey,
+        forcedTemplateKey: nextTemplateKey
+    });
+}
+
+function renderBillingDetail(container, record, options = {}) {
+    if (!container) {
+        return;
+    }
+
+    const {
+        editable = true,
+        showSaveButton = true,
+        collapsed = true,
+        containerId = "",
+        forcedTemplateKey = ""
+    } = options;
+    const normalized = normalizeBillingRecord(record, forcedTemplateKey);
+    const detailKey = containerId || normalized.serial_number || "billing";
+    const baseItems = buildBillingBaseInfoItems(normalized);
+    const allowTemplateSwitch = editable && (
+        normalized.billing_template_source === "legacy_fallback" ||
+        normalized.billing_template_source === "legacy_items" ||
+        normalized.billing_template_source === "legacy_empty"
+    );
+
+    container.innerHTML = `
+        <div class="detail-grid">${buildDetailGridItems(baseItems)}</div>
+        ${buildBillingTemplateNotice(normalized)}
+        <div style="margin-top: 16px;">
+            <div class="form-group">
+                <label>账单模板:</label>
+                ${allowTemplateSwitch
+                    ? `<select id="billingTemplateKey_${detailKey}" onchange="switchBillingTemplate('${detailKey}')">${buildBillingTemplateOptionsHtml(normalized.billing_template_key)}</select>`
+                    : `<input type="text" value="${escapeHtml(normalized.billing_template_title || normalized.billing_template_label || "")}" readonly>`}
+            </div>
+            <div class="form-group">
+                <label>账单完成时间:</label>
+                ${editable
+                    ? `<input type="date" id="billingCompletedTime_${detailKey}" value="${escapeHtml((normalized.billing_completed_time || "").split("T")[0])}">`
+                    : `<span>${escapeHtml(formatDateOnly(normalized.billing_completed_time))}</span>`}
+            </div>
+        </div>
+        ${buildBillingFeeSectionCardHtml("cost_items", normalized.cost_items, {
+            editable,
+            detailKey,
+            templateKey: normalized.billing_template_key
+        })}
+        ${buildBillingFeeSectionCardHtml("billing_items", normalized.billing_items, {
+            editable,
+            detailKey,
+            templateKey: normalized.billing_template_key
+        })}
+        ${showSaveButton ? `<div class="button-group"><button type="button" onclick="saveBillingRecord('${detailKey}')">保存账单信息</button></div>` : ""}
+    `;
+
+    container.dataset.serialNumber = normalized.serial_number || "";
+    container.dataset.detailKey = detailKey;
+    container.dataset.billingTemplateKey = normalized.billing_template_key || BILLING_TEMPLATE_FALLBACK_KEY;
+    container.dataset.billingRecordJson = JSON.stringify(normalized);
+    container.dataset.renderOptions = JSON.stringify({
+        editable,
+        showSaveButton,
+        collapsed,
+        containerId: detailKey
+    });
+    currentOrderBillingData = normalized;
+}
+
+async function saveBillingRecord(detailKey) {
+    const draftRecord = buildBillingDraftRecord(detailKey);
+    if (!draftRecord) {
+        return;
+    }
+
+    await persistBillingDraftRecord(detailKey, draftRecord);
+}
+
 function getOrderDisplayOrigin(record) {
     return record?.order_origin || record?.origin || "";
 }
