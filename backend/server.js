@@ -131,6 +131,7 @@ const userPool = mysql.createPool(userDbConfig);
   app.use("/api/senders", require("./routes/senders")(userPool, pool));
   app.use("/api/customers", require("./routes/customers")(userPool, pool));
   app.use("/api/user-profiles", require("./routes/user_profiles")(userPool, pool));
+  app.use("/api/input-memory", require("./routes/input_memory")(pool, userPool));
   app.use("/api/products", require("./routes/products")(pool));
   app.use("/api/customs-clearance", require("./routes/customs_clearance")(pool));
   app.use("/api/billing", require("./routes/billing")(pool));

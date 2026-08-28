@@ -3282,6 +3282,10 @@ function showOrderForm(order = null) {
             senderIdInput.removeEventListener("change", handleSenderIdChange);
             senderIdInput.addEventListener("change", handleSenderIdChange);
         }
+
+        if (typeof window.initializeOrderInputMemory === "function") {
+            window.initializeOrderInputMemory(form);
+        }
     }
     
     modal.style.display = "block";
@@ -3569,6 +3573,9 @@ async function saveOrder() {
         }
 
         if (response.ok) {
+            if (typeof window.recordOrderInputMemory === "function") {
+                window.recordOrderInputMemory(orderData);
+            }
             showMessage("订单保存成功");
             // 保存成功后关闭弹窗并刷新列表
             const addOrdersPage = document.getElementById("addOrdersPage");
