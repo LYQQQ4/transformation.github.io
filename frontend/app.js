@@ -732,6 +732,77 @@ let currentPickupTrackingSearchTerm = "";
 let currentTransferSearchTerm = "";
 let currentGuestSearchTerm = "";
 const REPORT_TYPE_TOTAL = "total";
+const REPORT_EMPTY_VALUE_TEXT = "\u8be5\u9879\u672a\u586b";
+const TOTAL_REPORT_FIELD_GROUPS = [
+    {
+        key: "base",
+        label: "\u57fa\u7840\u4fe1\u606f",
+        fields: [
+            { key: "serial_number", label: "\u6d41\u6c34\u53f7" },
+            { key: "company_name", label: "\u516c\u53f8\u540d\u79f0" },
+            { key: "orderer", label: "\u6307\u4ee4\u4eba" },
+            { key: "business_type", label: "\u4e1a\u52a1\u7c7b\u578b" },
+            { key: "sender_id", label: "\u53d1\u4ef6\u4ebaID" },
+            { key: "customer_id", label: "\u5ba2\u6237ID" },
+            { key: "receive_date", label: "\u63a5\u6536\u6307\u4ee4\u65e5\u671f" },
+            { key: "origin", label: "\u8d77\u59cb\u5730" },
+            { key: "destination", label: "\u76ee\u7684\u5730" },
+            { key: "trade_term", label: "\u8d38\u6613\u672f\u8bed" },
+            { key: "product_name", label: "\u8d27\u7269\u54c1\u540d" }
+        ]
+    },
+    {
+        key: "tracking",
+        label: "\u63d0\u8d27/\u8fd0\u8f93",
+        fields: [
+            { key: "transport_mode", label: "\u8fd0\u8f93\u65b9\u5f0f" },
+            { key: "tracking_number", label: "\u8fd0\u5355\u53f7" },
+            { key: "pickup_date", label: "\u63d0\u8d27\u65f6\u95f4" },
+            { key: "arrival_time", label: "\u5230\u8d27\u65f6\u95f4" }
+        ]
+    },
+    {
+        key: "customs",
+        label: "\u62a5\u5173",
+        fields: [
+            { key: "customs_port", label: "\u62a5\u5173\u53e3\u5cb8" },
+            { key: "customs_title", label: "\u62a5\u5173\u54c1\u540d" },
+            { key: "customs_start_time", label: "\u5f00\u59cb\u62a5\u5173\u65f6\u95f4" },
+            { key: "tax_payment_time", label: "\u4ed8\u7a0e\u65f6\u95f4" },
+            { key: "release_time", label: "\u653e\u884c\u65f6\u95f4" },
+            { key: "customs_declaration_number", label: "\u62a5\u5173\u5355\u53f7" },
+            { key: "customs_supplier", label: "\u62a5\u5173\u4f9b\u5e94\u5546" }
+        ]
+    },
+    {
+        key: "delivery",
+        label: "\u9001\u8d27/\u6d41\u8f6c",
+        fields: [
+            { key: "arrival_port_time", label: "\u5230\u6e2f\u65f6\u95f4" },
+            { key: "clearance_time", label: "\u6e05\u5173\u65f6\u95f4" },
+            { key: "delivery_time", label: "\u9001\u8fbe\u65f6\u95f4" },
+            { key: "complete_docs_send_time", label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4" }
+        ]
+    },
+    {
+        key: "billing",
+        label: "\u8d26\u5355",
+        fields: [
+            { key: "billing_completed_time", label: "\u65b0\u589e\u8d26\u5355\u5b8c\u6210\u65f6\u95f4" },
+            { key: "billing_period", label: "\u8d26\u671f" }
+        ]
+    },
+    {
+        key: "package",
+        label: "\u5305\u88c5",
+        fields: [
+            { key: "pieces_total", label: "\u4ef6\u6570" },
+            { key: "weight_total", label: "\u91cd\u91cf" },
+            { key: "volume_total", label: "\u4f53\u79ef" },
+            { key: "charge_weight_total", label: "\u8ba1\u8d39\u91cd\u91cf" }
+        ]
+    }
+];
 
 function buildOrderFilledStatusFilterHtml(label, selectId) {
     return `
@@ -783,51 +854,95 @@ function showReportManagementMessage(message = "", type = "info") {
     messageEl.className = type;
 }
 
-function getReportRequestUrl(reportType, serialNumber) {
+function buildReportFieldSelectorHtml() {
+    return `
+        <div id="reportFieldSelectorContainer" style="margin-bottom: 16px; padding: 16px; border: 1px solid #E5E7EB; border-radius: 8px; background: #F9FAFB;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
+                <strong>\u8f93\u51fa\u9879\u9009\u62e9</strong>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button type="button" onclick="setAllReportFieldsSelected(true)">\u5168\u9009</button>
+                    <button type="button" onclick="setAllReportFieldsSelected(false)">\u5168\u4e0d\u9009</button>
+                </div>
+            </div>
+            <div style="display: grid; gap: 12px;">
+                ${TOTAL_REPORT_FIELD_GROUPS.map((group) => `
+                    <div data-report-field-group="${group.key}">
+                        <div style="font-weight: 600; margin-bottom: 8px;">${escapeHtml(group.label)}</div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px 16px;">
+                            ${group.fields.map((field) => `
+                                <label style="display: inline-flex; align-items: center; gap: 6px; width: 220px; margin: 0;">
+                                    <input type="checkbox" data-report-field-key="${escapeHtml(field.key)}" checked>
+                                    <span>${escapeHtml(field.label)}</span>
+                                </label>
+                            `).join("")}
+                        </div>
+                    </div>
+                `).join("")}
+            </div>
+        </div>
+    `;
+}
+
+function ensureReportManagementFieldSelector() {
+    const messageEl = document.getElementById("reportManagementMessage");
+    if (!messageEl || document.getElementById("reportFieldSelectorContainer")) {
+        return;
+    }
+
+    messageEl.insertAdjacentHTML("beforebegin", buildReportFieldSelectorHtml());
+}
+
+window.addEventListener("load", ensureReportManagementFieldSelector);
+
+function getSelectedReportFieldKeys() {
+    const checkboxes = document.querySelectorAll('#reportFieldSelectorContainer input[data-report-field-key]:checked');
+    return Array.from(checkboxes).map((checkbox) => checkbox.dataset.reportFieldKey || "").filter(Boolean);
+}
+
+function setAllReportFieldsSelected(checked) {
+    const checkboxes = document.querySelectorAll('#reportFieldSelectorContainer input[data-report-field-key]');
+    checkboxes.forEach((checkbox) => {
+        checkbox.checked = checked;
+    });
+}
+
+function appendSelectedReportFields(params, selectedFieldKeys) {
+    if (!Array.isArray(selectedFieldKeys)) {
+        return;
+    }
+
+    params.set("selected_fields", JSON.stringify(selectedFieldKeys));
+}
+
+function getReportRequestUrl(reportType, serialNumber, selectedFieldKeys) {
     const params = new URLSearchParams();
     params.set("report_type", reportType || REPORT_TYPE_TOTAL);
     if (serialNumber) {
         params.set("serial_number", serialNumber);
     }
+    appendSelectedReportFields(params, selectedFieldKeys);
     return `${API_BASE}/reports/summary?${params.toString()}`;
 }
 
-function getReportExportUrl(reportType, serialNumber) {
+function getReportExportUrl(reportType, serialNumber, selectedFieldKeys) {
     const params = new URLSearchParams();
     params.set("report_type", reportType || REPORT_TYPE_TOTAL);
     if (serialNumber) {
         params.set("serial_number", serialNumber);
     }
+    appendSelectedReportFields(params, selectedFieldKeys);
     return `${API_BASE}/reports/export?${params.toString()}`;
 }
 
-function formatReportCellValue(columnKey, value) {
+function formatReportCellValue(columnKey, value, emptyValueText = REPORT_EMPTY_VALUE_TEXT) {
     if (value === undefined || value === null || value === "") {
-        return "";
-    }
-
-    const dateColumns = new Set([
-        "receive_date",
-        "pickup_date",
-        "arrival_time",
-        "customs_start_time",
-        "tax_payment_time",
-        "release_time",
-        "arrival_port_time",
-        "clearance_time",
-        "delivery_time",
-        "complete_docs_send_time",
-        "billing_completed_time"
-    ]);
-
-    if (dateColumns.has(columnKey)) {
-        return formatDateOnly(value);
+        return emptyValueText;
     }
 
     return String(value);
 }
 
-function renderReportTable(columns = [], rows = []) {
+function renderReportTable(columns = [], rows = [], emptyValueText = REPORT_EMPTY_VALUE_TEXT) {
     const thead = document.querySelector("#reportManagementTable thead");
     const tbody = document.querySelector("#reportManagementTable tbody");
 
@@ -844,7 +959,7 @@ function renderReportTable(columns = [], rows = []) {
     thead.innerHTML = `<tr>${columns.map((column) => `<th>${escapeHtml(column.label || column.key)}</th>`).join("")}</tr>`;
     tbody.innerHTML = rows.map((row) => {
         return `<tr>${columns.map((column) => {
-            const value = formatReportCellValue(column.key, row?.[column.key]);
+            const value = formatReportCellValue(column.key, row?.[column.key], emptyValueText);
             return `<td>${escapeHtml(value)}</td>`;
         }).join("")}</tr>`;
     }).join("");
@@ -926,6 +1041,106 @@ async function exportReports() {
         showReportManagementMessage("报表导出成功", "success");
     } catch (error) {
         showReportManagementMessage("导出报表失败: " + error.message, "error");
+    }
+}
+
+async function queryReports() {
+    ensureReportManagementFieldSelector();
+
+    if (!isAdminUser()) {
+        showMessage("\u4ec5\u7ba1\u7406\u5458\u53ef\u4f7f\u7528\u62a5\u8868\u7ba1\u7406", "error");
+        showPage("viewOrders");
+        return;
+    }
+
+    const reportType = document.getElementById("reportTypeSelect")?.value || REPORT_TYPE_TOTAL;
+    const serialNumber = document.getElementById("reportSerialInput")?.value.trim() || "";
+    const selectedFieldKeys = getSelectedReportFieldKeys();
+
+    if (selectedFieldKeys.length === 0) {
+        renderReportTable([], []);
+        showReportManagementMessage("\u8bf7\u81f3\u5c11\u9009\u62e9\u4e00\u9879\u8f93\u51fa\u5185\u5bb9", "info");
+        return;
+    }
+
+    try {
+        showReportManagementMessage("\u6b63\u5728\u67e5\u8be2\u62a5\u8868...", "info");
+        const response = await fetch(getReportRequestUrl(reportType, serialNumber, selectedFieldKeys), {
+            headers: getAuthHeaders()
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "\u67e5\u8be2\u62a5\u8868\u5931\u8d25");
+        }
+
+        renderReportTable(
+            data.columns || [],
+            data.rows || [],
+            data.empty_value_text || REPORT_EMPTY_VALUE_TEXT
+        );
+        if ((data.rows || []).length === 0) {
+            showReportManagementMessage("\u672a\u67e5\u8be2\u5230\u7b26\u5408\u6761\u4ef6\u7684\u62a5\u8868\u6570\u636e", "info");
+        } else {
+            showReportManagementMessage(`\u5df2\u67e5\u8be2\u5230 ${(data.rows || []).length} \u6761\u8bb0\u5f55`, "success");
+        }
+    } catch (error) {
+        renderReportTable([], []);
+        showReportManagementMessage("\u67e5\u8be2\u62a5\u8868\u5931\u8d25: " + error.message, "error");
+    }
+}
+
+async function exportReports() {
+    ensureReportManagementFieldSelector();
+
+    if (!isAdminUser()) {
+        showMessage("\u4ec5\u7ba1\u7406\u5458\u53ef\u4f7f\u7528\u62a5\u8868\u7ba1\u7406", "error");
+        showPage("viewOrders");
+        return;
+    }
+
+    const reportType = document.getElementById("reportTypeSelect")?.value || REPORT_TYPE_TOTAL;
+    const serialNumber = document.getElementById("reportSerialInput")?.value.trim() || "";
+    const selectedFieldKeys = getSelectedReportFieldKeys();
+
+    if (selectedFieldKeys.length === 0) {
+        showReportManagementMessage("\u8bf7\u81f3\u5c11\u9009\u62e9\u4e00\u9879\u8f93\u51fa\u5185\u5bb9", "info");
+        return;
+    }
+
+    try {
+        showReportManagementMessage("\u6b63\u5728\u5bfc\u51fa\u62a5\u8868...", "info");
+        const response = await fetch(getReportExportUrl(reportType, serialNumber, selectedFieldKeys), {
+            headers: getAuthHeaders()
+        });
+
+        if (!response.ok) {
+            let errorMessage = "\u5bfc\u51fa\u62a5\u8868\u5931\u8d25";
+            try {
+                const error = await response.json();
+                errorMessage = error.error || errorMessage;
+            } catch {
+                // Keep the generic error when the server response is not JSON.
+            }
+            throw new Error(errorMessage);
+        }
+
+        const blob = await response.blob();
+        if (!blob.size) {
+            throw new Error("\u5bfc\u51fa\u7684\u62a5\u8868\u4e3a\u7a7a");
+        }
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "report_export.xlsx";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showReportManagementMessage("\u62a5\u8868\u5bfc\u51fa\u6210\u529f", "success");
+    } catch (error) {
+        showReportManagementMessage("\u5bfc\u51fa\u62a5\u8868\u5931\u8d25: " + error.message, "error");
     }
 }
 

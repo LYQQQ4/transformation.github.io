@@ -4,21 +4,11 @@ const XLSX = require("xlsx");
 const router = express.Router();
 
 const { requireAdminAccess } = require("../lib/request_auth");
-const { buildTotalReportSummaryRows, ensureBillingInfoSchema } = require("../lib/reporting");
-
-const REPORT_DATE_COLUMNS = new Set([
-  "receive_date",
-  "pickup_date",
-  "arrival_time",
-  "customs_start_time",
-  "tax_payment_time",
-  "release_time",
-  "arrival_port_time",
-  "clearance_time",
-  "delivery_time",
-  "complete_docs_send_time",
-  "billing_completed_time",
-]);
+const {
+  buildTotalReportSummaryRows,
+  ensureBillingInfoSchema,
+  normalizeSelectedReportFieldKeys,
+} = require("../lib/reporting");
 
 function normalizeReportType(value) {
   return String(value || "total").trim().toLowerCase();
@@ -26,6 +16,30 @@ function normalizeReportType(value) {
 
 function normalizeSerialNumberKeyword(value) {
   return String(value || "").trim();
+}
+
+function parseSelectedReportFields(value) {
+  if (Array.isArray(value)) {
+    return normalizeSelectedReportFieldKeys(
+      value.flatMap((item) => String(item || "").split(","))
+    );
+  }
+
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(normalizedValue);
+    if (Array.isArray(parsed)) {
+      return normalizeSelectedReportFieldKeys(parsed);
+    }
+  } catch (error) {
+    // Fall back to comma-separated parsing.
+  }
+
+  return normalizeSelectedReportFieldKeys(normalizedValue.split(","));
 }
 
 function buildReportBaseSql(whereClause = "") {
@@ -85,6 +99,7 @@ function buildReportBaseSql(whereClause = "") {
 
 function buildReportFilter(req) {
   const serialNumber = normalizeSerialNumberKeyword(req.query.serial_number);
+  const selectedFieldKeys = parseSelectedReportFields(req.query.selected_fields);
   const conditions = [];
   const params = [];
 
@@ -95,35 +110,15 @@ function buildReportFilter(req) {
 
   return {
     serialNumber,
+    selectedFieldKeys,
     whereClause: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
     params,
   };
 }
 
-function formatReportExportValue(columnKey, value) {
-  if (value === undefined || value === null || value === "") {
-    return "";
-  }
-
-  if (!REPORT_DATE_COLUMNS.has(columnKey)) {
-    return value;
-  }
-
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return `${value.getFullYear()}/${String(value.getMonth() + 1).padStart(2, "0")}/${String(value.getDate()).padStart(2, "0")}`;
-  }
-
-  const dateMatch = String(value).match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-  if (dateMatch) {
-    return `${dateMatch[1]}/${dateMatch[2].padStart(2, "0")}/${dateMatch[3].padStart(2, "0")}`;
-  }
-
-  return String(value);
-}
-
 async function loadReportSummary(db, reportType, filter) {
   if (reportType !== "total") {
-    const error = new Error("当前仅支持总报表");
+    const error = new Error("\u5f53\u524d\u4ec5\u652f\u6301\u603b\u62a5\u8868");
     error.statusCode = 400;
     throw error;
   }
@@ -133,23 +128,28 @@ async function loadReportSummary(db, reportType, filter) {
     filter.params
   );
 
-  return buildTotalReportSummaryRows(rows);
+  return buildTotalReportSummaryRows(rows, {
+    selectedFieldKeys: filter.selectedFieldKeys,
+  });
 }
 
 module.exports = (db, userDb) => {
   router.get("/summary", async (req, res) => {
     try {
-      await requireAdminAccess(userDb, req, "报表管理");
+      await requireAdminAccess(userDb, req, "\u62a5\u8868\u7ba1\u7406");
       await ensureBillingInfoSchema(db);
 
       const reportType = normalizeReportType(req.query.report_type);
       const filter = buildReportFilter(req);
       const summary = await loadReportSummary(db, reportType, filter);
+
       return res.json({
         report_type: "total",
         serial_number: filter.serialNumber,
+        selected_fields: filter.selectedFieldKeys || [],
         columns: summary.columns,
         rows: summary.rows,
+        empty_value_text: summary.emptyValueText,
       });
     } catch (error) {
       return res.status(error.statusCode || 500).json({ error: error.message });
@@ -158,7 +158,7 @@ module.exports = (db, userDb) => {
 
   router.get("/export", async (req, res) => {
     try {
-      await requireAdminAccess(userDb, req, "报表管理");
+      await requireAdminAccess(userDb, req, "\u62a5\u8868\u7ba1\u7406");
       await ensureBillingInfoSchema(db);
 
       const reportType = normalizeReportType(req.query.report_type);
@@ -166,14 +166,15 @@ module.exports = (db, userDb) => {
       const summary = await loadReportSummary(db, reportType, filter);
       const headerRow = summary.columns.map((column) => column.label || column.key);
       const dataRows = summary.rows.map((row) =>
-        summary.columns.map((column) => formatReportExportValue(column.key, row[column.key]))
+        summary.columns.map((column) => row[column.key] ?? summary.emptyValueText)
       );
       const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
       worksheet["!cols"] = summary.columns.map((column) => ({
         wch: Math.min(Math.max(String(column.label || column.key).length + 2, 12), 30),
       }));
+
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "报表");
+      XLSX.utils.book_append_sheet(workbook, worksheet, "\u62a5\u8868");
       const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
 
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

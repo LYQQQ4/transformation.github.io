@@ -14,6 +14,10 @@ function isFilledValue(value) {
   return normalizeTextValue(value) !== "";
 }
 
+function isEmptyReportValue(value) {
+  return normalizeTextValue(value) === "";
+}
+
 function parseStoredFeeItems(value) {
   if (!isFilledValue(value)) {
     return [];
@@ -67,6 +71,7 @@ function deriveBillingPeriod(row = {}) {
     if (!period || seen.has(period)) {
       return;
     }
+
     seen.add(period);
     periods.push(period);
   });
@@ -95,52 +100,300 @@ function buildFilledStatusSql(columnName, filledStatus) {
   return "";
 }
 
+const REPORT_EMPTY_VALUE_TEXT = "\u8be5\u9879\u672a\u586b";
+
+const TOTAL_REPORT_DATE_COLUMN_KEYS = new Set([
+  "receive_date",
+  "pickup_date",
+  "arrival_time",
+  "customs_start_time",
+  "tax_payment_time",
+  "release_time",
+  "arrival_port_time",
+  "clearance_time",
+  "delivery_time",
+  "complete_docs_send_time",
+  "billing_completed_time",
+]);
+
 const TOTAL_REPORT_FIELD_DEFINITIONS = [
-  { key: "serial_number", label: "流水号", getValue: (row) => row.serial_number },
-  { key: "company_name", label: "公司名称", getValue: (row) => row.company_name },
-  { key: "orderer", label: "指令人", getValue: (row) => row.orderer },
-  { key: "business_type", label: "业务类型", getValue: (row) => row.business_type },
-  { key: "sender_id", label: "发件人ID", getValue: (row) => row.sender_id },
-  { key: "customer_id", label: "客户ID", getValue: (row) => row.customer_id },
-  { key: "receive_date", label: "接收指令日期", getValue: (row) => row.receive_date },
-  { key: "origin", label: "起始地", getValue: (row) => row.order_origin || row.origin },
-  { key: "destination", label: "目的地", getValue: (row) => row.order_destination || row.destination },
-  { key: "trade_term", label: "贸易术语", getValue: (row) => row.trade_term },
-  { key: "product_name", label: "货物品名", getValue: (row) => row.order_product_name || row.product_name },
-  { key: "transport_mode", label: "运输方式", getValue: (row) => row.transport_mode },
-  { key: "tracking_number", label: "运单号", getValue: (row) => row.tracking_number },
-  { key: "pickup_date", label: "提货时间", getValue: (row) => row.pickup_date },
-  { key: "arrival_time", label: "到货时间", getValue: (row) => row.arrival_time },
-  { key: "customs_port", label: "报关口岸", getValue: (row) => row.customs_port },
-  { key: "customs_title", label: "报关品名", getValue: (row) => row.customs_title },
-  { key: "customs_start_time", label: "开始报关时间", getValue: (row) => row.customs_start_time },
-  { key: "tax_payment_time", label: "付税时间", getValue: (row) => row.tax_payment_time },
-  { key: "release_time", label: "放行时间", getValue: (row) => row.release_time },
-  { key: "customs_declaration_number", label: "报关单号", getValue: (row) => row.customs_declaration_number },
-  { key: "customs_supplier", label: "报关供应商", getValue: (row) => row.customs_supplier },
-  { key: "arrival_port_time", label: "到港时间", getValue: (row) => row.arrival_port_time },
-  { key: "clearance_time", label: "清关时间", getValue: (row) => row.clearance_time },
-  { key: "delivery_time", label: "送达时间", getValue: (row) => row.delivery_time },
-  { key: "complete_docs_send_time", label: "完整单据回复时间", getValue: (row) => row.complete_docs_send_time },
-  { key: "billing_completed_time", label: "新增账单完成时间", getValue: (row) => row.billing_completed_time },
-  { key: "billing_period", label: "账期", getValue: (row) => row.billing_period },
-  { key: "pieces_total", label: "件数", getValue: (row) => row.pieces_total },
-  { key: "weight_total", label: "重量", getValue: (row) => row.weight_total },
-  { key: "volume_total", label: "体积", getValue: (row) => row.volume_total },
-  { key: "charge_weight_total", label: "计费重量", getValue: (row) => row.charge_weight_total },
+  {
+    key: "serial_number",
+    outputKey: "serial_number",
+    section: "base",
+    label: "\u6d41\u6c34\u53f7",
+    getValue: (row) => row.serial_number,
+  },
+  {
+    key: "company_name",
+    outputKey: "company_name",
+    section: "base",
+    label: "\u516c\u53f8\u540d\u79f0",
+    getValue: (row) => row.company_name,
+  },
+  {
+    key: "orderer",
+    outputKey: "orderer",
+    section: "base",
+    label: "\u6307\u4ee4\u4eba",
+    getValue: (row) => row.orderer,
+  },
+  {
+    key: "business_type",
+    outputKey: "business_type",
+    section: "base",
+    label: "\u4e1a\u52a1\u7c7b\u578b",
+    getValue: (row) => row.business_type,
+  },
+  {
+    key: "sender_id",
+    outputKey: "sender_id",
+    section: "base",
+    label: "\u53d1\u4ef6\u4ebaID",
+    getValue: (row) => row.sender_id,
+  },
+  {
+    key: "customer_id",
+    outputKey: "customer_id",
+    section: "base",
+    label: "\u5ba2\u6237ID",
+    getValue: (row) => row.customer_id,
+  },
+  {
+    key: "receive_date",
+    outputKey: "receive_date",
+    section: "base",
+    label: "\u63a5\u6536\u6307\u4ee4\u65e5\u671f",
+    getValue: (row) => row.receive_date,
+  },
+  {
+    key: "origin",
+    outputKey: "origin",
+    section: "base",
+    label: "\u8d77\u59cb\u5730",
+    getValue: (row) => row.order_origin || row.origin,
+  },
+  {
+    key: "destination",
+    outputKey: "destination",
+    section: "base",
+    label: "\u76ee\u7684\u5730",
+    getValue: (row) => row.order_destination || row.destination,
+  },
+  {
+    key: "trade_term",
+    outputKey: "trade_term",
+    section: "base",
+    label: "\u8d38\u6613\u672f\u8bed",
+    getValue: (row) => row.trade_term,
+  },
+  {
+    key: "product_name",
+    outputKey: "product_name",
+    section: "base",
+    label: "\u8d27\u7269\u54c1\u540d",
+    getValue: (row) => row.order_product_name || row.product_name,
+  },
+  {
+    key: "transport_mode",
+    outputKey: "transport_mode",
+    section: "tracking",
+    label: "\u8fd0\u8f93\u65b9\u5f0f",
+    getValue: (row) => row.transport_mode,
+  },
+  {
+    key: "tracking_number",
+    outputKey: "tracking_number",
+    section: "tracking",
+    label: "\u8fd0\u5355\u53f7",
+    getValue: (row) => row.tracking_number,
+  },
+  {
+    key: "pickup_date",
+    outputKey: "pickup_date",
+    section: "tracking",
+    label: "\u63d0\u8d27\u65f6\u95f4",
+    getValue: (row) => row.pickup_date,
+  },
+  {
+    key: "arrival_time",
+    outputKey: "arrival_time",
+    section: "tracking",
+    label: "\u5230\u8d27\u65f6\u95f4",
+    getValue: (row) => row.arrival_time,
+  },
+  {
+    key: "customs_port",
+    outputKey: "customs_port",
+    section: "customs",
+    label: "\u62a5\u5173\u53e3\u5cb8",
+    getValue: (row) => row.customs_port,
+  },
+  {
+    key: "customs_title",
+    outputKey: "customs_title",
+    section: "customs",
+    label: "\u62a5\u5173\u54c1\u540d",
+    getValue: (row) => row.customs_title,
+  },
+  {
+    key: "customs_start_time",
+    outputKey: "customs_start_time",
+    section: "customs",
+    label: "\u5f00\u59cb\u62a5\u5173\u65f6\u95f4",
+    getValue: (row) => row.customs_start_time,
+  },
+  {
+    key: "tax_payment_time",
+    outputKey: "tax_payment_time",
+    section: "customs",
+    label: "\u4ed8\u7a0e\u65f6\u95f4",
+    getValue: (row) => row.tax_payment_time,
+  },
+  {
+    key: "release_time",
+    outputKey: "release_time",
+    section: "customs",
+    label: "\u653e\u884c\u65f6\u95f4",
+    getValue: (row) => row.release_time,
+  },
+  {
+    key: "customs_declaration_number",
+    outputKey: "customs_declaration_number",
+    section: "customs",
+    label: "\u62a5\u5173\u5355\u53f7",
+    getValue: (row) => row.customs_declaration_number,
+  },
+  {
+    key: "customs_supplier",
+    outputKey: "customs_supplier",
+    section: "customs",
+    label: "\u62a5\u5173\u4f9b\u5e94\u5546",
+    getValue: (row) => row.customs_supplier,
+  },
+  {
+    key: "arrival_port_time",
+    outputKey: "arrival_port_time",
+    section: "delivery",
+    label: "\u5230\u6e2f\u65f6\u95f4",
+    getValue: (row) => row.arrival_port_time,
+  },
+  {
+    key: "clearance_time",
+    outputKey: "clearance_time",
+    section: "delivery",
+    label: "\u6e05\u5173\u65f6\u95f4",
+    getValue: (row) => row.clearance_time,
+  },
+  {
+    key: "delivery_time",
+    outputKey: "delivery_time",
+    section: "delivery",
+    label: "\u9001\u8fbe\u65f6\u95f4",
+    getValue: (row) => row.delivery_time,
+  },
+  {
+    key: "complete_docs_send_time",
+    outputKey: "complete_docs_send_time",
+    section: "delivery",
+    label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4",
+    getValue: (row) => row.complete_docs_send_time,
+  },
+  {
+    key: "billing_completed_time",
+    outputKey: "billing_completed_time",
+    section: "billing",
+    label: "\u65b0\u589e\u8d26\u5355\u5b8c\u6210\u65f6\u95f4",
+    getValue: (row) => row.billing_completed_time,
+  },
+  {
+    key: "billing_period",
+    outputKey: "billing_period",
+    section: "billing",
+    label: "\u8d26\u671f",
+    getValue: (row) => row.billing_period,
+  },
+  {
+    key: "pieces_total",
+    outputKey: "pieces_total",
+    section: "package",
+    label: "\u4ef6\u6570",
+    getValue: (row) => row.pieces_total,
+  },
+  {
+    key: "weight_total",
+    outputKey: "weight_total",
+    section: "package",
+    label: "\u91cd\u91cf",
+    getValue: (row) => row.weight_total,
+  },
+  {
+    key: "volume_total",
+    outputKey: "volume_total",
+    section: "package",
+    label: "\u4f53\u79ef",
+    getValue: (row) => row.volume_total,
+  },
+  {
+    key: "charge_weight_total",
+    outputKey: "charge_weight_total",
+    section: "package",
+    label: "\u8ba1\u8d39\u91cd\u91cf",
+    getValue: (row) => row.charge_weight_total,
+  },
 ];
 
-function buildTotalReportSummaryRows(rows = []) {
+function formatReportDateValue(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}/${String(value.getMonth() + 1).padStart(2, "0")}/${String(value.getDate()).padStart(2, "0")}`;
+  }
+
+  const dateMatch = String(value).match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (dateMatch) {
+    return `${dateMatch[1]}/${String(dateMatch[2]).padStart(2, "0")}/${String(dateMatch[3]).padStart(2, "0")}`;
+  }
+
+  return normalizeTextValue(value);
+}
+
+function formatTotalReportValue(columnKey, value, options = {}) {
+  const emptyValueText = normalizeTextValue(options.emptyValueText) || REPORT_EMPTY_VALUE_TEXT;
+
+  if (isEmptyReportValue(value)) {
+    return emptyValueText;
+  }
+
+  if (TOTAL_REPORT_DATE_COLUMN_KEYS.has(columnKey)) {
+    return formatReportDateValue(value);
+  }
+
+  return normalizeTextValue(value);
+}
+
+function normalizeSelectedReportFieldKeys(selectedFieldKeys) {
+  if (!Array.isArray(selectedFieldKeys)) {
+    return null;
+  }
+
+  return selectedFieldKeys
+    .map((fieldKey) => normalizeTextValue(fieldKey))
+    .filter(Boolean);
+}
+
+function buildTotalReportSummaryRows(rows = [], options = {}) {
   const normalizedRows = rows.map((row) => enrichOrderBillingFields(row));
+  const selectedFieldKeys = normalizeSelectedReportFieldKeys(options.selectedFieldKeys);
+  const selectedFieldKeySet = selectedFieldKeys ? new Set(selectedFieldKeys) : null;
+  const emptyValueText = normalizeTextValue(options.emptyValueText) || REPORT_EMPTY_VALUE_TEXT;
   const hasDataMap = new Map(TOTAL_REPORT_FIELD_DEFINITIONS.map((field) => [field.key, false]));
 
-  const resultRows = normalizedRows.map((row) => {
+  const rawRows = normalizedRows.map((row) => {
     const summary = {};
 
     TOTAL_REPORT_FIELD_DEFINITIONS.forEach((field) => {
       const value = field.getValue(row);
       summary[field.key] = value ?? "";
-      if (isFilledValue(value)) {
+      if (!isEmptyReportValue(value)) {
         hasDataMap.set(field.key, true);
       }
     });
@@ -148,24 +401,60 @@ function buildTotalReportSummaryRows(rows = []) {
     return summary;
   });
 
+  const outputKeys = new Set();
   const columns = TOTAL_REPORT_FIELD_DEFINITIONS
-    .filter((field) => field.key === "serial_number" || hasDataMap.get(field.key))
-    .map((field) => ({ key: field.key, label: field.label }));
+    .filter((field) => {
+      if (selectedFieldKeySet && !selectedFieldKeySet.has(field.key)) {
+        return false;
+      }
+
+      if (!selectedFieldKeySet && field.key !== "serial_number" && !hasDataMap.get(field.key)) {
+        return false;
+      }
+
+      const outputKey = field.outputKey || field.key;
+      if (outputKeys.has(outputKey)) {
+        return false;
+      }
+
+      outputKeys.add(outputKey);
+      return true;
+    })
+    .map((field) => ({
+      key: field.key,
+      label: field.label,
+      section: field.section || "",
+      output_key: field.outputKey || field.key,
+    }));
+
+  const formattedRows = rawRows.map((row) => {
+    const formattedRow = {};
+
+    columns.forEach((column) => {
+      formattedRow[column.key] = formatTotalReportValue(column.key, row[column.key], { emptyValueText });
+    });
+
+    return formattedRow;
+  });
 
   return {
     columns,
-    rows: resultRows,
+    rows: formattedRows,
+    emptyValueText,
   };
 }
 
 module.exports = {
+  REPORT_EMPTY_VALUE_TEXT,
   TOTAL_REPORT_FIELD_DEFINITIONS,
   buildFilledStatusSql,
   buildTotalReportSummaryRows,
   deriveBillingPeriod,
   ensureBillingInfoSchema,
   enrichOrderBillingFields,
+  formatTotalReportValue,
   isFilledValue,
+  normalizeSelectedReportFieldKeys,
   normalizeTextValue,
   parseStoredFeeItems,
 };
