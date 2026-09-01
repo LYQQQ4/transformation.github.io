@@ -1961,7 +1961,242 @@ function openBillingPageFromOrderDetail() {
 }
 
 const BILLING_TEMPLATE_API = window.BillingTemplates || null;
+const BILLING_FORMULA_API = window.BillingFormula || null;
 const BILLING_TEMPLATE_FALLBACK_KEY = BILLING_TEMPLATE_API?.LEGACY_BILLING_TEMPLATE_KEY || "legacy";
+
+function isBillingFormulaField(fieldKey) {
+    return Boolean(BILLING_FORMULA_API?.isFormulaEnabledField?.(fieldKey));
+}
+
+function normalizeBillingComputedFieldValue(fieldKey, rawValue) {
+    if (!BILLING_FORMULA_API?.normalizeBillingFieldValue) {
+        return {
+            ok: true,
+            value: String(rawValue ?? "").trim(),
+            raw: String(rawValue ?? "").trim(),
+            kind: "text"
+        };
+    }
+
+    return BILLING_FORMULA_API.normalizeBillingFieldValue(fieldKey, rawValue);
+}
+
+function normalizeBillingItemsForPersistence(items, templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
+    const normalizedItems = Array.isArray(items) ? items : [];
+    if (!BILLING_FORMULA_API?.normalizeBillingItems) {
+        return normalizeBillingFeeItems(normalizedItems, templateKey);
+    }
+
+    return BILLING_FORMULA_API.normalizeBillingItems(
+        normalizedItems,
+        templateKey,
+        (nextItems, nextTemplateKey) => normalizeBillingFeeItems(nextItems, nextTemplateKey)
+    );
+}
+
+function getBillingFieldCalculationHint(fieldKey, rawValue) {
+    const normalized = normalizeBillingComputedFieldValue(fieldKey, rawValue);
+    if (!normalized.ok) {
+        return {
+            state: "error",
+            message: "公式无效",
+            normalized
+        };
+    }
+
+    if (normalized.computed) {
+        return {
+            state: "computed",
+            message: `=${normalized.value}`,
+            normalized
+        };
+    }
+
+    return {
+        state: "idle",
+        message: "",
+        normalized
+    };
+}
+
+function ensureBillingFormulaStyles() {
+    if (document.getElementById("billingFormulaStyles")) {
+        return;
+    }
+
+    const style = document.createElement("style");
+    style.id = "billingFormulaStyles";
+    style.textContent = `
+        .billing-formula-cell {
+            position: relative;
+            min-width: 120px;
+        }
+        .billing-formula-input {
+            width: 100%;
+        }
+        .billing-formula-hint {
+            display: block;
+            margin-top: 4px;
+            font-size: 12px;
+            color: #6b7280;
+            min-height: 16px;
+            line-height: 1.2;
+        }
+        .billing-formula-hint.error {
+            color: #dc2626;
+        }
+        .billing-formula-hint.computed {
+            color: #2563eb;
+        }
+        .billing-formula-input.error {
+            border-color: #dc2626;
+            box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.12);
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function buildBillingFieldInputHtml(tableType, rowIndex, field, value) {
+    const escapedValue = escapeHtml(value);
+    if (!isBillingFormulaField(field.key)) {
+        return `<input type="text" data-table-type="${tableType}" data-row-index="${rowIndex}" data-field="${field.key}" value="${escapedValue}">`;
+    }
+
+    const hint = getBillingFieldCalculationHint(field.key, value);
+    const hintClass = hint.state === "error" ? "billing-formula-hint error" : hint.state === "computed" ? "billing-formula-hint computed" : "billing-formula-hint";
+    const inputClass = hint.state === "error" ? "billing-formula-input error" : "billing-formula-input";
+    return `
+        <div class="billing-formula-cell">
+            <input
+                type="text"
+                class="${inputClass}"
+                data-table-type="${tableType}"
+                data-row-index="${rowIndex}"
+                data-field="${field.key}"
+                data-billing-formula-enabled="true"
+                value="${escapedValue}"
+            >
+            <span class="${hintClass}" data-billing-formula-hint="${field.key}">${escapeHtml(hint.message)}</span>
+        </div>
+    `;
+}
+
+function updateBillingFormulaInputState(input) {
+    if (!input || input.dataset.billingFormulaEnabled !== "true") {
+        return true;
+    }
+
+    const fieldKey = input.dataset.field || "";
+    const hint = input.parentElement?.querySelector(`[data-billing-formula-hint="${fieldKey}"]`);
+    const result = getBillingFieldCalculationHint(fieldKey, input.value);
+
+    input.classList.toggle("error", result.state === "error");
+    if (hint) {
+        hint.textContent = result.message;
+        hint.className = result.state === "error"
+            ? "billing-formula-hint error"
+            : result.state === "computed"
+                ? "billing-formula-hint computed"
+                : "billing-formula-hint";
+    }
+
+    return result.state !== "error";
+}
+
+function commitBillingFormulaInputValue(input) {
+    if (!input || input.dataset.billingFormulaEnabled !== "true") {
+        return true;
+    }
+
+    const result = normalizeBillingComputedFieldValue(input.dataset.field || "", input.value);
+    updateBillingFormulaInputState(input);
+    if (!result.ok) {
+        return false;
+    }
+
+    if (result.computed || result.kind === "numeric") {
+        input.value = result.value;
+        updateBillingFormulaInputState(input);
+    }
+
+    return true;
+}
+
+let billingFormulaEventsInstalled = false;
+
+function getBillingFormulaInputFromEventTarget(target) {
+    if (!(target instanceof Element)) {
+        return null;
+    }
+
+    return target.matches('input[data-billing-formula-enabled="true"]')
+        ? target
+        : target.closest('input[data-billing-formula-enabled="true"]');
+}
+
+function installBillingFormulaEventDelegation() {
+    if (billingFormulaEventsInstalled || typeof document === "undefined") {
+        return;
+    }
+
+    document.addEventListener("input", (event) => {
+        const input = getBillingFormulaInputFromEventTarget(event.target);
+        if (input) {
+            updateBillingFormulaInputState(input);
+        }
+    });
+
+    document.addEventListener("focusout", (event) => {
+        const input = getBillingFormulaInputFromEventTarget(event.target);
+        if (input) {
+            commitBillingFormulaInputValue(input);
+        }
+    });
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") {
+            return;
+        }
+
+        const input = getBillingFormulaInputFromEventTarget(event.target);
+        if (input) {
+            commitBillingFormulaInputValue(input);
+        }
+    });
+
+    billingFormulaEventsInstalled = true;
+}
+
+function bindBillingFormulaInputs(container) {
+    if (!container) {
+        return;
+    }
+
+    ensureBillingFormulaStyles();
+    installBillingFormulaEventDelegation();
+    const inputs = container.querySelectorAll('input[data-billing-formula-enabled="true"]');
+    inputs.forEach((input) => {
+        updateBillingFormulaInputState(input);
+    });
+}
+
+installBillingFormulaEventDelegation();
+
+function validateBillingFormulaInputs(container) {
+    if (!container) {
+        return true;
+    }
+
+    const inputs = Array.from(container.querySelectorAll('input[data-billing-formula-enabled="true"]'));
+    for (const input of inputs) {
+        if (!commitBillingFormulaInputValue(input)) {
+            input.focus();
+            return false;
+        }
+    }
+
+    return true;
+}
 
 function getBillingTemplateFieldDefinitions(templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
     if (!BILLING_TEMPLATE_API) {
@@ -2119,7 +2354,7 @@ function buildBillingFeeTableHtml(title, tableType, items, options = {}) {
                 if (!editable) {
                     return `<td>${escapeHtml(value)}</td>`;
                 }
-                return `<td><input type="text" data-table-type="${tableType}" data-row-index="${rowIndex}" data-field="${field.key}" value="${escapeHtml(value)}"></td>`;
+                return `<td>${buildBillingFieldInputHtml(tableType, rowIndex, field, value)}</td>`;
             }).join("")}
         </tr>
     `).join("");
@@ -2156,7 +2391,7 @@ function serializeBillingFeeItems(container, tableType, templateKey = BILLING_TE
         return item;
     });
 
-    return normalizeBillingFeeItems(items, templateKey);
+    return normalizeBillingItemsForPersistence(items, templateKey);
 }
 
 function getBillingDetailContainer(detailKey) {
@@ -2268,6 +2503,7 @@ function renderBillingDetail(container, record, options = {}) {
         containerId: detailKey
     });
     currentOrderBillingData = normalized;
+    bindBillingFormulaInputs(container);
 }
 
 async function saveBillingRecord(detailKey) {
@@ -2386,7 +2622,7 @@ function buildBillingFeeEditorTableHtml(tableType, items, options = {}) {
                 if (!editable) {
                     return `<td>${escapeHtml(value)}</td>`;
                 }
-                return `<td><input type="text" data-table-type="${tableType}" data-row-index="${rowIndex}" data-field="${field.key}" value="${escapeHtml(value)}"></td>`;
+                return `<td>${buildBillingFieldInputHtml(tableType, rowIndex, field, value)}</td>`;
             }).join("")}
         </tr>
     `).join("");
@@ -2420,7 +2656,7 @@ function serializeBillingFeeItems(container, tableType, templateKey = BILLING_TE
         return item;
     });
 
-    return normalizeBillingFeeItems(items, templateKey);
+    return normalizeBillingItemsForPersistence(items, templateKey);
 }
 
 function getBillingDetailContainer(detailKey) {
@@ -2544,11 +2780,17 @@ function showBillingFeeModal(detailKey, tableType) {
 
     document.body.appendChild(modal);
     modal.style.display = "block";
+    bindBillingFormulaInputs(modal);
 }
 
 async function persistBillingDraftRecord(detailKey, draftRecord) {
     const container = getBillingDetailContainer(detailKey);
     if (!container || !draftRecord) {
+        return null;
+    }
+
+    if (!validateBillingFormulaInputs(container)) {
+        showMessage("存在无效公式，请先修正后再保存", "error");
         return null;
     }
 
@@ -2562,8 +2804,8 @@ async function persistBillingDraftRecord(detailKey, draftRecord) {
     const payload = {
         billing_template_key: templateKey,
         billing_completed_time: draftRecord.billing_completed_time || null,
-        cost_items: normalizeBillingFeeItems(draftRecord.cost_items, templateKey),
-        billing_items: normalizeBillingFeeItems(draftRecord.billing_items, templateKey)
+        cost_items: normalizeBillingItemsForPersistence(draftRecord.cost_items, templateKey),
+        billing_items: normalizeBillingItemsForPersistence(draftRecord.billing_items, templateKey)
     };
 
     try {
@@ -2606,6 +2848,11 @@ async function saveBillingFeeModal() {
     const tableType = modal.dataset.tableType || "";
     if (!detailKey || !tableType) {
         hideBillingFeeModal();
+        return;
+    }
+
+    if (!validateBillingFormulaInputs(modal)) {
+        showMessage("存在无效公式，请先修正后再保存", "error");
         return;
     }
 
@@ -2705,6 +2952,7 @@ function renderBillingDetail(container, record, options = {}) {
         containerId: detailKey
     });
     currentOrderBillingData = normalized;
+    bindBillingFormulaInputs(container);
 }
 
 async function saveBillingRecord(detailKey) {

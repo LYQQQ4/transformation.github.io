@@ -1,5 +1,6 @@
 const express = require("express");
 const billingTemplates = require("../../frontend/billing_templates");
+const billingFormula = require("../../frontend/billing_formula");
 
 const router = express.Router();
 
@@ -74,13 +75,34 @@ function parseStoredFeeItems(value) {
 }
 
 function normalizeFeeItemsForTemplate(items, templateKey) {
-  return billingTemplates.normalizeBillingItems(items, templateKey, {
+  const normalizedItems = billingTemplates.normalizeBillingItems(items, templateKey, {
     preserveUnknown: templateKey === billingTemplates.LEGACY_BILLING_TEMPLATE_KEY,
   });
+
+  return billingFormula.normalizeBillingItems(
+    normalizedItems,
+    templateKey,
+    (nextItems, nextTemplateKey) =>
+      billingTemplates.normalizeBillingItems(nextItems, nextTemplateKey, {
+        preserveUnknown: nextTemplateKey === billingTemplates.LEGACY_BILLING_TEMPLATE_KEY,
+      }),
+    { strict: false }
+  );
+}
+
+function sanitizeFeeItemsForPersistence(items, templateKey) {
+  return billingFormula.normalizeBillingItems(
+    items,
+    templateKey,
+    (nextItems, nextTemplateKey) =>
+      billingTemplates.normalizeBillingItems(nextItems, nextTemplateKey, {
+        preserveUnknown: nextTemplateKey === billingTemplates.LEGACY_BILLING_TEMPLATE_KEY,
+      })
+  );
 }
 
 function stringifyFeeItems(items, templateKey) {
-  return JSON.stringify(normalizeFeeItemsForTemplate(items, templateKey));
+  return JSON.stringify(sanitizeFeeItemsForPersistence(items, templateKey));
 }
 
 function resolveBillingTemplateContext(row = {}, options = {}) {
@@ -221,7 +243,8 @@ module.exports = (db) => {
         }),
       });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      const isFormulaValidationError = Boolean(err?.fieldKey) || /^(amount|tax_rate|exchange_rate):/u.test(String(err?.message || ""));
+      res.status(isFormulaValidationError ? 400 : 500).json({ error: err.message });
     }
   });
 
