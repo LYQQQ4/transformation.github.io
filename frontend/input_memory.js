@@ -2,11 +2,14 @@
     const INPUT_MEMORY_SCOPE = "order-form";
     const SESSION_STORAGE_KEY = "input-memory:order-form:v2";
     const MAX_SUGGESTIONS = 8;
+    const MAX_EMPTY_QUERY_SUGGESTIONS = 5;
+    const MAX_SINGLE_CHAR_SUGGESTIONS = 6;
     const MAX_SESSION_ITEMS_PER_FIELD = 40;
-    const INPUT_UPDATE_DELAY_MS = 60;
+    const INPUT_UPDATE_DELAY_MS = 120;
+    const MIN_CONTAINS_QUERY_LENGTH = 2;
     const MIN_FUZZY_QUERY_LENGTH = 2;
     const DAY_IN_MS = 24 * 60 * 60 * 1000;
-    const FIELD_CONFIGS = [
+    const ORDER_FIELD_CONFIGS = [
         { fieldKey: "company_name", inputId: "companyName", maxLength: 80, persistSession: true },
         { fieldKey: "orderer", inputId: "orderer", maxLength: 50, persistSession: false },
         { fieldKey: "business_type", inputId: "businessType", maxLength: 40, persistSession: true },
@@ -14,6 +17,23 @@
         { fieldKey: "destination", inputId: "destination", maxLength: 40, persistSession: true },
         { fieldKey: "trade_term", inputId: "tradeTerm", maxLength: 20, persistSession: true },
         { fieldKey: "product_name", inputId: "productName", maxLength: 120, persistSession: true }
+    ];
+
+    const PICKUP_TRACKING_FIELD_CONFIGS = [
+        { fieldKey: "pickup_transport_mode", inputId: "pickupTrackingTransportMode", valueKey: "transport_mode", maxLength: 40, persistSession: true },
+        { fieldKey: "pickup_customs_port", inputId: "pickupTrackingCustomsPort", valueKey: "customs_port", maxLength: 40, persistSession: true },
+        { fieldKey: "pickup_transport_supplier", inputId: "pickupTrackingTransportSupplier", valueKey: "transport_supplier", maxLength: 60, persistSession: true }
+    ];
+
+    const CUSTOMS_TRACKING_FIELD_CONFIGS = [
+        { fieldKey: "customs_transport_mode", inputId: "customsTransportMode", valueKey: "transport_mode", maxLength: 40, persistSession: true },
+        { fieldKey: "customs_supplier", inputId: "customsSupplier", valueKey: "customs_supplier", maxLength: 60, persistSession: true }
+    ];
+
+    const FIELD_CONFIGS = [
+        ...ORDER_FIELD_CONFIGS,
+        ...PICKUP_TRACKING_FIELD_CONFIGS,
+        ...CUSTOMS_TRACKING_FIELD_CONFIGS
     ];
 
     const fieldConfigMap = FIELD_CONFIGS.reduce((accumulator, field) => {
@@ -129,6 +149,22 @@
         return !isLikelySensitiveValue(value);
     }
 
+    function getConfigValue(config, payload) {
+        if (!config || !payload || typeof payload !== "object") {
+            return "";
+        }
+
+        if (typeof config.getValue === "function") {
+            return config.getValue(payload);
+        }
+
+        if (config.valueKey) {
+            return payload[config.valueKey];
+        }
+
+        return payload[config.fieldKey];
+    }
+
     function trimStoreBucket(bucket) {
         return Object.entries(bucket)
             .sort((left, right) => {
@@ -176,6 +212,7 @@
         }
 
         upsertMemory(volatileMemoryStore, fieldKey, rawValue);
+        volatileMemoryStore[fieldKey] = trimStoreBucket(volatileMemoryStore[fieldKey]);
     }
 
     function getStoredSuggestions(store, fieldKey, sourceName) {
@@ -234,6 +271,45 @@
         return Array.from(merged.values());
     }
 
+    function bindInputMemoryGroup(form, configs) {
+        if (!form || !Array.isArray(configs) || configs.length === 0) {
+            return;
+        }
+
+        configs.forEach((config) => {
+            const input = form.querySelector(`#${config.inputId}`);
+            if (input) {
+                bindInputMemory(input, config.fieldKey);
+            }
+        });
+
+        loadRemoteSuggestions().then(() => {
+            configs.forEach((config) => {
+                const input = form.querySelector(`#${config.inputId}`);
+                if (input) {
+                    const state = getState(input, config.fieldKey);
+                    if (document.activeElement === input) {
+                        updateSuggestions(state);
+                    }
+                }
+            });
+        });
+    }
+
+    function recordMemoryGroup(payload, configs) {
+        if (!payload || typeof payload !== "object" || !Array.isArray(configs) || configs.length === 0) {
+            return;
+        }
+
+        configs.forEach((config) => {
+            const value = getConfigValue(config, payload);
+            if (shouldTrackFieldValue(config.fieldKey, value)) {
+                upsertVolatileMemory(config.fieldKey, value);
+                upsertSessionMemory(config.fieldKey, value);
+            }
+        });
+    }
+
     function calculateRecencyScore(lastUsedAt) {
         if (!lastUsedAt) {
             return 0;
@@ -248,23 +324,42 @@
         return Math.max(0, 60 - ageDays * 4);
     }
 
-    function calculateSequentialMatchScore(query, candidate) {
-        if (!query) {
+    function getRecencyTimestamp(lastUsedAt) {
+        if (!lastUsedAt) {
             return 0;
         }
 
+        const timestamp = new Date(lastUsedAt).getTime();
+        return Number.isFinite(timestamp) ? timestamp : 0;
+    }
+
+    function getSequentialMatchInfo(query, candidate) {
+        if (!query) {
+            return null;
+        }
+
         let searchIndex = 0;
-        let hitCount = 0;
+        let firstMatchIndex = -1;
+        let lastMatchIndex = -1;
+
         for (const char of query) {
             const nextIndex = candidate.indexOf(char, searchIndex);
             if (nextIndex === -1) {
-                return -1;
+                return null;
             }
-            hitCount += 1;
+
+            if (firstMatchIndex === -1) {
+                firstMatchIndex = nextIndex;
+            }
+
+            lastMatchIndex = nextIndex;
             searchIndex = nextIndex + 1;
         }
 
-        return hitCount * 12;
+        return {
+            startIndex: firstMatchIndex,
+            spanLength: lastMatchIndex - firstMatchIndex + 1
+        };
     }
 
     function levenshteinDistance(left, right, maxDistance) {
@@ -317,61 +412,129 @@
         return previous[rightLength];
     }
 
-    function getWordPrefixScore(query, candidate) {
+    function getWordPrefixInfo(query, candidate) {
         if (!query) {
-            return 0;
+            return null;
         }
 
         const parts = candidate.split(/[\s/-]+/).filter(Boolean);
-        return parts.some((part) => part.startsWith(query)) ? 760 : 0;
+        for (let index = 0; index < parts.length; index += 1) {
+            const part = parts[index];
+            if (part.startsWith(query)) {
+                return {
+                    wordIndex: index,
+                    remainderLength: part.length - query.length
+                };
+            }
+        }
+
+        return null;
     }
 
-    function calculateSuggestionScore(query, suggestion) {
+    function calculateSuggestionRanking(query, suggestion) {
         const normalizedQuery = normalizeComparable(query);
         const normalizedValue = normalizeComparable(suggestion.value);
 
         if (!normalizedValue) {
-            return -1;
+            return null;
         }
 
-        let matchScore = 0;
         if (!normalizedQuery) {
-            matchScore = 100;
-        } else if (normalizedValue === normalizedQuery) {
-            matchScore = 1500;
-        } else if (normalizedValue.startsWith(normalizedQuery)) {
-            matchScore = 1200 - Math.min(normalizedValue.length - normalizedQuery.length, 120);
-        } else {
-            matchScore = getWordPrefixScore(normalizedQuery, normalizedValue);
+            return {
+                matchType: "fallback",
+                matchRank: 99,
+                distancePenalty: 0,
+                frequency: Number(suggestion.frequency || 0),
+                recencyScore: calculateRecencyScore(suggestion.last_used_at),
+                recencyTimestamp: getRecencyTimestamp(suggestion.last_used_at),
+                sourceBoost: suggestion.sources?.includes("session") || suggestion.sources?.includes("volatile") ? 1 : 0
+            };
+        }
 
-            if (!matchScore && normalizedValue.includes(normalizedQuery)) {
-                matchScore = 720;
-            }
+        if (normalizedValue === normalizedQuery) {
+            return {
+                matchType: "exact",
+                matchRank: 0,
+                distancePenalty: 0,
+                frequency: Number(suggestion.frequency || 0),
+                recencyScore: calculateRecencyScore(suggestion.last_used_at),
+                recencyTimestamp: getRecencyTimestamp(suggestion.last_used_at),
+                sourceBoost: suggestion.sources?.includes("session") || suggestion.sources?.includes("volatile") ? 1 : 0
+            };
+        }
 
-            if (!matchScore && normalizedQuery.length >= MIN_FUZZY_QUERY_LENGTH) {
-                const sequentialScore = calculateSequentialMatchScore(normalizedQuery, normalizedValue);
-                if (sequentialScore > 0) {
-                    matchScore = 460 + sequentialScore;
-                }
-            }
+        if (normalizedValue.startsWith(normalizedQuery)) {
+            return {
+                matchType: "prefix",
+                matchRank: 1,
+                distancePenalty: normalizedValue.length - normalizedQuery.length,
+                frequency: Number(suggestion.frequency || 0),
+                recencyScore: calculateRecencyScore(suggestion.last_used_at),
+                recencyTimestamp: getRecencyTimestamp(suggestion.last_used_at),
+                sourceBoost: suggestion.sources?.includes("session") || suggestion.sources?.includes("volatile") ? 1 : 0
+            };
+        }
 
-            if (!matchScore && normalizedQuery.length >= MIN_FUZZY_QUERY_LENGTH) {
-                const candidateSlice = normalizedValue.slice(0, Math.min(normalizedValue.length, normalizedQuery.length + 2));
-                const distance = levenshteinDistance(normalizedQuery, candidateSlice, 2);
-                if (distance <= 2) {
-                    matchScore = distance === 1 ? 540 : 500;
-                }
-            }
+        const wordPrefixInfo = getWordPrefixInfo(normalizedQuery, normalizedValue);
+        if (wordPrefixInfo) {
+            return {
+                matchType: "word-prefix",
+                matchRank: 2,
+                distancePenalty: wordPrefixInfo.wordIndex * 100 + wordPrefixInfo.remainderLength,
+                frequency: Number(suggestion.frequency || 0),
+                recencyScore: calculateRecencyScore(suggestion.last_used_at),
+                recencyTimestamp: getRecencyTimestamp(suggestion.last_used_at),
+                sourceBoost: suggestion.sources?.includes("session") || suggestion.sources?.includes("volatile") ? 1 : 0
+            };
+        }
 
-            if (!matchScore) {
-                return -1;
+        if (normalizedQuery.length >= MIN_CONTAINS_QUERY_LENGTH) {
+            const containsIndex = normalizedValue.indexOf(normalizedQuery);
+            if (containsIndex >= 0) {
+                return {
+                    matchType: "contains",
+                    matchRank: 3,
+                    distancePenalty: containsIndex * 100 + (normalizedValue.length - normalizedQuery.length),
+                    frequency: Number(suggestion.frequency || 0),
+                    recencyScore: calculateRecencyScore(suggestion.last_used_at),
+                    recencyTimestamp: getRecencyTimestamp(suggestion.last_used_at),
+                    sourceBoost: suggestion.sources?.includes("session") || suggestion.sources?.includes("volatile") ? 1 : 0
+                };
             }
         }
 
-        const frequencyScore = Math.min(Number(suggestion.frequency || 0), 50) * 10;
-        const recencyScore = calculateRecencyScore(suggestion.last_used_at);
-        const recentSourceBoost = suggestion.sources?.includes("session") || suggestion.sources?.includes("volatile") ? 30 : 0;
-        return matchScore + frequencyScore + recencyScore + recentSourceBoost;
+        if (normalizedQuery.length >= MIN_FUZZY_QUERY_LENGTH) {
+            const sequentialInfo = getSequentialMatchInfo(normalizedQuery, normalizedValue);
+            if (sequentialInfo) {
+                return {
+                    matchType: "sequential",
+                    matchRank: 4,
+                    distancePenalty: sequentialInfo.spanLength * 100 + sequentialInfo.startIndex,
+                    frequency: Number(suggestion.frequency || 0),
+                    recencyScore: calculateRecencyScore(suggestion.last_used_at),
+                    recencyTimestamp: getRecencyTimestamp(suggestion.last_used_at),
+                    sourceBoost: suggestion.sources?.includes("session") || suggestion.sources?.includes("volatile") ? 1 : 0
+                };
+            }
+        }
+
+        if (normalizedQuery.length >= MIN_FUZZY_QUERY_LENGTH) {
+            const candidateSlice = normalizedValue.slice(0, Math.min(normalizedValue.length, normalizedQuery.length + 2));
+            const distance = levenshteinDistance(normalizedQuery, candidateSlice, 2);
+            if (distance <= 2) {
+                return {
+                    matchType: "typo-tolerant",
+                    matchRank: 5,
+                    distancePenalty: distance * 100 + candidateSlice.length,
+                    frequency: Number(suggestion.frequency || 0),
+                    recencyScore: calculateRecencyScore(suggestion.last_used_at),
+                    recencyTimestamp: getRecencyTimestamp(suggestion.last_used_at),
+                    sourceBoost: suggestion.sources?.includes("session") || suggestion.sources?.includes("volatile") ? 1 : 0
+                };
+            }
+        }
+
+        return null;
     }
 
     function getMergedFieldSuggestions(fieldKey) {
@@ -385,13 +548,18 @@
         return getMergedFieldSuggestions(fieldKey)
             .map((item) => ({
                 ...item,
-                score: calculateSuggestionScore(query, item)
+                ranking: calculateSuggestionRanking(query, item)
             }))
-            .filter((item) => item.score >= 0)
+            .filter((item) => item.ranking)
             .sort((left, right) => {
-                const scoreGap = right.score - left.score;
-                if (scoreGap !== 0) {
-                    return scoreGap;
+                const matchRankGap = left.ranking.matchRank - right.ranking.matchRank;
+                if (matchRankGap !== 0) {
+                    return matchRankGap;
+                }
+
+                const distancePenaltyGap = left.ranking.distancePenalty - right.ranking.distancePenalty;
+                if (distancePenaltyGap !== 0) {
+                    return distancePenaltyGap;
                 }
 
                 const frequencyGap = (right.frequency || 0) - (left.frequency || 0);
@@ -399,10 +567,19 @@
                     return frequencyGap;
                 }
 
-                const rightTime = right.last_used_at ? new Date(right.last_used_at).getTime() : 0;
-                const leftTime = left.last_used_at ? new Date(left.last_used_at).getTime() : 0;
-                if (rightTime !== leftTime) {
-                    return rightTime - leftTime;
+                const recencyScoreGap = right.ranking.recencyScore - left.ranking.recencyScore;
+                if (recencyScoreGap !== 0) {
+                    return recencyScoreGap;
+                }
+
+                const recencyTimeGap = right.ranking.recencyTimestamp - left.ranking.recencyTimestamp;
+                if (recencyTimeGap !== 0) {
+                    return recencyTimeGap;
+                }
+
+                const sourceBoostGap = right.ranking.sourceBoost - left.ranking.sourceBoost;
+                if (sourceBoostGap !== 0) {
+                    return sourceBoostGap;
                 }
 
                 return String(left.value).localeCompare(String(right.value), "zh-CN");
@@ -418,11 +595,11 @@
                     return frequencyGap;
                 }
 
-                const rightTime = right.last_used_at ? new Date(right.last_used_at).getTime() : 0;
-                const leftTime = left.last_used_at ? new Date(left.last_used_at).getTime() : 0;
+                const rightTime = getRecencyTimestamp(right.last_used_at);
+                const leftTime = getRecencyTimestamp(left.last_used_at);
                 return rightTime - leftTime;
             })
-            .slice(0, 5);
+            .slice(0, MAX_EMPTY_QUERY_SUGGESTIONS);
     }
 
     async function loadRemoteSuggestions() {
@@ -524,7 +701,10 @@
             suggestions: [],
             activeIndex: -1,
             renderTimer: null,
-            blurTimer: null
+            blurTimer: null,
+            isComposing: false,
+            suppressNextInputUpdate: false,
+            suppressNextFocusUpdate: false
         };
 
         inputStates.set(input, state);
@@ -564,10 +744,10 @@
     function buildMetaLabel(item) {
         const parts = [];
         if (item.frequency) {
-            parts.push(`used ${item.frequency}x`);
+            parts.push(`高频 ${item.frequency} 次`);
         }
         if (item.sources?.includes("session") || item.sources?.includes("volatile")) {
-            parts.push("recent");
+            parts.push("本次会话");
         }
         return parts.join(" / ");
     }
@@ -605,6 +785,8 @@
 
         state.input.value = suggestion.value;
         hidePanel(state);
+        state.suppressNextInputUpdate = true;
+        state.suppressNextFocusUpdate = true;
         state.input.dispatchEvent(new Event("input", { bubbles: true }));
         state.input.dispatchEvent(new Event("change", { bubbles: true }));
     }
@@ -621,7 +803,8 @@
 
         if (query.length === 1) {
             state.suggestions = getRankedSuggestions(state.fieldKey, query)
-                .filter((item) => normalizeComparable(item.value).startsWith(normalizeComparable(query)));
+                .filter((item) => item.ranking?.matchRank <= 2)
+                .slice(0, MAX_SINGLE_CHAR_SUGGESTIONS);
         } else {
             state.suggestions = getRankedSuggestions(state.fieldKey, query);
         }
@@ -662,12 +845,18 @@
         }
 
         const state = getState(input, fieldKey);
+        input.setAttribute("autocomplete", "off");
 
         const onViewportChange = () => positionPanel(state);
         window.addEventListener("resize", onViewportChange);
         window.addEventListener("scroll", onViewportChange, true);
 
         input.addEventListener("focus", () => {
+            if (state.suppressNextFocusUpdate) {
+                state.suppressNextFocusUpdate = false;
+                return;
+            }
+
             window.clearTimeout(state.blurTimer);
             loadRemoteSuggestions().then(() => {
                 updateSuggestions(state);
@@ -676,10 +865,34 @@
 
         input.addEventListener("input", () => {
             window.clearTimeout(state.blurTimer);
+
+            if (state.suppressNextInputUpdate) {
+                state.suppressNextInputUpdate = false;
+                return;
+            }
+
+            if (state.isComposing) {
+                return;
+            }
+
+            scheduleUpdate(state);
+        });
+
+        input.addEventListener("compositionstart", () => {
+            state.isComposing = true;
+            window.clearTimeout(state.renderTimer);
+        });
+
+        input.addEventListener("compositionend", () => {
+            state.isComposing = false;
             scheduleUpdate(state);
         });
 
         input.addEventListener("keydown", (event) => {
+            if (event.isComposing || state.isComposing) {
+                return;
+            }
+
             if (event.key === "ArrowDown") {
                 event.preventDefault();
                 moveSelection(state, 1);
@@ -740,44 +953,33 @@
     }
 
     function initializeOrderInputMemory(form) {
-        if (!form) {
-            return;
-        }
+        bindInputMemoryGroup(form, ORDER_FIELD_CONFIGS);
+    }
 
-        FIELD_CONFIGS.forEach((config) => {
-            const input = form.querySelector(`#${config.inputId}`);
-            if (input) {
-                bindInputMemory(input, config.fieldKey);
-            }
-        });
+    function initializePickupTrackingInputMemory(form) {
+        bindInputMemoryGroup(form, PICKUP_TRACKING_FIELD_CONFIGS);
+    }
 
-        loadRemoteSuggestions().then(() => {
-            FIELD_CONFIGS.forEach((config) => {
-                const input = form.querySelector(`#${config.inputId}`);
-                if (input) {
-                    const state = getState(input, config.fieldKey);
-                    if (document.activeElement === input) {
-                        updateSuggestions(state);
-                    }
-                }
-            });
-        });
+    function initializeCustomsInputMemory(form) {
+        bindInputMemoryGroup(form, CUSTOMS_TRACKING_FIELD_CONFIGS);
     }
 
     function recordOrderInputMemory(orderData) {
-        if (!orderData || typeof orderData !== "object") {
-            return;
-        }
+        recordMemoryGroup(orderData, ORDER_FIELD_CONFIGS);
+    }
 
-        FIELD_CONFIGS.forEach((config) => {
-            const value = orderData[config.fieldKey];
-            if (shouldTrackFieldValue(config.fieldKey, value)) {
-                upsertVolatileMemory(config.fieldKey, value);
-                upsertSessionMemory(config.fieldKey, value);
-            }
-        });
+    function recordPickupTrackingInputMemory(trackingData) {
+        recordMemoryGroup(trackingData, PICKUP_TRACKING_FIELD_CONFIGS);
+    }
+
+    function recordCustomsInputMemory(recordData) {
+        recordMemoryGroup(recordData, CUSTOMS_TRACKING_FIELD_CONFIGS);
     }
 
     window.initializeOrderInputMemory = initializeOrderInputMemory;
+    window.initializePickupTrackingInputMemory = initializePickupTrackingInputMemory;
+    window.initializeCustomsInputMemory = initializeCustomsInputMemory;
     window.recordOrderInputMemory = recordOrderInputMemory;
+    window.recordPickupTrackingInputMemory = recordPickupTrackingInputMemory;
+    window.recordCustomsInputMemory = recordCustomsInputMemory;
 })();

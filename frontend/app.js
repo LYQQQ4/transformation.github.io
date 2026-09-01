@@ -6271,6 +6271,9 @@ function showPickupTrackingForm(trackingData = null) {
     const form = modal.querySelector("#pickupTrackingFormData");
     setupTransferDateInput("pickupTrackingPickupDate", form, updateTransferDateHidden);
     setupTransferDateInput("pickupTrackingArrivalTime", form, updateTransferDateHidden);
+    if (typeof window.initializePickupTrackingInputMemory === "function") {
+        window.initializePickupTrackingInputMemory(form);
+    }
 
     const fillFields = (data) => {
         if (!data) {
@@ -6403,6 +6406,9 @@ async function savePickupTracking() {
         });
 
         if (response.ok) {
+            if (typeof window.recordPickupTrackingInputMemory === "function") {
+                window.recordPickupTrackingInputMemory(payload);
+            }
             showMessage("提货运输跟踪保存成功");
             hidePickupTrackingForm();
             await refreshTrackingLinkedViews(serialNumber);
@@ -8265,6 +8271,9 @@ function showCustomsForm(recordData = null) {
     setupTransferDateInput("customsStartTime", form, updateTransferDateHidden);
     setupTransferDateInput("taxPaymentTime", form, updateTransferDateHidden);
     setupTransferDateInput("releaseTime", form, updateTransferDateHidden);
+    if (typeof window.initializeCustomsInputMemory === "function") {
+        window.initializeCustomsInputMemory(form);
+    }
 
     const fillCustomsFormFields = (data) => {
         if (!data) {
@@ -8408,6 +8417,9 @@ async function saveCustomsClearance() {
         }
 
         if (response.ok) {
+            if (typeof window.recordCustomsInputMemory === "function") {
+                window.recordCustomsInputMemory(recordData);
+            }
             showMessage("报关信息保存成功");
             hideCustomsForm();
             await refreshTrackingLinkedViews(serialNumber);

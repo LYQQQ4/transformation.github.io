@@ -238,9 +238,109 @@ async function buildOrderFormSuggestions(orderDb, userDb) {
   };
 }
 
+async function buildTrackingFieldSuggestions(orderDb) {
+  const [
+    pickupTransportModes,
+    pickupCustomsPorts,
+    pickupTransportSuppliers,
+    customsTransportModes,
+    customsSuppliers,
+  ] = await Promise.all([
+    queryGroupedSuggestions(
+      orderDb,
+      `
+        SELECT
+          TRIM(transport_mode) AS value,
+          COUNT(*) AS frequency,
+          MAX(updated_at) AS last_used_at
+        FROM pickup_transport_tracking
+        WHERE transport_mode IS NOT NULL AND TRIM(transport_mode) <> ''
+        GROUP BY TRIM(transport_mode)
+        ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
+        LIMIT ${DEFAULT_LIMIT}
+      `
+    ),
+    queryGroupedSuggestions(
+      orderDb,
+      `
+        SELECT
+          TRIM(customs_port) AS value,
+          COUNT(*) AS frequency,
+          MAX(updated_at) AS last_used_at
+        FROM pickup_transport_tracking
+        WHERE customs_port IS NOT NULL AND TRIM(customs_port) <> ''
+        GROUP BY TRIM(customs_port)
+        ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
+        LIMIT ${DEFAULT_LIMIT}
+      `
+    ),
+    queryGroupedSuggestions(
+      orderDb,
+      `
+        SELECT
+          TRIM(transport_supplier) AS value,
+          COUNT(*) AS frequency,
+          MAX(updated_at) AS last_used_at
+        FROM pickup_transport_tracking
+        WHERE transport_supplier IS NOT NULL AND TRIM(transport_supplier) <> ''
+        GROUP BY TRIM(transport_supplier)
+        ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
+        LIMIT ${DEFAULT_LIMIT}
+      `
+    ),
+    queryGroupedSuggestions(
+      orderDb,
+      `
+        SELECT
+          TRIM(transport_mode) AS value,
+          COUNT(*) AS frequency,
+          MAX(updated_at) AS last_used_at
+        FROM pickup_transport_tracking
+        WHERE transport_mode IS NOT NULL AND TRIM(transport_mode) <> ''
+        GROUP BY TRIM(transport_mode)
+        ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
+        LIMIT ${DEFAULT_LIMIT}
+      `
+    ),
+    queryGroupedSuggestions(
+      orderDb,
+      `
+        SELECT
+          TRIM(customs_supplier) AS value,
+          COUNT(*) AS frequency,
+          MAX(updated_at) AS last_used_at
+        FROM customs_clearance_tracking
+        WHERE customs_supplier IS NOT NULL AND TRIM(customs_supplier) <> ''
+        GROUP BY TRIM(customs_supplier)
+        ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
+        LIMIT ${DEFAULT_LIMIT}
+      `
+    ),
+  ]);
+
+  return {
+    pickup_transport_mode: sortSuggestions(pickupTransportModes),
+    pickup_customs_port: sortSuggestions(pickupCustomsPorts),
+    pickup_transport_supplier: sortSuggestions(pickupTransportSuppliers),
+    customs_transport_mode: sortSuggestions(customsTransportModes),
+    customs_supplier: sortSuggestions(customsSuppliers),
+  };
+}
+
 async function buildScopePayload(scope, orderDb, userDb) {
   if (scope === SCOPE_ORDER_FORM) {
-    return buildOrderFormSuggestions(orderDb, userDb);
+    const [orderFormSuggestions, trackingFieldSuggestions] = await Promise.all([
+      buildOrderFormSuggestions(orderDb, userDb),
+      buildTrackingFieldSuggestions(orderDb),
+    ]);
+
+    return {
+      ...orderFormSuggestions,
+      fields: {
+        ...orderFormSuggestions.fields,
+        ...trackingFieldSuggestions,
+      },
+    };
   }
 
   const error = new Error(`Unsupported input memory scope: ${scope}`);
