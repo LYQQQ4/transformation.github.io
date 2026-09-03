@@ -1339,18 +1339,21 @@ function renderOrderDetailView(order) {
         return;
     }
 
-    const serialNumber = order.serial_number || order.id || "";
+    const currentOrder = order || {};
+    const serialNumber = currentOrder.serial_number || currentOrder.id || "";
     currentOrderDetailSerial = serialNumber;
     const detailItems = [
-        ...buildCommonOrderFieldItems(order, serialNumber),
-        ["提货时间", formatDateOnly(order.pickup_date)],
-        ["开始报关时间", formatDateOnly(order.customs_start_time)],
-        ["付税时间", formatDateOnly(order.tax_payment_time)],
-        ["放行时间", formatDateOnly(order.release_time)],
-        ["到货时间", formatDateOnly(order.arrival_time)],
-        ["完整单据回复时间", formatDateOnly(order.complete_docs_send_time)],
-        ["新增账单完成时间", formatDateOnly(order.billing_completed_time)],
-        ["账期", order.billing_period || ""]
+        ...buildCommonOrderFieldItems(currentOrder, serialNumber),
+        ["备注1", getOrderRemarkValue(currentOrder, "remark1")],
+        ["备注2", getOrderRemarkValue(currentOrder, "remark2")],
+        ["提货时间", formatDateOnly(currentOrder.pickup_date)],
+        ["开始报关时间", formatDateOnly(currentOrder.customs_start_time)],
+        ["付税时间", formatDateOnly(currentOrder.tax_payment_time)],
+        ["放行时间", formatDateOnly(currentOrder.release_time)],
+        ["到货时间", formatDateOnly(currentOrder.arrival_time)],
+        ["完整单据回复时间", formatDateOnly(currentOrder.complete_docs_send_time)],
+        ["新增账单完成时间", formatDateOnly(currentOrder.billing_completed_time)],
+        ["账期", currentOrder.billing_period || ""]
     ];
 
     detailContent.innerHTML = `
@@ -2976,6 +2979,16 @@ function getOrderDisplayProductName(record) {
     return record?.order_product_name || record?.product_name || "";
 }
 
+function getOrderRemarkValue(record, fieldName) {
+    const aliasFieldName = fieldName === "remark1"
+        ? "remark_1"
+        : fieldName === "remark2"
+            ? "remark_2"
+            : fieldName;
+
+    return record?.[fieldName] || record?.[aliasFieldName] || "";
+}
+
 function buildCommonOrderFieldItems(record, serialNumber = "") {
     return [
         ["流水号", serialNumber || record?.serial_number || record?.id || ""],
@@ -3499,8 +3512,8 @@ function showOrderForm(order = null) {
             form.querySelector("#destination").value = order.destination || "";
             form.querySelector("#tradeTerm").value = order.trade_term || "";
             form.querySelector("#productName").value = order.product_name || "";
-            form.querySelector("#orderRemark1").value = order.remark1 || "";
-            form.querySelector("#orderRemark2").value = order.remark2 || "";
+            form.querySelector("#orderRemark1").value = getOrderRemarkValue(order, "remark1");
+            form.querySelector("#orderRemark2").value = getOrderRemarkValue(order, "remark2");
             form.dataset.editId = order.id;
         }
     } else {
