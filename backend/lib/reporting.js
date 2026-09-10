@@ -32,6 +32,7 @@ function parseStoredFeeItems(value) {
 }
 
 let billingInfoSchemaReadyPromise = null;
+let reportSchemaReadyPromise = null;
 
 async function ensureBillingInfoSchema(db) {
   if (!billingInfoSchemaReadyPromise) {
@@ -55,6 +56,39 @@ async function ensureBillingInfoSchema(db) {
   }
 
   return billingInfoSchemaReadyPromise;
+}
+
+async function ensureReportSchema(db) {
+  if (!reportSchemaReadyPromise) {
+    reportSchemaReadyPromise = (async () => {
+      const [tables] = await db.execute("SHOW TABLES LIKE 'package'");
+      if (tables.length === 0) {
+        return;
+      }
+
+      for (const column of [
+        { name: "remark1", sql: "ALTER TABLE `package` ADD COLUMN remark1 VARCHAR(1000) DEFAULT NULL COMMENT '备注1'" },
+        { name: "remark2", sql: "ALTER TABLE `package` ADD COLUMN remark2 VARCHAR(1000) DEFAULT NULL COMMENT '备注2'" },
+      ]) {
+        const [columns] = await db.execute(
+          `SELECT COLUMN_NAME
+           FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE()
+             AND TABLE_NAME = 'package'
+             AND COLUMN_NAME = ?`,
+          [column.name]
+        );
+        if (columns.length === 0) {
+          await db.execute(column.sql);
+        }
+      }
+    })().catch((error) => {
+      reportSchemaReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return reportSchemaReadyPromise;
 }
 
 function deriveBillingPeriod(row = {}) {
@@ -115,6 +149,33 @@ const TOTAL_REPORT_DATE_COLUMN_KEYS = new Set([
   "complete_docs_send_time",
   "billing_completed_time",
 ]);
+
+const TRACKING_REMARK_SOURCES = [
+  { keyPrefix: "pickup_remark", label: "\u63d0\u8d27\u5907\u6ce8" },
+  { keyPrefix: "transfer_remark", label: "\u9001\u8d27\u5907\u6ce8" },
+  { keyPrefix: "customs_remark", label: "\u62a5\u5173\u5907\u6ce8" },
+];
+
+function combineTrackingRemarks(row = {}, remarkNumber) {
+  const values = [];
+  const seenValues = new Set();
+
+  TRACKING_REMARK_SOURCES.forEach(({ keyPrefix, label }) => {
+    const value = normalizeTextValue(row[`${keyPrefix}${remarkNumber}_source`]);
+    if (!value || seenValues.has(value)) {
+      return;
+    }
+
+    seenValues.add(value);
+    values.push({ label, value });
+  });
+
+  if (values.length <= 1) {
+    return values[0]?.value || "";
+  }
+
+  return values.map(({ label, value }) => `${label}\uff1a${value}`).join("\n");
+}
 
 const TOTAL_REPORT_FIELD_DEFINITIONS = [
   {
@@ -195,6 +256,20 @@ const TOTAL_REPORT_FIELD_DEFINITIONS = [
     getValue: (row) => row.order_product_name || row.product_name,
   },
   {
+    key: "order_remark1",
+    outputKey: "order_remark1",
+    section: "base",
+    label: "\u8ba2\u5355\u5907\u6ce81",
+    getValue: (row) => row.order_remark1,
+  },
+  {
+    key: "order_remark2",
+    outputKey: "order_remark2",
+    section: "base",
+    label: "\u8ba2\u5355\u5907\u6ce82",
+    getValue: (row) => row.order_remark2,
+  },
+  {
     key: "transport_mode",
     outputKey: "transport_mode",
     section: "tracking",
@@ -221,6 +296,34 @@ const TOTAL_REPORT_FIELD_DEFINITIONS = [
     section: "tracking",
     label: "\u5230\u8d27\u65f6\u95f4",
     getValue: (row) => row.arrival_time,
+  },
+  {
+    key: "cargo_flow_info",
+    outputKey: "cargo_flow_info",
+    section: "tracking",
+    label: "\u8d27\u7269\u6d41\u8f6c\u4fe1\u606f",
+    getValue: (row) => row.cargo_flow_info,
+  },
+  {
+    key: "value_added_services",
+    outputKey: "value_added_services",
+    section: "tracking",
+    label: "\u589e\u503c\u670d\u52a1\u5907\u6ce8",
+    getValue: (row) => row.value_added_services,
+  },
+  {
+    key: "remark1",
+    outputKey: "remark1",
+    section: "tracking",
+    label: "\u5907\u6ce81",
+    getValue: (row) => combineTrackingRemarks(row, 1),
+  },
+  {
+    key: "remark2",
+    outputKey: "remark2",
+    section: "tracking",
+    label: "\u5907\u6ce82",
+    getValue: (row) => combineTrackingRemarks(row, 2),
   },
   {
     key: "customs_port",
@@ -341,6 +444,20 @@ const TOTAL_REPORT_FIELD_DEFINITIONS = [
     label: "\u8ba1\u8d39\u91cd\u91cf",
     getValue: (row) => row.charge_weight_total,
   },
+  {
+    key: "package_remark1",
+    outputKey: "package_remark1",
+    section: "package",
+    label: "\u5305\u88c5\u5907\u6ce81",
+    getValue: (row) => row.package_remark1,
+  },
+  {
+    key: "package_remark2",
+    outputKey: "package_remark2",
+    section: "package",
+    label: "\u5305\u88c5\u5907\u6ce82",
+    getValue: (row) => row.package_remark2,
+  },
 ];
 
 function formatReportDateValue(value) {
@@ -375,9 +492,17 @@ function normalizeSelectedReportFieldKeys(selectedFieldKeys) {
     return null;
   }
 
+  const seen = new Set();
   return selectedFieldKeys
     .map((fieldKey) => normalizeTextValue(fieldKey))
-    .filter(Boolean);
+    .filter((fieldKey) => {
+      if (!fieldKey || seen.has(fieldKey)) {
+        return false;
+      }
+
+      seen.add(fieldKey);
+      return true;
+    });
 }
 
 function buildTotalReportSummaryRows(rows = [], options = {}) {
@@ -445,12 +570,14 @@ function buildTotalReportSummaryRows(rows = [], options = {}) {
 }
 
 module.exports = {
+  combineTrackingRemarks,
   REPORT_EMPTY_VALUE_TEXT,
   TOTAL_REPORT_FIELD_DEFINITIONS,
   buildFilledStatusSql,
   buildTotalReportSummaryRows,
   deriveBillingPeriod,
   ensureBillingInfoSchema,
+  ensureReportSchema,
   enrichOrderBillingFields,
   formatTotalReportValue,
   isFilledValue,

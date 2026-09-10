@@ -146,7 +146,9 @@ async function setupDatabase() {
       { name: "single_weight", sql: "ALTER TABLE package ADD COLUMN single_weight DOUBLE DEFAULT NULL COMMENT '单件重量'" },
       { name: "length", sql: "ALTER TABLE package ADD COLUMN length DOUBLE DEFAULT NULL COMMENT '长'" },
       { name: "width", sql: "ALTER TABLE package ADD COLUMN width DOUBLE DEFAULT NULL COMMENT '宽'" },
-      { name: "height", sql: "ALTER TABLE package ADD COLUMN height DOUBLE DEFAULT NULL COMMENT '高'" }
+      { name: "height", sql: "ALTER TABLE package ADD COLUMN height DOUBLE DEFAULT NULL COMMENT '高'" },
+      { name: "remark1", sql: "ALTER TABLE package ADD COLUMN remark1 VARCHAR(1000) DEFAULT NULL COMMENT '备注1'" },
+      { name: "remark2", sql: "ALTER TABLE package ADD COLUMN remark2 VARCHAR(1000) DEFAULT NULL COMMENT '备注2'" }
     ];
 
     for (const column of packageColumnDefinitions) {

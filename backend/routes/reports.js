@@ -1,12 +1,11 @@
 const express = require("express");
 const XLSX = require("xlsx");
 
-const router = express.Router();
-
 const { requireAdminAccess } = require("../lib/request_auth");
 const {
   buildTotalReportSummaryRows,
   ensureBillingInfoSchema,
+  ensureReportSchema,
   normalizeSelectedReportFieldKeys,
 } = require("../lib/reporting");
 
@@ -56,10 +55,22 @@ function buildReportBaseSql(whereClause = "") {
       o.destination AS order_destination,
       o.trade_term,
       o.product_name AS order_product_name,
+      o.remark1 AS order_remark1,
+      o.remark2 AS order_remark2,
       COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
       t.tracking_number,
       pt.pickup_date,
       COALESCE(t.arrival_port_time, pt.arrival_time) AS arrival_time,
+      COALESCE(
+        NULLIF(TRIM(pt.cargo_flow_info), ''),
+        NULLIF(TRIM(t.cargo_flow_info), '')
+      ) AS cargo_flow_info,
+      COALESCE(
+        NULLIF(TRIM(pt.value_added_services), ''),
+        NULLIF(TRIM(t.value_added_services), '')
+      ) AS value_added_services,
+      pt.remark1 AS pickup_remark1_source,
+      pt.remark2 AS pickup_remark2_source,
       pt.customs_port,
       pt.customs_title,
       c.customs_start_time,
@@ -67,20 +78,38 @@ function buildReportBaseSql(whereClause = "") {
       c.release_time,
       c.customs_declaration_number,
       c.customs_supplier,
+      c.remark1 AS customs_remark1_source,
+      c.remark2 AS customs_remark2_source,
       t.arrival_port_time,
       t.clearance_time,
       t.delivery_time,
       t.complete_docs_send_time,
       t.billing_period AS billing_period_raw,
+      t.remark1 AS transfer_remark1_source,
+      t.remark2 AS transfer_remark2_source,
       b.billing_completed_time,
       b.billing_items AS billing_items_raw,
       pkg.pieces_total,
       pkg.weight_total,
       pkg.volume_total,
-      pkg.charge_weight_total
+      pkg.charge_weight_total,
+      pkg.package_remark1,
+      pkg.package_remark2
     FROM orders o
     LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = o.serial_number
-    LEFT JOIN customs_clearance_tracking c ON c.serial_number = o.serial_number
+    LEFT JOIN (
+      SELECT
+        serial_number,
+        MAX(customs_start_time) AS customs_start_time,
+        MAX(tax_payment_time) AS tax_payment_time,
+        MAX(release_time) AS release_time,
+        GROUP_CONCAT(NULLIF(TRIM(customs_declaration_number), '') ORDER BY id SEPARATOR '\n') AS customs_declaration_number,
+        GROUP_CONCAT(NULLIF(TRIM(customs_supplier), '') ORDER BY id SEPARATOR '\n') AS customs_supplier,
+        GROUP_CONCAT(NULLIF(TRIM(remark1), '') ORDER BY id SEPARATOR '\n') AS remark1,
+        GROUP_CONCAT(NULLIF(TRIM(remark2), '') ORDER BY id SEPARATOR '\n') AS remark2
+      FROM customs_clearance_tracking
+      GROUP BY serial_number
+    ) c ON c.serial_number = o.serial_number
     LEFT JOIN transfer t ON t.serial_number = o.serial_number
     LEFT JOIN billing_info b ON b.serial_number = o.serial_number
     LEFT JOIN (
@@ -89,7 +118,9 @@ function buildReportBaseSql(whereClause = "") {
         SUM(COALESCE(pieces, 0)) AS pieces_total,
         ROUND(SUM(COALESCE(single_weight, 0) * (CASE WHEN pieces IS NULL OR pieces <= 0 THEN 1 ELSE pieces END)), 2) AS weight_total,
         ROUND(SUM(COALESCE(volume, 0) * (CASE WHEN pieces IS NULL OR pieces <= 0 THEN 1 ELSE pieces END)), 4) AS volume_total,
-        MAX(charge_weight) AS charge_weight_total
+        MAX(charge_weight) AS charge_weight_total,
+        GROUP_CONCAT(NULLIF(TRIM(remark1), '') ORDER BY package_order, id SEPARATOR '\n') AS package_remark1,
+        GROUP_CONCAT(NULLIF(TRIM(remark2), '') ORDER BY package_order, id SEPARATOR '\n') AS package_remark2
       FROM \`package\`
       GROUP BY serial_number
     ) pkg ON pkg.serial_number = o.serial_number
@@ -123,17 +154,26 @@ async function loadReportSummary(db, reportType, filter) {
     throw error;
   }
 
-  const [rows] = await db.execute(
-    `${buildReportBaseSql(filter.whereClause)} ORDER BY o.serial_number DESC`,
-    filter.params
-  );
+  await ensureReportSchema(db);
+  const connection = await db.getConnection();
+  try {
+    await connection.execute("SET SESSION group_concat_max_len = 1000000");
+    const [rows] = await connection.execute(
+      `${buildReportBaseSql(filter.whereClause)} ORDER BY o.serial_number DESC`,
+      filter.params
+    );
 
-  return buildTotalReportSummaryRows(rows, {
-    selectedFieldKeys: filter.selectedFieldKeys,
-  });
+    return buildTotalReportSummaryRows(rows, {
+      selectedFieldKeys: filter.selectedFieldKeys,
+    });
+  } finally {
+    connection.release();
+  }
 }
 
 module.exports = (db, userDb) => {
+  const router = express.Router();
+
   router.get("/summary", async (req, res) => {
     try {
       await requireAdminAccess(userDb, req, "\u62a5\u8868\u7ba1\u7406");

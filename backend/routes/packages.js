@@ -359,6 +359,8 @@ async function ensurePackageSchema(db) {
           { name: "package_order", sql: "ALTER TABLE `package` ADD COLUMN package_order INT DEFAULT 1 COMMENT '包装排序' AFTER package_label" },
           { name: "box_type_id", sql: "ALTER TABLE `package` ADD COLUMN box_type_id VARCHAR(64) DEFAULT NULL COMMENT '箱型ID' AFTER package_order" },
           { name: "single_weight", sql: "ALTER TABLE `package` ADD COLUMN single_weight DOUBLE DEFAULT NULL COMMENT '单件重量' AFTER pieces" },
+          { name: "remark1", sql: "ALTER TABLE `package` ADD COLUMN remark1 VARCHAR(1000) DEFAULT NULL COMMENT '备注1'" },
+          { name: "remark2", sql: "ALTER TABLE `package` ADD COLUMN remark2 VARCHAR(1000) DEFAULT NULL COMMENT '备注2'" },
         ];
 
         for (const column of packageColumns) {

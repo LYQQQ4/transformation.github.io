@@ -131,6 +131,22 @@ async function setupDatabase() {
     `);
     console.log('    ✓ package 表已创建');
 
+    for (const column of [
+      { name: "remark1", sql: "ALTER TABLE package ADD COLUMN remark1 VARCHAR(1000) DEFAULT NULL COMMENT '备注1'" },
+      { name: "remark2", sql: "ALTER TABLE package ADD COLUMN remark2 VARCHAR(1000) DEFAULT NULL COMMENT '备注2'" }
+    ]) {
+      const [packageColumns] = await connection.execute(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ?
+          AND TABLE_NAME = 'package'
+          AND COLUMN_NAME = ?
+      `, [ORDER_SYSTEM_DB, column.name]);
+      if (packageColumns.length === 0) {
+        await connection.execute(column.sql);
+      }
+    }
+
     // 3. 创建pickup_transport_tracking表
     console.log('  • 创建 pickup_transport_tracking 表...');
     await connection.execute(`

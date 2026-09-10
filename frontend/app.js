@@ -748,7 +748,9 @@ const TOTAL_REPORT_FIELD_GROUPS = [
             { key: "origin", label: "\u8d77\u59cb\u5730" },
             { key: "destination", label: "\u76ee\u7684\u5730" },
             { key: "trade_term", label: "\u8d38\u6613\u672f\u8bed" },
-            { key: "product_name", label: "\u8d27\u7269\u54c1\u540d" }
+            { key: "product_name", label: "\u8d27\u7269\u54c1\u540d" },
+            { key: "order_remark1", label: "\u8ba2\u5355\u5907\u6ce81" },
+            { key: "order_remark2", label: "\u8ba2\u5355\u5907\u6ce82" }
         ]
     },
     {
@@ -758,7 +760,11 @@ const TOTAL_REPORT_FIELD_GROUPS = [
             { key: "transport_mode", label: "\u8fd0\u8f93\u65b9\u5f0f" },
             { key: "tracking_number", label: "\u8fd0\u5355\u53f7" },
             { key: "pickup_date", label: "\u63d0\u8d27\u65f6\u95f4" },
-            { key: "arrival_time", label: "\u5230\u8d27\u65f6\u95f4" }
+            { key: "arrival_time", label: "\u5230\u8d27\u65f6\u95f4" },
+            { key: "cargo_flow_info", label: "\u8d27\u7269\u6d41\u8f6c\u4fe1\u606f" },
+            { key: "value_added_services", label: "\u589e\u503c\u670d\u52a1\u5907\u6ce8" },
+            { key: "remark1", label: "\u5907\u6ce81" },
+            { key: "remark2", label: "\u5907\u6ce82" }
         ]
     },
     {
@@ -799,7 +805,9 @@ const TOTAL_REPORT_FIELD_GROUPS = [
             { key: "pieces_total", label: "\u4ef6\u6570" },
             { key: "weight_total", label: "\u91cd\u91cf" },
             { key: "volume_total", label: "\u4f53\u79ef" },
-            { key: "charge_weight_total", label: "\u8ba1\u8d39\u91cd\u91cf" }
+            { key: "charge_weight_total", label: "\u8ba1\u8d39\u91cd\u91cf" },
+            { key: "package_remark1", label: "\u5305\u88c5\u5907\u6ce81" },
+            { key: "package_remark2", label: "\u5305\u88c5\u5907\u6ce82" }
         ]
     }
 ];
@@ -6608,7 +6616,10 @@ function showTransferForm(transferData = null) {
                     <label>货物流转信息:</label>
                     <textarea id="transferCargoFlowInfo"></textarea>
                 </div>
-                <textarea id="transferValueAddedServices" style="display:none;"></textarea>
+                <div class="form-group">
+                    <label>\u589e\u503c\u670d\u52a1\u5907\u6ce8:</label>
+                    <textarea id="transferValueAddedServices"></textarea>
+                </div>
                 <div class="form-group">
                     <label>备注1:</label>
                     <textarea id="transferRemark1"></textarea>
