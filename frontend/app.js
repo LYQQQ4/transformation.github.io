@@ -17,6 +17,7 @@ let currentOrderDeliveryTrackingData = null;
 let currentOrderCustomsClearanceData = null;
 let currentOrderBillingData = null;
 let currentBillingSerialNumber = "";
+const ORDER_SUMMARY_FIELD_API = window.OrderSummaryFields || null;
 
 const BILLING_FEE_CATEGORIES = [
     "提货运输费",
@@ -733,84 +734,37 @@ let currentTransferSearchTerm = "";
 let currentGuestSearchTerm = "";
 const REPORT_TYPE_TOTAL = "total";
 const REPORT_EMPTY_VALUE_TEXT = "\u8be5\u9879\u672a\u586b";
-const TOTAL_REPORT_FIELD_GROUPS = [
-    {
-        key: "base",
-        label: "\u57fa\u7840\u4fe1\u606f",
-        fields: [
-            { key: "serial_number", label: "\u6d41\u6c34\u53f7" },
-            { key: "company_name", label: "\u516c\u53f8\u540d\u79f0" },
-            { key: "orderer", label: "\u6307\u4ee4\u4eba" },
-            { key: "business_type", label: "\u4e1a\u52a1\u7c7b\u578b" },
-            { key: "sender_id", label: "\u53d1\u4ef6\u4ebaID" },
-            { key: "customer_id", label: "\u5ba2\u6237ID" },
-            { key: "receive_date", label: "\u63a5\u6536\u6307\u4ee4\u65e5\u671f" },
-            { key: "origin", label: "\u8d77\u59cb\u5730" },
-            { key: "destination", label: "\u76ee\u7684\u5730" },
-            { key: "trade_term", label: "\u8d38\u6613\u672f\u8bed" },
-            { key: "product_name", label: "\u8d27\u7269\u54c1\u540d" },
-            { key: "order_remark1", label: "\u8ba2\u5355\u5907\u6ce81" },
-            { key: "order_remark2", label: "\u8ba2\u5355\u5907\u6ce82" }
-        ]
-    },
-    {
-        key: "tracking",
-        label: "\u63d0\u8d27/\u8fd0\u8f93",
-        fields: [
-            { key: "transport_mode", label: "\u8fd0\u8f93\u65b9\u5f0f" },
-            { key: "tracking_number", label: "\u8fd0\u5355\u53f7" },
-            { key: "pickup_date", label: "\u63d0\u8d27\u65f6\u95f4" },
-            { key: "arrival_time", label: "\u5230\u8d27\u65f6\u95f4" },
-            { key: "cargo_flow_info", label: "\u8d27\u7269\u6d41\u8f6c\u4fe1\u606f" },
-            { key: "value_added_services", label: "\u589e\u503c\u670d\u52a1\u5907\u6ce8" },
-            { key: "remark1", label: "\u5907\u6ce81" },
-            { key: "remark2", label: "\u5907\u6ce82" }
-        ]
-    },
-    {
-        key: "customs",
-        label: "\u62a5\u5173",
-        fields: [
-            { key: "customs_port", label: "\u62a5\u5173\u53e3\u5cb8" },
-            { key: "customs_title", label: "\u62a5\u5173\u54c1\u540d" },
-            { key: "customs_start_time", label: "\u5f00\u59cb\u62a5\u5173\u65f6\u95f4" },
-            { key: "tax_payment_time", label: "\u4ed8\u7a0e\u65f6\u95f4" },
-            { key: "release_time", label: "\u653e\u884c\u65f6\u95f4" },
-            { key: "customs_declaration_number", label: "\u62a5\u5173\u5355\u53f7" },
-            { key: "customs_supplier", label: "\u62a5\u5173\u4f9b\u5e94\u5546" }
-        ]
-    },
-    {
-        key: "delivery",
-        label: "\u9001\u8d27/\u6d41\u8f6c",
-        fields: [
-            { key: "arrival_port_time", label: "\u5230\u6e2f\u65f6\u95f4" },
-            { key: "clearance_time", label: "\u6e05\u5173\u65f6\u95f4" },
-            { key: "delivery_time", label: "\u9001\u8fbe\u65f6\u95f4" },
-            { key: "complete_docs_send_time", label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4" }
-        ]
-    },
-    {
-        key: "billing",
-        label: "\u8d26\u5355",
-        fields: [
-            { key: "billing_completed_time", label: "\u65b0\u589e\u8d26\u5355\u5b8c\u6210\u65f6\u95f4" },
-            { key: "billing_period", label: "\u8d26\u671f" }
-        ]
-    },
-    {
-        key: "package",
-        label: "\u5305\u88c5",
-        fields: [
-            { key: "pieces_total", label: "\u4ef6\u6570" },
-            { key: "weight_total", label: "\u91cd\u91cf" },
-            { key: "volume_total", label: "\u4f53\u79ef" },
-            { key: "charge_weight_total", label: "\u8ba1\u8d39\u91cd\u91cf" },
-            { key: "package_remark1", label: "\u5305\u88c5\u5907\u6ce81" },
-            { key: "package_remark2", label: "\u5305\u88c5\u5907\u6ce82" }
-        ]
-    }
-];
+const TOTAL_REPORT_FIELD_GROUPS = [{
+    key: "order_summary",
+    label: "\u8ba2\u5355\u6458\u8981",
+    fields: ORDER_SUMMARY_FIELD_API?.ORDER_SUMMARY_FIELD_DEFINITIONS || []
+}];
+
+function getOrderSummaryFieldDefinitions() {
+    return ORDER_SUMMARY_FIELD_API?.ORDER_SUMMARY_FIELD_DEFINITIONS || [];
+}
+
+function getOrderSummaryFieldValue(record, fieldKey) {
+    return ORDER_SUMMARY_FIELD_API?.getOrderSummaryFieldValue?.(record || {}, fieldKey) ?? "";
+}
+
+function formatOrderSummaryFieldValue(fieldKey, value) {
+    return ORDER_SUMMARY_FIELD_API?.formatOrderSummaryValue?.(fieldKey, value, {
+        emptyValueText: REPORT_EMPTY_VALUE_TEXT
+    }) ?? (value === undefined || value === null || value === "" ? REPORT_EMPTY_VALUE_TEXT : String(value));
+}
+
+function buildOrderSummaryDetailItems(record, serialNumber = "") {
+    const summaryRecord = {
+        ...(record || {}),
+        serial_number: serialNumber || record?.serial_number || record?.id || ""
+    };
+
+    return getOrderSummaryFieldDefinitions().map((field) => [
+        field.label,
+        formatOrderSummaryFieldValue(field.key, getOrderSummaryFieldValue(summaryRecord, field.key))
+    ]);
+}
 
 function buildOrderFilledStatusFilterHtml(label, selectId) {
     return `
@@ -973,7 +927,7 @@ function renderReportTable(columns = [], rows = [], emptyValueText = REPORT_EMPT
     }).join("");
 }
 
-async function queryReports() {
+async function legacyQueryReports() {
     if (!isAdminUser()) {
         showMessage("仅管理员可使用报表管理", "error");
         showPage("viewOrders");
@@ -1006,7 +960,7 @@ async function queryReports() {
     }
 }
 
-async function exportReports() {
+async function legacyExportReports() {
     if (!isAdminUser()) {
         showMessage("仅管理员可使用报表管理", "error");
         showPage("viewOrders");
@@ -1350,22 +1304,10 @@ function renderOrderDetailView(order) {
     const currentOrder = order || {};
     const serialNumber = currentOrder.serial_number || currentOrder.id || "";
     currentOrderDetailSerial = serialNumber;
-    const detailItems = [
-        ...buildCommonOrderFieldItems(currentOrder, serialNumber),
-        ["备注1", getOrderRemarkValue(currentOrder, "remark1")],
-        ["备注2", getOrderRemarkValue(currentOrder, "remark2")],
-        ["提货时间", formatDateOnly(currentOrder.pickup_date)],
-        ["开始报关时间", formatDateOnly(currentOrder.customs_start_time)],
-        ["付税时间", formatDateOnly(currentOrder.tax_payment_time)],
-        ["放行时间", formatDateOnly(currentOrder.release_time)],
-        ["到货时间", formatDateOnly(currentOrder.arrival_time)],
-        ["完整单据回复时间", formatDateOnly(currentOrder.complete_docs_send_time)],
-        ["新增账单完成时间", formatDateOnly(currentOrder.billing_completed_time)],
-        ["账期", currentOrder.billing_period || ""]
-    ];
+    const summaryDetailItems = buildOrderSummaryDetailItems(currentOrder, serialNumber);
 
     detailContent.innerHTML = `
-        <div class="detail-grid">${buildDetailGridItems(detailItems)}</div>
+        <div class="detail-grid">${buildDetailGridItems(summaryDetailItems)}</div>
     `;
 
     const logisticsSection = document.getElementById("orderLogisticsSection");
@@ -1581,7 +1523,7 @@ function createEmptyBillingFeeItem(category = "") {
     }, { category });
 }
 
-function normalizeBillingFeeItems(items) {
+function legacyNormalizeBillingFeeItems(items) {
     const sourceItems = Array.isArray(items) ? items : [];
     const itemMap = new Map(
         sourceItems.map(item => [String(item?.category || "").trim(), item || {}])
@@ -1596,7 +1538,7 @@ function normalizeBillingFeeItems(items) {
     });
 }
 
-function normalizeBillingRecord(record = null) {
+function legacyNormalizeBillingRecord(record = null) {
     return {
         serial_number: record?.serial_number || "",
         company_name: record?.company_name || "",
@@ -1616,12 +1558,12 @@ function normalizeBillingRecord(record = null) {
         volume_total: record?.volume_total || "",
         charge_weight: record?.charge_weight || "",
         billing_completed_time: record?.billing_completed_time || "",
-        cost_items: normalizeBillingFeeItems(record?.cost_items),
-        billing_items: normalizeBillingFeeItems(record?.billing_items)
+        cost_items: legacyNormalizeBillingFeeItems(record?.cost_items),
+        billing_items: legacyNormalizeBillingFeeItems(record?.billing_items)
     };
 }
 
-function buildBillingBaseInfoItems(record) {
+function legacyBuildBillingBaseInfoItems(record) {
     return [
         ...buildCommonOrderFieldItems(record, record?.serial_number || ""),
         ["运输方式", record?.transport_mode || ""],
@@ -1634,7 +1576,7 @@ function buildBillingBaseInfoItems(record) {
     ];
 }
 
-function buildBillingFeeTableHtml(title, tableType, items, options = {}) {
+function legacyBuildBillingFeeTableHtml(title, tableType, items, options = {}) {
     const { editable = false, collapsed = true, serialNumber = "" } = options;
     const sectionId = `${tableType}Section_${serialNumber || "general"}`;
     const bodyHtml = items.map((item, rowIndex) => `
@@ -1734,6 +1676,7 @@ function ensureBillingPageStructure() {
             <div id="billingDetailContainer" style="margin-top: 24px;"></div>
         `;
     }
+    syncBillingTableColumns();
 }
 
 function ensureOrderBillingSection() {
@@ -1761,7 +1704,7 @@ function ensureOrderBillingSection() {
     customsSection.insertAdjacentElement("afterend", section);
 }
 
-function buildBillingRecordRow(record) {
+function legacySummaryBuildBillingRecordRow(record) {
     const serialNumber = record.serial_number || "";
     return `
         <tr>
@@ -1787,14 +1730,14 @@ function buildBillingRecordRow(record) {
     `;
 }
 
-function renderBillingDetail(container, record, options = {}) {
+function legacyRenderBillingDetail(container, record, options = {}) {
     if (!container) {
         return;
     }
 
     const { editable = true, showSaveButton = true, collapsed = true, containerId = "" } = options;
     const normalized = normalizeBillingRecord(record);
-    const baseItems = buildBillingBaseInfoItems(normalized);
+    const baseItems = legacyBuildBillingBaseInfoItems(normalized);
     const detailKey = containerId || normalized.serial_number || "billing";
 
     container.innerHTML = `
@@ -1807,12 +1750,12 @@ function renderBillingDetail(container, record, options = {}) {
                     : `<span>${escapeHtml(formatDateOnly(normalized.billing_completed_time))}</span>`}
             </div>
         </div>
-        ${buildBillingFeeTableHtml("成本信息", "cost_items", normalized.cost_items, {
+        ${legacyBuildBillingFeeTableHtml("成本信息", "cost_items", normalized.cost_items, {
             editable,
             collapsed,
             serialNumber: detailKey
         })}
-        ${buildBillingFeeTableHtml("账单信息", "billing_items", normalized.billing_items, {
+        ${legacyBuildBillingFeeTableHtml("账单信息", "billing_items", normalized.billing_items, {
             editable,
             collapsed,
             serialNumber: detailKey
@@ -1908,7 +1851,7 @@ async function loadOrderBillingDetails(serialNumber) {
     }
 }
 
-async function saveBillingRecord(detailKey) {
+async function legacySaveBillingRecord(detailKey) {
     const container = detailKey === "billingPage"
         ? document.getElementById("billingDetailContainer")
         : document.getElementById("orderBillingContent");
@@ -2275,6 +2218,7 @@ function normalizeBillingRecord(record = null, forcedTemplateKey = "") {
         volume_total: record?.volume_total || "",
         charge_weight: record?.charge_weight || "",
         billing_completed_time: record?.billing_completed_time || "",
+        billing_period: record?.billing_period || record?.billing_period_raw || "",
         billing_template_key: templateKey,
         billing_template_label: templateContext.template.label,
         billing_template_title: templateContext.template.title,
@@ -2285,7 +2229,7 @@ function normalizeBillingRecord(record = null, forcedTemplateKey = "") {
     };
 }
 
-function buildBillingBaseInfoItems(record) {
+function legacyTemplateBuildBillingBaseInfoItems(record) {
     return [
         ...buildCommonOrderFieldItems(record, record?.serial_number || ""),
         ["运输方式", record?.transport_mode || ""],
@@ -2388,7 +2332,7 @@ function buildBillingFeeTableHtml(title, tableType, items, options = {}) {
     `;
 }
 
-function serializeBillingFeeItems(container, tableType, templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
+function legacySerializeBillingFeeItems(container, tableType, templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
     const fieldDefinitions = getBillingTemplateFieldDefinitions(templateKey);
     const rows = Array.from(container.querySelectorAll(`[data-billing-row="${tableType}"]`));
     const items = rows.map((row) => {
@@ -2405,14 +2349,14 @@ function serializeBillingFeeItems(container, tableType, templateKey = BILLING_TE
     return normalizeBillingItemsForPersistence(items, templateKey);
 }
 
-function getBillingDetailContainer(detailKey) {
+function legacyGetBillingDetailContainer(detailKey) {
     return detailKey === "billingPage"
         ? document.getElementById("billingDetailContainer")
         : document.getElementById("orderBillingContent");
 }
 
-function switchBillingTemplate(detailKey) {
-    const container = getBillingDetailContainer(detailKey);
+function legacySwitchBillingTemplate(detailKey) {
+    const container = legacyGetBillingDetailContainer(detailKey);
     if (!container) {
         return;
     }
@@ -2431,8 +2375,8 @@ function switchBillingTemplate(detailKey) {
     draftRecord = {
         ...draftRecord,
         billing_completed_time: billingCompletedTimeInput ? billingCompletedTimeInput.value : (draftRecord.billing_completed_time || ""),
-        cost_items: serializeBillingFeeItems(container, "cost_items", currentTemplateKey),
-        billing_items: serializeBillingFeeItems(container, "billing_items", currentTemplateKey),
+        cost_items: legacySerializeBillingFeeItems(container, "cost_items", currentTemplateKey),
+        billing_items: legacySerializeBillingFeeItems(container, "billing_items", currentTemplateKey),
         billing_template_key: nextTemplateKey
     };
 
@@ -2450,7 +2394,7 @@ function switchBillingTemplate(detailKey) {
     });
 }
 
-function renderBillingDetail(container, record, options = {}) {
+function legacyModalRenderBillingDetail(container, record, options = {}) {
     if (!container) {
         return;
     }
@@ -2517,7 +2461,7 @@ function renderBillingDetail(container, record, options = {}) {
     bindBillingFormulaInputs(container);
 }
 
-async function saveBillingRecord(detailKey) {
+async function legacyTemplateSaveBillingRecord(detailKey) {
     const container = getBillingDetailContainer(detailKey);
     if (!container) {
         return;
@@ -2653,7 +2597,7 @@ function buildBillingFeeEditorTableHtml(tableType, items, options = {}) {
     `;
 }
 
-function serializeBillingFeeItems(container, tableType, templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
+function legacyTemplateSerializeBillingFeeItems(container, tableType, templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
     const fieldDefinitions = getBillingTemplateFieldDefinitions(templateKey);
     const rows = Array.from(container.querySelectorAll(`[data-billing-row="${tableType}"]`));
     const items = rows.map((row) => {
@@ -2901,7 +2845,7 @@ function switchBillingTemplate(detailKey) {
     });
 }
 
-function renderBillingDetail(container, record, options = {}) {
+function legacyTemplateRenderBillingDetail(container, record, options = {}) {
     if (!container) {
         return;
     }
@@ -3011,6 +2955,76 @@ function buildCommonOrderFieldItems(record, serialNumber = "") {
         ["贸易术语", record?.trade_term || ""],
         ["货物品名", getOrderDisplayProductName(record)]
     ];
+}
+
+function syncBillingTableColumns() {
+    const headerRow = document.querySelector("#billingTable thead tr");
+    if (!headerRow) {
+        return;
+    }
+
+    headerRow.innerHTML = getOrderSummaryFieldDefinitions()
+        .map((field) => `<th>${escapeHtml(field.label)}</th>`)
+        .join("");
+}
+
+function buildBillingRecordRow(record) {
+    const serialNumber = record?.serial_number || "";
+    const cells = getOrderSummaryFieldDefinitions().map((field) => {
+        const value = formatOrderSummaryFieldValue(
+            field.key,
+            getOrderSummaryFieldValue(record, field.key)
+        );
+
+        if (field.key === "serial_number") {
+            return `<td><button class="link-button" onclick="showBillingDetail('${escapeHtml(serialNumber)}')">${escapeHtml(value)}</button></td>`;
+        }
+
+        return `<td>${escapeHtml(value)}</td>`;
+    }).join("");
+
+    return `<tr>${cells}</tr>`;
+}
+
+function buildBillingBaseInfoItems(record) {
+    return buildOrderSummaryDetailItems(record, record?.serial_number || "");
+}
+
+function renderBillingDetail(container, record, options = {}) {
+    if (!container) {
+        return;
+    }
+
+    const {
+        editable = true,
+        containerId = "",
+        forcedTemplateKey = ""
+    } = options;
+    const normalized = normalizeBillingRecord(record, forcedTemplateKey);
+    const detailKey = containerId || normalized.serial_number || "billing";
+    const baseItems = buildBillingBaseInfoItems(normalized);
+
+    container.innerHTML = `
+        <div class="detail-grid">${buildDetailGridItems(baseItems)}</div>
+        ${editable ? `
+            <div class="button-group">
+                <button type="button" onclick="showBillingFeeModal('${escapeHtml(detailKey)}', 'cost_items')">\u7f16\u8f91\u6210\u672c\u660e\u7ec6</button>
+                <button type="button" onclick="showBillingFeeModal('${escapeHtml(detailKey)}', 'billing_items')">\u7f16\u8f91\u9500\u552e\u660e\u7ec6</button>
+            </div>
+        ` : ""}
+    `;
+
+    container.dataset.serialNumber = normalized.serial_number || "";
+    container.dataset.detailKey = detailKey;
+    container.dataset.billingTemplateKey = normalized.billing_template_key || BILLING_TEMPLATE_FALLBACK_KEY;
+    container.dataset.billingRecordJson = JSON.stringify(normalized);
+    container.dataset.renderOptions = JSON.stringify({
+        editable,
+        showSaveButton: false,
+        collapsed: true,
+        containerId: detailKey
+    });
+    currentOrderBillingData = normalized;
 }
 
 function getSharedTrackingFieldValue(record, fieldName) {

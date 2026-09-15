@@ -1,10 +1,8 @@
+const orderSummaryFields = require("../../frontend/order_summary_fields");
+
 function normalizeTextValue(value) {
   if (value === undefined || value === null) {
     return "";
-  }
-
-  if (typeof value === "string") {
-    return value.trim();
   }
 
   return String(value).trim();
@@ -19,16 +17,7 @@ function isEmptyReportValue(value) {
 }
 
 function parseStoredFeeItems(value) {
-  if (!isFilledValue(value)) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    return [];
-  }
+  return orderSummaryFields.parseFeeItems(value);
 }
 
 let billingInfoSchemaReadyPromise = null;
@@ -92,32 +81,14 @@ async function ensureReportSchema(db) {
 }
 
 function deriveBillingPeriod(row = {}) {
-  const directBillingPeriod = normalizeTextValue(row.billing_period_raw || row.billing_period);
-  if (directBillingPeriod) {
-    return directBillingPeriod;
-  }
-
-  const periods = [];
-  const seen = new Set();
-
-  parseStoredFeeItems(row.billing_items_raw || row.billing_items).forEach((item) => {
-    const period = normalizeTextValue(item?.billing_period);
-    if (!period || seen.has(period)) {
-      return;
-    }
-
-    seen.add(period);
-    periods.push(period);
-  });
-
-  return periods.join(" / ");
+  return orderSummaryFields.deriveBillingPeriod(row);
 }
 
 function enrichOrderBillingFields(row = {}) {
-  return {
+  return orderSummaryFields.enrichOrderSummaryFields({
     ...row,
     billing_period: deriveBillingPeriod(row),
-  };
+  });
 }
 
 function buildFilledStatusSql(columnName, filledStatus) {
@@ -134,375 +105,57 @@ function buildFilledStatusSql(columnName, filledStatus) {
   return "";
 }
 
-const REPORT_EMPTY_VALUE_TEXT = "\u8be5\u9879\u672a\u586b";
-
-const TOTAL_REPORT_DATE_COLUMN_KEYS = new Set([
-  "receive_date",
-  "pickup_date",
-  "arrival_time",
-  "customs_start_time",
-  "tax_payment_time",
-  "release_time",
-  "arrival_port_time",
-  "clearance_time",
-  "delivery_time",
-  "complete_docs_send_time",
-  "billing_completed_time",
-]);
-
-const TRACKING_REMARK_SOURCES = [
-  { keyPrefix: "pickup_remark", label: "\u63d0\u8d27\u5907\u6ce8" },
-  { keyPrefix: "transfer_remark", label: "\u9001\u8d27\u5907\u6ce8" },
-  { keyPrefix: "customs_remark", label: "\u62a5\u5173\u5907\u6ce8" },
-];
-
-function combineTrackingRemarks(row = {}, remarkNumber) {
-  const values = [];
-  const seenValues = new Set();
-
-  TRACKING_REMARK_SOURCES.forEach(({ keyPrefix, label }) => {
-    const value = normalizeTextValue(row[`${keyPrefix}${remarkNumber}_source`]);
-    if (!value || seenValues.has(value)) {
-      return;
-    }
-
-    seenValues.add(value);
-    values.push({ label, value });
-  });
-
-  if (values.length <= 1) {
-    return values[0]?.value || "";
-  }
-
-  return values.map(({ label, value }) => `${label}\uff1a${value}`).join("\n");
-}
-
-const TOTAL_REPORT_FIELD_DEFINITIONS = [
-  {
-    key: "serial_number",
-    outputKey: "serial_number",
-    section: "base",
-    label: "\u6d41\u6c34\u53f7",
-    getValue: (row) => row.serial_number,
-  },
-  {
-    key: "company_name",
-    outputKey: "company_name",
-    section: "base",
-    label: "\u516c\u53f8\u540d\u79f0",
-    getValue: (row) => row.company_name,
-  },
-  {
-    key: "orderer",
-    outputKey: "orderer",
-    section: "base",
-    label: "\u6307\u4ee4\u4eba",
-    getValue: (row) => row.orderer,
-  },
-  {
-    key: "business_type",
-    outputKey: "business_type",
-    section: "base",
-    label: "\u4e1a\u52a1\u7c7b\u578b",
-    getValue: (row) => row.business_type,
-  },
-  {
-    key: "sender_id",
-    outputKey: "sender_id",
-    section: "base",
-    label: "\u53d1\u4ef6\u4ebaID",
-    getValue: (row) => row.sender_id,
-  },
-  {
-    key: "customer_id",
-    outputKey: "customer_id",
-    section: "base",
-    label: "\u5ba2\u6237ID",
-    getValue: (row) => row.customer_id,
-  },
-  {
-    key: "receive_date",
-    outputKey: "receive_date",
-    section: "base",
-    label: "\u63a5\u6536\u6307\u4ee4\u65e5\u671f",
-    getValue: (row) => row.receive_date,
-  },
-  {
-    key: "origin",
-    outputKey: "origin",
-    section: "base",
-    label: "\u8d77\u59cb\u5730",
-    getValue: (row) => row.order_origin || row.origin,
-  },
-  {
-    key: "destination",
-    outputKey: "destination",
-    section: "base",
-    label: "\u76ee\u7684\u5730",
-    getValue: (row) => row.order_destination || row.destination,
-  },
-  {
-    key: "trade_term",
-    outputKey: "trade_term",
-    section: "base",
-    label: "\u8d38\u6613\u672f\u8bed",
-    getValue: (row) => row.trade_term,
-  },
-  {
-    key: "product_name",
-    outputKey: "product_name",
-    section: "base",
-    label: "\u8d27\u7269\u54c1\u540d",
-    getValue: (row) => row.order_product_name || row.product_name,
-  },
-  {
-    key: "order_remark1",
-    outputKey: "order_remark1",
-    section: "base",
-    label: "\u8ba2\u5355\u5907\u6ce81",
-    getValue: (row) => row.order_remark1,
-  },
-  {
-    key: "order_remark2",
-    outputKey: "order_remark2",
-    section: "base",
-    label: "\u8ba2\u5355\u5907\u6ce82",
-    getValue: (row) => row.order_remark2,
-  },
-  {
-    key: "transport_mode",
-    outputKey: "transport_mode",
-    section: "tracking",
-    label: "\u8fd0\u8f93\u65b9\u5f0f",
-    getValue: (row) => row.transport_mode,
-  },
-  {
-    key: "tracking_number",
-    outputKey: "tracking_number",
-    section: "tracking",
-    label: "\u8fd0\u5355\u53f7",
-    getValue: (row) => row.tracking_number,
-  },
-  {
-    key: "pickup_date",
-    outputKey: "pickup_date",
-    section: "tracking",
-    label: "\u63d0\u8d27\u65f6\u95f4",
-    getValue: (row) => row.pickup_date,
-  },
-  {
-    key: "arrival_time",
-    outputKey: "arrival_time",
-    section: "tracking",
-    label: "\u5230\u8d27\u65f6\u95f4",
-    getValue: (row) => row.arrival_time,
-  },
-  {
-    key: "cargo_flow_info",
-    outputKey: "cargo_flow_info",
-    section: "tracking",
-    label: "\u8d27\u7269\u6d41\u8f6c\u4fe1\u606f",
-    getValue: (row) => row.cargo_flow_info,
-  },
-  {
-    key: "value_added_services",
-    outputKey: "value_added_services",
-    section: "tracking",
-    label: "\u589e\u503c\u670d\u52a1\u5907\u6ce8",
-    getValue: (row) => row.value_added_services,
-  },
-  {
-    key: "remark1",
-    outputKey: "remark1",
-    section: "tracking",
-    label: "\u5907\u6ce81",
-    getValue: (row) => combineTrackingRemarks(row, 1),
-  },
-  {
-    key: "remark2",
-    outputKey: "remark2",
-    section: "tracking",
-    label: "\u5907\u6ce82",
-    getValue: (row) => combineTrackingRemarks(row, 2),
-  },
-  {
-    key: "customs_port",
-    outputKey: "customs_port",
-    section: "customs",
-    label: "\u62a5\u5173\u53e3\u5cb8",
-    getValue: (row) => row.customs_port,
-  },
-  {
-    key: "customs_title",
-    outputKey: "customs_title",
-    section: "customs",
-    label: "\u62a5\u5173\u54c1\u540d",
-    getValue: (row) => row.customs_title,
-  },
-  {
-    key: "customs_start_time",
-    outputKey: "customs_start_time",
-    section: "customs",
-    label: "\u5f00\u59cb\u62a5\u5173\u65f6\u95f4",
-    getValue: (row) => row.customs_start_time,
-  },
-  {
-    key: "tax_payment_time",
-    outputKey: "tax_payment_time",
-    section: "customs",
-    label: "\u4ed8\u7a0e\u65f6\u95f4",
-    getValue: (row) => row.tax_payment_time,
-  },
-  {
-    key: "release_time",
-    outputKey: "release_time",
-    section: "customs",
-    label: "\u653e\u884c\u65f6\u95f4",
-    getValue: (row) => row.release_time,
-  },
-  {
-    key: "customs_declaration_number",
-    outputKey: "customs_declaration_number",
-    section: "customs",
-    label: "\u62a5\u5173\u5355\u53f7",
-    getValue: (row) => row.customs_declaration_number,
-  },
-  {
-    key: "customs_supplier",
-    outputKey: "customs_supplier",
-    section: "customs",
-    label: "\u62a5\u5173\u4f9b\u5e94\u5546",
-    getValue: (row) => row.customs_supplier,
-  },
-  {
-    key: "arrival_port_time",
-    outputKey: "arrival_port_time",
-    section: "delivery",
-    label: "\u5230\u6e2f\u65f6\u95f4",
-    getValue: (row) => row.arrival_port_time,
-  },
-  {
-    key: "clearance_time",
-    outputKey: "clearance_time",
-    section: "delivery",
-    label: "\u6e05\u5173\u65f6\u95f4",
-    getValue: (row) => row.clearance_time,
-  },
-  {
-    key: "delivery_time",
-    outputKey: "delivery_time",
-    section: "delivery",
-    label: "\u9001\u8fbe\u65f6\u95f4",
-    getValue: (row) => row.delivery_time,
-  },
-  {
-    key: "complete_docs_send_time",
-    outputKey: "complete_docs_send_time",
-    section: "delivery",
-    label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4",
-    getValue: (row) => row.complete_docs_send_time,
-  },
-  {
-    key: "billing_completed_time",
-    outputKey: "billing_completed_time",
-    section: "billing",
-    label: "\u65b0\u589e\u8d26\u5355\u5b8c\u6210\u65f6\u95f4",
-    getValue: (row) => row.billing_completed_time,
-  },
-  {
-    key: "billing_period",
-    outputKey: "billing_period",
-    section: "billing",
-    label: "\u8d26\u671f",
-    getValue: (row) => row.billing_period,
-  },
-  {
-    key: "pieces_total",
-    outputKey: "pieces_total",
-    section: "package",
-    label: "\u4ef6\u6570",
-    getValue: (row) => row.pieces_total,
-  },
-  {
-    key: "weight_total",
-    outputKey: "weight_total",
-    section: "package",
-    label: "\u91cd\u91cf",
-    getValue: (row) => row.weight_total,
-  },
-  {
-    key: "volume_total",
-    outputKey: "volume_total",
-    section: "package",
-    label: "\u4f53\u79ef",
-    getValue: (row) => row.volume_total,
-  },
-  {
-    key: "charge_weight_total",
-    outputKey: "charge_weight_total",
-    section: "package",
-    label: "\u8ba1\u8d39\u91cd\u91cf",
-    getValue: (row) => row.charge_weight_total,
-  },
-  {
-    key: "package_remark1",
-    outputKey: "package_remark1",
-    section: "package",
-    label: "\u5305\u88c5\u5907\u6ce81",
-    getValue: (row) => row.package_remark1,
-  },
-  {
-    key: "package_remark2",
-    outputKey: "package_remark2",
-    section: "package",
-    label: "\u5305\u88c5\u5907\u6ce82",
-    getValue: (row) => row.package_remark2,
-  },
-];
-
-function formatReportDateValue(value) {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return `${value.getFullYear()}/${String(value.getMonth() + 1).padStart(2, "0")}/${String(value.getDate()).padStart(2, "0")}`;
-  }
-
-  const dateMatch = String(value).match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-  if (dateMatch) {
-    return `${dateMatch[1]}/${String(dateMatch[2]).padStart(2, "0")}/${String(dateMatch[3]).padStart(2, "0")}`;
-  }
-
-  return normalizeTextValue(value);
-}
-
-function formatTotalReportValue(columnKey, value, options = {}) {
-  const emptyValueText = normalizeTextValue(options.emptyValueText) || REPORT_EMPTY_VALUE_TEXT;
-
-  if (isEmptyReportValue(value)) {
-    return emptyValueText;
-  }
-
-  if (TOTAL_REPORT_DATE_COLUMN_KEYS.has(columnKey)) {
-    return formatReportDateValue(value);
-  }
-
-  return normalizeTextValue(value);
-}
+const REPORT_EMPTY_VALUE_TEXT = orderSummaryFields.ORDER_SUMMARY_EMPTY_VALUE_TEXT;
+const TOTAL_REPORT_FIELD_DEFINITIONS = orderSummaryFields.ORDER_SUMMARY_FIELD_DEFINITIONS;
 
 function normalizeSelectedReportFieldKeys(selectedFieldKeys) {
   if (!Array.isArray(selectedFieldKeys)) {
     return null;
   }
 
+  const allowedKeys = new Set(TOTAL_REPORT_FIELD_DEFINITIONS.map((field) => field.key));
   const seen = new Set();
   return selectedFieldKeys
     .map((fieldKey) => normalizeTextValue(fieldKey))
     .filter((fieldKey) => {
-      if (!fieldKey || seen.has(fieldKey)) {
+      if (!fieldKey || !allowedKeys.has(fieldKey) || seen.has(fieldKey)) {
         return false;
       }
 
       seen.add(fieldKey);
       return true;
     });
+}
+
+function formatTotalReportValue(columnKey, value, options = {}) {
+  return orderSummaryFields.formatOrderSummaryValue(columnKey, value, {
+    emptyValueText: normalizeTextValue(options.emptyValueText) || REPORT_EMPTY_VALUE_TEXT,
+  });
+}
+
+function combineTrackingRemarks(row = {}, remarkNumber) {
+  const sourceDefinitions = [
+    ["pickup_remark", "提货备注"],
+    ["transfer_remark", "送货备注"],
+    ["customs_remark", "报关备注"],
+  ];
+  const values = [];
+  const seen = new Set();
+
+  sourceDefinitions.forEach(([prefix, label]) => {
+    const value = normalizeTextValue(row[`${prefix}${remarkNumber}_source`]);
+    if (!value || seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+    values.push({ label, value });
+  });
+
+  if (values.length === 1) {
+    return values[0].value;
+  }
+
+  return values.map(({ label, value }) => `${label}：${value}`).join("\n");
 }
 
 function buildTotalReportSummaryRows(rows = [], options = {}) {
@@ -514,7 +167,6 @@ function buildTotalReportSummaryRows(rows = [], options = {}) {
 
   const rawRows = normalizedRows.map((row) => {
     const summary = {};
-
     TOTAL_REPORT_FIELD_DEFINITIONS.forEach((field) => {
       const value = field.getValue(row);
       summary[field.key] = value ?? "";
@@ -522,29 +174,11 @@ function buildTotalReportSummaryRows(rows = [], options = {}) {
         hasDataMap.set(field.key, true);
       }
     });
-
     return summary;
   });
 
-  const outputKeys = new Set();
   const columns = TOTAL_REPORT_FIELD_DEFINITIONS
-    .filter((field) => {
-      if (selectedFieldKeySet && !selectedFieldKeySet.has(field.key)) {
-        return false;
-      }
-
-      if (!selectedFieldKeySet && field.key !== "serial_number" && !hasDataMap.get(field.key)) {
-        return false;
-      }
-
-      const outputKey = field.outputKey || field.key;
-      if (outputKeys.has(outputKey)) {
-        return false;
-      }
-
-      outputKeys.add(outputKey);
-      return true;
-    })
+    .filter((field) => selectedFieldKeySet ? selectedFieldKeySet.has(field.key) : field.key === "serial_number" || hasDataMap.get(field.key))
     .map((field) => ({
       key: field.key,
       label: field.label,
@@ -554,19 +188,13 @@ function buildTotalReportSummaryRows(rows = [], options = {}) {
 
   const formattedRows = rawRows.map((row) => {
     const formattedRow = {};
-
     columns.forEach((column) => {
       formattedRow[column.key] = formatTotalReportValue(column.key, row[column.key], { emptyValueText });
     });
-
     return formattedRow;
   });
 
-  return {
-    columns,
-    rows: formattedRows,
-    emptyValueText,
-  };
+  return { columns, rows: formattedRows, emptyValueText };
 }
 
 module.exports = {

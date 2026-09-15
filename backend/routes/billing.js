@@ -1,6 +1,7 @@
 const express = require("express");
 const billingTemplates = require("../../frontend/billing_templates");
 const billingFormula = require("../../frontend/billing_formula");
+const orderSummaryFields = require("../../frontend/order_summary_fields");
 
 const router = express.Router();
 
@@ -69,7 +70,7 @@ function parseStoredFeeItems(value) {
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
+  } catch {
     return [];
   }
 }
@@ -179,6 +180,7 @@ function buildBillingSummarySelect(whereClause = "") {
       o.product_name,
       COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
       t.tracking_number AS tracking_number,
+      t.billing_period AS billing_period_raw,
       pkg.pieces_total,
       pkg.weight_total,
       pkg.volume_total,
@@ -215,6 +217,7 @@ function normalizeBillingRecord(row) {
 
   return {
     ...row,
+    ...orderSummaryFields.enrichOrderSummaryFields(row),
     billing_template_key: templateKey,
     billing_template_label: templateContext.template.label,
     billing_template_title: templateContext.template.title,

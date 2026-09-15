@@ -34,7 +34,7 @@ function parseSelectedReportFields(value) {
     if (Array.isArray(parsed)) {
       return normalizeSelectedReportFieldKeys(parsed);
     }
-  } catch (error) {
+  } catch {
     // Fall back to comma-separated parsing.
   }
 
@@ -88,6 +88,7 @@ function buildReportBaseSql(whereClause = "") {
       t.remark1 AS transfer_remark1_source,
       t.remark2 AS transfer_remark2_source,
       b.billing_completed_time,
+      b.cost_items AS cost_items_raw,
       b.billing_items AS billing_items_raw,
       pkg.pieces_total,
       pkg.weight_total,

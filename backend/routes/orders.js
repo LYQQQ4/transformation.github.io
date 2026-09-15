@@ -115,12 +115,19 @@ function buildOrderSelectSql(whereClause = "") {
       t.complete_docs_send_time AS complete_docs_send_time,
       t.billing_period AS billing_period_raw,
       b.billing_completed_time AS billing_completed_time,
-      b.billing_items AS billing_items_raw
+      b.cost_items AS cost_items_raw,
+      b.billing_items AS billing_items_raw,
+      pkg.pieces_total
     FROM orders o
     LEFT JOIN pickup_transport_tracking p ON p.serial_number = o.serial_number
     LEFT JOIN customs_clearance_tracking c ON c.serial_number = o.serial_number
     LEFT JOIN transfer t ON t.serial_number = o.serial_number
     LEFT JOIN billing_info b ON b.serial_number = o.serial_number
+    LEFT JOIN (
+      SELECT serial_number, SUM(COALESCE(pieces, 0)) AS pieces_total
+      FROM \`package\`
+      GROUP BY serial_number
+    ) pkg ON pkg.serial_number = o.serial_number
     ${whereClause}
   `;
 }
