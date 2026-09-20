@@ -778,7 +778,6 @@ const createPackagesRouter = (db) => {
         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = p.serial_number
         LEFT JOIN transfer t ON t.serial_number = p.serial_number
         ORDER BY p.updated_at DESC, COALESCE(p.package_order, 1) ASC, p.id ASC
-        LIMIT 500
       `);
       res.json({ packages: buildPackageResponseRows(rows, boxTypeMap) });
     } catch (err) {

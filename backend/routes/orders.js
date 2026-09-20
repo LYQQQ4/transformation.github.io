@@ -297,6 +297,55 @@ function normalizeOptionalDateValue(value) {
   return value;
 }
 
+function normalizeBatchReceiveDate(value) {
+  const normalized = normalizeOptionalDateValue(value);
+  if (typeof normalized !== "string") {
+    return null;
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() + 1 !== month ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function normalizeBatchSerialNumbers(value) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const serialNumbers = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (typeof item !== "string" || !item.trim()) {
+      return null;
+    }
+
+    const serialNumber = item.trim();
+    if (!seen.has(serialNumber)) {
+      seen.add(serialNumber);
+      serialNumbers.push(serialNumber);
+    }
+  }
+
+  return serialNumbers.length > 0 ? serialNumbers : null;
+}
+
 function validateRequiredFields(payload, requiredFields, fieldMapping) {
   const errors = [];
 
@@ -443,6 +492,76 @@ module.exports = (db, userDb = null) => {
       res.json({ order: enrichOrderBillingFields(rows[0]) });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.put(["/batch-receive-date", "/batch-date"], async (req, res) => {
+    let connection = null;
+    let transactionStarted = false;
+
+    try {
+      await requireAdminAccess(userDb, req, "批量填写接收指令日期");
+
+      const serialNumbers = normalizeBatchSerialNumbers(req.body?.serial_numbers);
+      if (!serialNumbers) {
+        return res.status(400).json({ error: "serial_numbers must be a non-empty array of strings" });
+      }
+
+      if (req.body?.field !== undefined && req.body.field !== "receive_date") {
+        return res.status(400).json({ error: "field is not allowed for this module" });
+      }
+
+      const receiveDate = normalizeBatchReceiveDate(
+        req.body?.receive_date ?? req.body?.value
+      );
+      if (!receiveDate) {
+        return res.status(400).json({ error: "receive_date must be a valid YYYY-MM-DD date" });
+      }
+
+      connection = await db.getConnection();
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      const placeholders = serialNumbers.map(() => "?").join(", ");
+      const [existingRows] = await connection.execute(
+        `SELECT serial_number FROM orders WHERE serial_number IN (${placeholders})`,
+        serialNumbers
+      );
+      const existingSerialNumbers = new Set(
+        existingRows.map((row) => String(row.serial_number || "").trim())
+      );
+      const foundSerialNumbers = serialNumbers.filter((serialNumber) => existingSerialNumbers.has(serialNumber));
+      const notFoundSerialNumbers = serialNumbers.filter((serialNumber) => !existingSerialNumbers.has(serialNumber));
+
+      if (foundSerialNumbers.length > 0) {
+        const updatePlaceholders = foundSerialNumbers.map(() => "?").join(", ");
+        await connection.execute(
+          `UPDATE orders SET receive_date = ? WHERE serial_number IN (${updatePlaceholders})`,
+          [receiveDate, ...foundSerialNumbers]
+        );
+      }
+
+      await connection.commit();
+      transactionStarted = false;
+
+      return res.json({
+        message: "批量填写接收指令日期完成",
+        module: "order",
+        field: "receive_date",
+        receive_date: receiveDate,
+        value: receiveDate,
+        updated_count: foundSerialNumbers.length,
+        not_found_serial_numbers: notFoundSerialNumbers,
+      });
+    } catch (err) {
+      if (connection && transactionStarted) {
+        await connection.rollback();
+      }
+      return res.status(err.statusCode || 500).json({ error: err.message });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   });
 

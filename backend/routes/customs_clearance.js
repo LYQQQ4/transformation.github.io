@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { sanitizeNullableString } = require("../lib/tracking_fields");
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
+const { requireAdminAccess } = require("../lib/request_auth");
+const { validateBatchDateRequest } = require("../lib/batch_date");
 
 function normalizeCustomsSerialNumber(value) {
   return String(value || "").trim();
@@ -12,7 +14,7 @@ function logCustomsRouteError(routeName, context, error) {
   console.error(`[customs_clearance] ${routeName}${payload}:`, error);
 }
 
-module.exports = (db) => {
+module.exports = (db, userDb = null) => {
   router.get("/", async (req, res) => {
     try {
       const [rows] = await db.execute(`
@@ -35,7 +37,6 @@ module.exports = (db) => {
         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = c.serial_number
         LEFT JOIN transfer t ON t.serial_number = c.serial_number
         ORDER BY c.serial_number DESC
-        LIMIT 100
       `);
       res.json({ records: rows });
     } catch (err) {
@@ -112,6 +113,61 @@ module.exports = (db) => {
     } catch (err) {
       logCustomsRouteError("getBySerial", { serial_number: req.params.serial_number }, err);
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.put("/batch-date", async (req, res) => {
+    let connection = null;
+    let transactionStarted = false;
+
+    try {
+      await requireAdminAccess(userDb, req, "报关板块批量日期修改");
+      const validated = validateBatchDateRequest("customs", req.body);
+      if (validated.error) {
+        return res.status(400).json({ error: validated.error });
+      }
+
+      const { field, definition, serialNumbers, value } = validated;
+      connection = await db.getConnection();
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      const placeholders = serialNumbers.map(() => "?").join(", ");
+      const [rows] = await connection.execute(
+        `SELECT serial_number FROM ${definition.tableName} WHERE serial_number IN (${placeholders})`,
+        serialNumbers
+      );
+      const existing = new Set(rows.map((row) => String(row.serial_number || "").trim()));
+      const found = serialNumbers.filter((serialNumber) => existing.has(serialNumber));
+      const notFound = serialNumbers.filter((serialNumber) => !existing.has(serialNumber));
+
+      if (found.length > 0) {
+        const updatePlaceholders = found.map(() => "?").join(", ");
+        await connection.execute(
+          `UPDATE ${definition.tableName} SET ${definition.columnName} = ? WHERE serial_number IN (${updatePlaceholders})`,
+          [value, ...found]
+        );
+      }
+
+      await connection.commit();
+      transactionStarted = false;
+      return res.json({
+        message: "报关板块日期批量更新完成",
+        module: "customs",
+        field,
+        value,
+        updated_count: found.length,
+        not_found_serial_numbers: notFound,
+      });
+    } catch (err) {
+      if (connection && transactionStarted) {
+        await connection.rollback();
+      }
+      return res.status(err.statusCode || 500).json({ error: err.message });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   });
 

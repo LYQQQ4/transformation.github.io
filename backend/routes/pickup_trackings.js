@@ -5,6 +5,8 @@ const {
   sanitizeNullableString,
 } = require("../lib/tracking_fields");
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
+const { requireAdminAccess } = require("../lib/request_auth");
+const { validateBatchDateRequest } = require("../lib/batch_date");
 
 function normalizeOptionalTrackingValue(value) {
   if (value === undefined || value === null) {
@@ -119,7 +121,7 @@ const PICKUP_SELECT_COLUMNS = `
           o.product_name
 `;
 
-module.exports = (db) => {
+module.exports = (db, userDb = null) => {
   router.get("/", async (req, res) => {
     try {
       const [tableCheck] = await db.execute("SHOW TABLES LIKE 'pickup_transport_tracking'");
@@ -134,7 +136,6 @@ ${PICKUP_SELECT_COLUMNS}
         LEFT JOIN transfer tr ON tr.serial_number = t.serial_number
         LEFT JOIN orders o ON t.serial_number = o.serial_number
         ORDER BY t.created_at DESC
-        LIMIT 20
       `);
       res.json({ pickupTrackings: rows });
     } catch (err) {
@@ -160,6 +161,64 @@ ${PICKUP_SELECT_COLUMNS}
       res.json({ pickupTracking: rows[0] });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.put("/batch-date", async (req, res) => {
+    let connection = null;
+    let transactionStarted = false;
+
+    try {
+      await requireAdminAccess(userDb, req, "提货运输批量日期修改");
+      const validated = validateBatchDateRequest("pickup", req.body);
+      if (validated.error) {
+        return res.status(400).json({ error: validated.error });
+      }
+
+      const { field, definition, serialNumbers, value } = validated;
+      connection = await db.getConnection();
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      const placeholders = serialNumbers.map(() => "?").join(", ");
+      const [rows] = await connection.execute(
+        `SELECT serial_number FROM ${definition.tableName} WHERE serial_number IN (${placeholders})`,
+        serialNumbers
+      );
+      const existing = new Set(rows.map((row) => String(row.serial_number || "").trim()));
+      const found = serialNumbers.filter((serialNumber) => existing.has(serialNumber));
+      const notFound = serialNumbers.filter((serialNumber) => !existing.has(serialNumber));
+
+      for (const serialNumber of found) {
+        await connection.execute(
+          `UPDATE ${definition.tableName} SET ${definition.columnName} = ? WHERE serial_number = ?`,
+          [value, serialNumber]
+        );
+        await syncTrackingFieldsBySerial(connection, serialNumber, {
+          [field]: value,
+          excludeTables: ["pickup_transport_tracking"],
+        });
+      }
+
+      await connection.commit();
+      transactionStarted = false;
+      return res.json({
+        message: "提货运输板块日期批量更新完成",
+        module: "pickup",
+        field,
+        value,
+        updated_count: found.length,
+        not_found_serial_numbers: notFound,
+      });
+    } catch (err) {
+      if (connection && transactionStarted) {
+        await connection.rollback();
+      }
+      return res.status(err.statusCode || 500).json({ error: err.message });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   });
 

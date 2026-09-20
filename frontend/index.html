@@ -611,6 +611,12 @@
                                 <button onclick="searchOrders()">搜索</button>
                             </div>
                         </div>
+                        <div id="batchReceiveDateControls" style="display: none; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px 16px; border: 1px solid #E5E7EB; border-radius: 8px; background-color: #F9FAFB;">
+                            <label for="batchReceiveDate" style="width: auto; margin: 0;">批量填写接收指令日期:</label>
+                            <input type="date" id="batchReceiveDate">
+                            <span>已选择 <strong id="batchReceiveDateSelectedCount">0</strong> 个订单</span>
+                            <button type="button" id="batchReceiveDateButton" onclick="batchFillReceiveDate()" disabled>批量填写日期</button>
+                        </div>
                         <table id="ordersTable">
                             <thead>
                                 <tr>
@@ -812,6 +818,7 @@
                             </thead>
                             <tbody></tbody>
                         </table>
+                        <div id="packagesPagination" style="display: none; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px;"></div>
                     </div>
                 </div>
 
@@ -828,9 +835,20 @@
                                 <button onclick="searchPickupTrackings()">搜索</button>
                             </div>
                         </div>
+                        <div id="pickupBatchDateControls" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px 16px; border: 1px solid #E5E7EB; border-radius: 8px; background-color: #F9FAFB;">
+                            <label for="pickupBatchDateField" style="width: auto; margin: 0;">批量修改字段:</label>
+                            <select id="pickupBatchDateField" onchange="updateBatchDateInputControl('pickup')">
+                                <option value="pickup_date">提货日期</option>
+                                <option value="arrival_time">到货时间</option>
+                            </select>
+                            <input type="date" id="pickupBatchDateValue">
+                            <span>已选择 <strong id="pickupBatchDateSelectedCount">0</strong> 个流水号</span>
+                            <button type="button" id="pickupBatchDateButton" onclick="batchUpdateModuleDate('pickup')" disabled>批量修改日期</button>
+                        </div>
                         <table id="pickupTrackingsTable">
                             <thead>
                                 <tr>
+                                    <th><input type="checkbox" data-batch-order-select-all="pickup" onchange="toggleAllBatchDateSelection('pickup', this)" aria-label="全选提货运输流水号"></th>
                                     <th>流水号</th>
                                     <th>公司名称</th>
                                     <th>指令人</th>
@@ -882,9 +900,23 @@
                                 <button onclick="searchTransfers()">搜索</button>
                             </div>
                         </div>
+                        <div id="transferBatchDateControls" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px 16px; border: 1px solid #E5E7EB; border-radius: 8px; background-color: #F9FAFB;">
+                            <label for="transferBatchDateField" style="width: auto; margin: 0;">批量修改字段:</label>
+                            <select id="transferBatchDateField" onchange="updateBatchDateInputControl('transfer')">
+                                <option value="pickup_date">提货日期</option>
+                                <option value="arrival_port_time">到货时间</option>
+                                <option value="clearance_time">放行时间</option>
+                                <option value="delivery_time">送达时间</option>
+                                <option value="complete_docs_send_time">完整单据回复时间</option>
+                            </select>
+                            <input type="date" id="transferBatchDateValue">
+                            <span>已选择 <strong id="transferBatchDateSelectedCount">0</strong> 个流水号</span>
+                            <button type="button" id="transferBatchDateButton" onclick="batchUpdateModuleDate('transfer')" disabled>批量修改日期</button>
+                        </div>
                         <table id="transfersTable">
                             <thead>
                                 <tr>
+                                    <th><input type="checkbox" data-batch-order-select-all="transfer" onchange="toggleAllBatchDateSelection('transfer', this)" aria-label="全选送货运输流水号"></th>
                                     <th>流水号</th>
                                     <th>公司名称</th>
                                     <th>指令人</th>
@@ -922,9 +954,21 @@
                                 <button onclick="searchCustomsClearance()">搜索</button>
                             </div>
                         </div>
+                        <div id="customsBatchDateControls" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px 16px; border: 1px solid #E5E7EB; border-radius: 8px; background-color: #F9FAFB;">
+                            <label for="customsBatchDateField" style="width: auto; margin: 0;">批量修改字段:</label>
+                            <select id="customsBatchDateField" onchange="updateBatchDateInputControl('customs')">
+                                <option value="customs_start_time">报关开始时间</option>
+                                <option value="tax_payment_time">付税时间</option>
+                                <option value="release_time">放行时间</option>
+                            </select>
+                            <input type="date" id="customsBatchDateValue">
+                            <span>已选择 <strong id="customsBatchDateSelectedCount">0</strong> 个流水号</span>
+                            <button type="button" id="customsBatchDateButton" onclick="batchUpdateModuleDate('customs')" disabled>批量修改日期</button>
+                        </div>
                         <table id="customsTable">
                             <thead>
                                 <tr>
+                                    <th><input type="checkbox" data-batch-order-select-all="customs" onchange="toggleAllBatchDateSelection('customs', this)" aria-label="全选报关流水号"></th>
                                     <th>流水号</th>
                                     <th>公司名称</th>
                                     <th>指令人</th>

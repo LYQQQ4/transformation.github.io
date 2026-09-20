@@ -124,8 +124,8 @@ const userPool = mysql.createPool(userDbConfig);
   // API routes
   app.use("/api/orders", require("./routes/orders")(pool, userPool));
   app.use("/api/packages", require("./routes/packages")(pool));
-  app.use("/api/pickup-trackings", require("./routes/pickup_trackings")(pool));
-  app.use("/api/transfers", require("./routes/transfer")(pool));
+  app.use("/api/pickup-trackings", require("./routes/pickup_trackings")(pool, userPool));
+  app.use("/api/transfers", require("./routes/transfer")(pool, userPool));
   app.use("/api/users", require("./routes/users")(userPool));
   app.use("/api/guests", require("./routes/guests")(userPool));
   app.use("/api/senders", require("./routes/senders")(userPool, pool));
@@ -133,8 +133,8 @@ const userPool = mysql.createPool(userDbConfig);
   app.use("/api/user-profiles", require("./routes/user_profiles")(userPool, pool));
   app.use("/api/input-memory", require("./routes/input_memory")(pool, userPool));
   app.use("/api/products", require("./routes/products")(pool));
-  app.use("/api/customs-clearance", require("./routes/customs_clearance")(pool));
-  app.use("/api/billing", require("./routes/billing")(pool));
+  app.use("/api/customs-clearance", require("./routes/customs_clearance")(pool, userPool));
+  app.use("/api/billing", require("./routes/billing")(pool, userPool));
   app.use("/api/reports", require("./routes/reports")(pool, userPool));
 
   // Serve static files from frontend - AFTER API routes

@@ -220,6 +220,8 @@ function showMainApp() {
         currentUserEl.textContent = currentUser ? currentUser.username : "未知用户";
     }
     updateDeleteOrdersMenuVisibility();
+    updateBatchReceiveDateControlsVisibility();
+    updateAllBatchDateControlsVisibility();
     // 默认显示查看货物订单页面
     showPage("viewOrders");
 }
@@ -706,6 +708,77 @@ function initTransferDateInputs(form) {
 const ORDER_PAGE_VIEW = "viewOrders";
 const ORDER_PAGE_DELETE = "deleteOrders";
 let activeOrderPageContext = ORDER_PAGE_VIEW;
+const selectedOrderSerialNumbers = new Set();
+let batchReceiveDateSubmitting = false;
+const batchDateModuleConfigs = {
+    pickup: {
+        tableId: "pickupTrackingsTable",
+        fieldId: "pickupBatchDateField",
+        valueId: "pickupBatchDateValue",
+        buttonId: "pickupBatchDateButton",
+        countId: "pickupBatchDateSelectedCount",
+        endpoint: `${API_BASE}/pickup-trackings/batch-date`,
+        reload: loadPickupTrackings,
+        fields: {
+            pickup_date: { label: "提货日期", includeTime: false },
+            arrival_time: { label: "到货时间", includeTime: false }
+        }
+    },
+    customs: {
+        tableId: "customsTable",
+        fieldId: "customsBatchDateField",
+        valueId: "customsBatchDateValue",
+        buttonId: "customsBatchDateButton",
+        countId: "customsBatchDateSelectedCount",
+        endpoint: `${API_BASE}/customs-clearance/batch-date`,
+        reload: loadCustomsClearance,
+        fields: {
+            customs_start_time: { label: "报关开始时间", includeTime: false },
+            tax_payment_time: { label: "付税时间", includeTime: false },
+            release_time: { label: "放行时间", includeTime: false }
+        }
+    },
+    transfer: {
+        tableId: "transfersTable",
+        fieldId: "transferBatchDateField",
+        valueId: "transferBatchDateValue",
+        buttonId: "transferBatchDateButton",
+        countId: "transferBatchDateSelectedCount",
+        endpoint: `${API_BASE}/transfers/batch-date`,
+        reload: loadTransfers,
+        fields: {
+            pickup_date: { label: "提货日期", includeTime: false },
+            arrival_port_time: { label: "到货时间", includeTime: false },
+            clearance_time: { label: "放行时间", includeTime: false },
+            delivery_time: { label: "送达时间", includeTime: false },
+            complete_docs_send_time: { label: "完整单据回复时间", includeTime: false }
+        }
+    },
+    billing: {
+        tableId: "billingTable",
+        fieldId: "billingBatchDateField",
+        valueId: "billingBatchDateValue",
+        buttonId: "billingBatchDateButton",
+        countId: "billingBatchDateSelectedCount",
+        endpoint: `${API_BASE}/billing/batch-date`,
+        reload: loadBillingRecords,
+        fields: {
+            billing_completed_time: { label: "账单完成时间", includeTime: false }
+        }
+    }
+};
+const selectedBatchDateSerialNumbers = {
+    pickup: new Set(),
+    customs: new Set(),
+    transfer: new Set(),
+    billing: new Set()
+};
+const batchDateSubmittingState = {
+    pickup: false,
+    customs: false,
+    transfer: false,
+    billing: false
+};
 const orderPageState = {
     [ORDER_PAGE_VIEW]: {
         filters: {},
@@ -729,9 +802,105 @@ const orderPageState = {
     }
 };
 let currentPackageSearchTerm = "";
+const PACKAGE_PAGE_SIZE = 15;
+let currentPackagePage = 1;
+let currentPackageDisplayGroups = [];
+const TABLE_PAGE_SIZE = 15;
+const tablePaginationStates = new Map();
 let currentPickupTrackingSearchTerm = "";
 let currentTransferSearchTerm = "";
 let currentGuestSearchTerm = "";
+
+function getTablePaginationContainerId(tableId) {
+    return `${tableId}Pagination`;
+}
+
+function ensureTablePaginationContainer(tableId) {
+    const table = document.getElementById(tableId);
+    if (!table) {
+        return null;
+    }
+
+    const containerId = getTablePaginationContainerId(tableId);
+    let container = document.getElementById(containerId);
+    if (!container) {
+        container = document.createElement("div");
+        container.id = containerId;
+        container.style.cssText = "display: none; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px;";
+        table.insertAdjacentElement("afterend", container);
+    }
+    return container;
+}
+
+function renderTablePagination(tableId, totalCount, currentPage, totalPages) {
+    const container = ensureTablePaginationContainer(tableId);
+    if (!container) {
+        return;
+    }
+
+    container.style.display = "flex";
+    container.innerHTML = `
+        <span>共 ${totalCount} 条，第 ${currentPage} / ${totalPages} 页</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <button type="button" onclick="changeTablePage('${tableId}', ${currentPage - 1})" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
+            <button type="button" onclick="changeTablePage('${tableId}', ${currentPage + 1})" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
+        </div>
+    `;
+}
+
+function applyRenderedTablePagination(tableId, resetPage = true) {
+    const tbody = document.querySelector(`#${tableId} tbody`);
+    if (!tbody) {
+        return;
+    }
+
+    const state = tablePaginationStates.get(tableId) || { page: 1, rows: [] };
+    state.rows = Array.from(tbody.rows);
+    if (resetPage) {
+        state.page = 1;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(state.rows.length / TABLE_PAGE_SIZE));
+    state.page = Math.min(Math.max(state.page, 1), totalPages);
+    tablePaginationStates.set(tableId, state);
+
+    state.rows.forEach((row, index) => {
+        const start = (state.page - 1) * TABLE_PAGE_SIZE;
+        row.style.display = index >= start && index < start + TABLE_PAGE_SIZE ? "" : "none";
+    });
+    renderTablePagination(tableId, state.rows.length, state.page, totalPages);
+}
+
+function updateTablePaginationSelectionState(tableId) {
+    if (tableId === "ordersTable") {
+        updateBatchReceiveDateSelectionState();
+    }
+    const moduleEntry = Object.entries(batchDateModuleConfigs).find(([, config]) => config.tableId === tableId);
+    if (moduleEntry) {
+        updateBatchDateSelectionState(moduleEntry[0]);
+    }
+}
+
+function changeTablePage(tableId, page) {
+    const state = tablePaginationStates.get(tableId);
+    if (!state) {
+        return;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(state.rows.length / TABLE_PAGE_SIZE));
+    const nextPage = Number(page);
+    if (!Number.isInteger(nextPage) || nextPage < 1 || nextPage > totalPages) {
+        return;
+    }
+
+    state.page = nextPage;
+    state.rows.forEach((row, index) => {
+        const start = (state.page - 1) * TABLE_PAGE_SIZE;
+        row.style.display = index >= start && index < start + TABLE_PAGE_SIZE ? "" : "none";
+    });
+    renderTablePagination(tableId, state.rows.length, state.page, totalPages);
+    updateTablePaginationSelectionState(tableId);
+}
 const REPORT_TYPE_TOTAL = "total";
 const REPORT_EMPTY_VALUE_TEXT = "\u8be5\u9879\u672a\u586b";
 const TOTAL_REPORT_FIELD_GROUPS = [{
@@ -785,6 +954,372 @@ function getOrderPageState(pageName = activeOrderPageContext) {
 
 function isAdminUser() {
     return String(currentUser?.role || "").trim() === "admin";
+}
+
+function updateBatchReceiveDateControlsVisibility() {
+    const controls = document.getElementById("batchReceiveDateControls");
+    if (!controls) {
+        return;
+    }
+
+    controls.style.display = isAdminUser() ? "flex" : "none";
+    if (!isAdminUser()) {
+        clearOrderBatchSelection();
+    } else {
+        updateBatchReceiveDateSelectionState();
+    }
+}
+
+function updateAllBatchDateControlsVisibility() {
+    Object.entries(batchDateModuleConfigs).forEach(([moduleName]) => {
+        const controls = document.getElementById(`${moduleName}BatchDateControls`);
+        if (!controls) {
+            return;
+        }
+        controls.style.display = isAdminUser() ? "flex" : "none";
+        if (!isAdminUser()) {
+            clearBatchDateSelection(moduleName);
+        } else {
+            updateBatchDateInputControl(moduleName, false);
+            updateBatchDateSelectionState(moduleName);
+        }
+    });
+}
+
+function updateBatchReceiveDateSelectionState() {
+    const checkboxes = Array.from(document.querySelectorAll("#ordersTable input[data-order-select]"));
+    const selectAll = document.querySelector("#ordersTable input[data-order-select-all]");
+    const countElement = document.getElementById("batchReceiveDateSelectedCount");
+    const submitButton = document.getElementById("batchReceiveDateButton");
+
+    if (countElement) {
+        countElement.textContent = String(selectedOrderSerialNumbers.size);
+    }
+
+    if (selectAll) {
+        const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+        selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+        selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+    }
+
+    if (submitButton) {
+        submitButton.disabled = batchReceiveDateSubmitting || selectedOrderSerialNumbers.size === 0;
+    }
+}
+
+function clearOrderBatchSelection(clearDate = true) {
+    selectedOrderSerialNumbers.clear();
+    document.querySelectorAll("#ordersTable input[data-order-select]").forEach((checkbox) => {
+        checkbox.checked = false;
+    });
+    const selectAll = document.querySelector("#ordersTable input[data-order-select-all]");
+    if (selectAll) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+    }
+    if (clearDate) {
+        const dateInput = document.getElementById("batchReceiveDate");
+        if (dateInput) {
+            dateInput.value = "";
+        }
+    }
+    updateBatchReceiveDateSelectionState();
+}
+
+function handleOrderSelectionChange(checkbox) {
+    const serialNumber = String(checkbox?.value || "").trim();
+    if (!serialNumber) {
+        return;
+    }
+
+    if (checkbox.checked) {
+        selectedOrderSerialNumbers.add(serialNumber);
+    } else {
+        selectedOrderSerialNumbers.delete(serialNumber);
+    }
+    updateBatchReceiveDateSelectionState();
+}
+
+function toggleAllOrderSelection(checkbox) {
+    const checked = Boolean(checkbox?.checked);
+    document.querySelectorAll("#ordersTable input[data-order-select]").forEach((item) => {
+        item.checked = checked;
+        handleOrderSelectionChange(item);
+    });
+    updateBatchReceiveDateSelectionState();
+}
+
+function isValidLocalDateInput(value) {
+    const normalized = String(value || "").trim();
+    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+        return false;
+    }
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    return !Number.isNaN(date.getTime()) &&
+        date.getFullYear() === year &&
+        date.getMonth() + 1 === month &&
+        date.getDate() === day;
+}
+
+async function batchFillReceiveDate() {
+    if (!isAdminUser()) {
+        showMessage("仅管理员可批量填写接收指令日期", "error");
+        return;
+    }
+
+    const serialNumbers = Array.from(selectedOrderSerialNumbers);
+    const receiveDate = document.getElementById("batchReceiveDate")?.value.trim() || "";
+    if (serialNumbers.length === 0) {
+        showMessage("请先选择要更新的订单", "error");
+        return;
+    }
+    if (!isValidLocalDateInput(receiveDate)) {
+        showMessage("请选择有效的接收指令日期", "error");
+        return;
+    }
+
+    batchReceiveDateSubmitting = true;
+    updateBatchReceiveDateSelectionState();
+
+    try {
+        const response = await fetch(`${API_BASE}/orders/batch-receive-date`, {
+            method: "PUT",
+            headers: getAuthHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({
+                serial_numbers: serialNumbers,
+                receive_date: receiveDate
+            })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "批量填写日期失败");
+        }
+
+        const notFound = Array.isArray(data.not_found_serial_numbers)
+            ? data.not_found_serial_numbers
+            : [];
+        clearOrderBatchSelection();
+        await loadOrders(ORDER_PAGE_VIEW);
+        const notFoundMessage = notFound.length > 0
+            ? `，未找到流水号：${notFound.join("、")}`
+            : "";
+        showMessage(`已更新 ${data.updated_count || 0} 个订单${notFoundMessage}`, notFound.length > 0 ? "info" : "success");
+    } catch (error) {
+        showMessage(`批量填写日期失败: ${error.message}`, "error");
+    } finally {
+        batchReceiveDateSubmitting = false;
+        updateBatchReceiveDateSelectionState();
+    }
+}
+
+function getBatchDateModuleState(moduleName) {
+    return selectedBatchDateSerialNumbers[moduleName] || null;
+}
+
+function getBatchDateFieldConfig(moduleName) {
+    const config = batchDateModuleConfigs[moduleName];
+    const field = document.getElementById(config?.fieldId)?.value || "";
+    return config?.fields?.[field] || null;
+}
+
+function updateBatchDateInputControl(moduleName, clearValue = true) {
+    const config = batchDateModuleConfigs[moduleName];
+    const input = document.getElementById(config?.valueId);
+    const fieldConfig = getBatchDateFieldConfig(moduleName);
+    if (!input || !fieldConfig) {
+        return;
+    }
+
+    input.type = "date";
+    input.step = "1";
+    if (clearValue) {
+        input.value = "";
+    }
+}
+
+function isValidBatchDateInput(value) {
+    const normalized = String(value || "").trim();
+    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+        return false;
+    }
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    if (
+        Number.isNaN(date.getTime()) ||
+        date.getFullYear() !== year ||
+        date.getMonth() + 1 !== month ||
+        date.getDate() !== day
+    ) {
+        return false;
+    }
+
+    return true;
+}
+
+function updateBatchDateSelectionState(moduleName) {
+    const config = batchDateModuleConfigs[moduleName];
+    const selected = getBatchDateModuleState(moduleName);
+    if (!config || !selected) {
+        return;
+    }
+
+    const checkboxes = Array.from(document.querySelectorAll(
+        `#${config.tableId} input[data-batch-order-select="${moduleName}"]`
+    ));
+    const selectAll = document.querySelector(
+        `#${config.tableId} input[data-batch-order-select-all="${moduleName}"]`
+    );
+    const countElement = document.getElementById(config.countId);
+    const submitButton = document.getElementById(config.buttonId);
+
+    if (countElement) {
+        countElement.textContent = String(selected.size);
+    }
+    if (selectAll) {
+        const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+        selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+        selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+    }
+    if (submitButton) {
+        submitButton.disabled = batchDateSubmittingState[moduleName] || selected.size === 0;
+    }
+}
+
+function clearBatchDateSelection(moduleName, clearValue = true) {
+    const config = batchDateModuleConfigs[moduleName];
+    const selected = getBatchDateModuleState(moduleName);
+    if (!config || !selected) {
+        return;
+    }
+
+    selected.clear();
+    document.querySelectorAll(
+        `#${config.tableId} input[data-batch-order-select="${moduleName}"]`
+    ).forEach((checkbox) => {
+        checkbox.checked = false;
+    });
+    const selectAll = document.querySelector(
+        `#${config.tableId} input[data-batch-order-select-all="${moduleName}"]`
+    );
+    if (selectAll) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+    }
+    if (clearValue) {
+        const input = document.getElementById(config.valueId);
+        if (input) {
+            input.value = "";
+        }
+    }
+    updateBatchDateSelectionState(moduleName);
+}
+
+function handleBatchDateSelectionChange(moduleName, checkbox) {
+    const selected = getBatchDateModuleState(moduleName);
+    const serialNumber = String(checkbox?.value || "").trim();
+    if (!selected || !serialNumber) {
+        return;
+    }
+
+    if (checkbox.checked) {
+        selected.add(serialNumber);
+    } else {
+        selected.delete(serialNumber);
+    }
+    updateBatchDateSelectionState(moduleName);
+}
+
+function toggleAllBatchDateSelection(moduleName, checkbox) {
+    const config = batchDateModuleConfigs[moduleName];
+    if (!config) {
+        return;
+    }
+
+    document.querySelectorAll(
+        `#${config.tableId} input[data-batch-order-select="${moduleName}"]`
+    ).forEach((item) => {
+        item.checked = Boolean(checkbox?.checked);
+        handleBatchDateSelectionChange(moduleName, item);
+    });
+    updateBatchDateSelectionState(moduleName);
+}
+
+async function batchUpdateModuleDate(moduleName) {
+    const config = batchDateModuleConfigs[moduleName];
+    const selected = getBatchDateModuleState(moduleName);
+    const field = document.getElementById(config?.fieldId)?.value || "";
+    const input = document.getElementById(config?.valueId);
+    const fieldConfig = config?.fields?.[field];
+
+    if (!config || !selected || !fieldConfig) {
+        showMessage("请选择需要修改的日期字段", "error");
+        return;
+    }
+    if (!isAdminUser()) {
+        showMessage("仅管理员可批量修改日期", "error");
+        return;
+    }
+    if (selected.size === 0) {
+        showMessage("请先选择要更新的流水号", "error");
+        return;
+    }
+
+    const value = input?.value?.trim() || "";
+    if (!isValidBatchDateInput(value)) {
+        showMessage(`请选择有效的${fieldConfig.label}`, "error");
+        return;
+    }
+
+    batchDateSubmittingState[moduleName] = true;
+    updateBatchDateSelectionState(moduleName);
+    try {
+        const response = await fetch(config.endpoint, {
+            method: "PUT",
+            headers: getAuthHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({
+                module: moduleName,
+                field,
+                serial_numbers: Array.from(selected),
+                value
+            })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "批量修改日期失败");
+        }
+
+        const notFound = Array.isArray(data.not_found_serial_numbers)
+            ? data.not_found_serial_numbers
+            : [];
+        clearBatchDateSelection(moduleName);
+        await config.reload();
+        const notFoundMessage = notFound.length > 0
+            ? `，未找到流水号：${notFound.map((item) => escapeHtml(item)).join("、")}`
+            : "";
+        showMessage(
+            `${fieldConfig.label}已更新 ${data.updated_count || 0} 个流水号${notFoundMessage}`,
+            notFound.length > 0 ? "info" : "success"
+        );
+    } catch (error) {
+        showMessage(`批量修改${fieldConfig.label}失败: ${error.message}`, "error");
+    } finally {
+        batchDateSubmittingState[moduleName] = false;
+        updateBatchDateSelectionState(moduleName);
+    }
+}
+
+function buildBatchDateSelectionCell(moduleName, serialNumber) {
+    const safeSerialNumber = escapeHtml(serialNumber || "");
+    return `<td><input type="checkbox" data-batch-order-select="${moduleName}" value="${safeSerialNumber}" onchange="handleBatchDateSelectionChange('${moduleName}', this)" aria-label="选择流水号 ${safeSerialNumber}"></td>`;
 }
 
 function getAuthHeaders(extraHeaders = {}) {
@@ -915,6 +1450,11 @@ function renderReportTable(columns = [], rows = [], emptyValueText = REPORT_EMPT
     if (!columns.length) {
         thead.innerHTML = "";
         tbody.innerHTML = "";
+        const pagination = document.getElementById(getTablePaginationContainerId("reportManagementTable"));
+        if (pagination) {
+            pagination.innerHTML = "";
+            pagination.style.display = "none";
+        }
         return;
     }
 
@@ -925,6 +1465,7 @@ function renderReportTable(columns = [], rows = [], emptyValueText = REPORT_EMPT
             return `<td>${escapeHtml(value)}</td>`;
         }).join("")}</tr>`;
     }).join("");
+    applyRenderedTablePagination("reportManagementTable");
 }
 
 async function legacyQueryReports() {
@@ -1148,6 +1689,13 @@ function ensureOrderIndexStructure(pageName = activeOrderPageContext) {
         `;
     }
 
+    if (tableHead && pageName === ORDER_PAGE_VIEW && !tableHead.querySelector("[data-order-select-all]")) {
+        tableHead.querySelector("tr")?.insertAdjacentHTML(
+            "afterbegin",
+            '<th><input type="checkbox" data-order-select-all onchange="toggleAllOrderSelection(this)" aria-label="全选订单"></th>'
+        );
+    }
+
     const filterForm = document.getElementById("filterFormData");
     if (filterForm && !document.getElementById("filterCompleteDocsSendTimeFilledStatus")) {
         filterForm.innerHTML = `
@@ -1222,6 +1770,10 @@ async function loadOrders(pageName = ORDER_PAGE_VIEW) {
 
 function displayOrders(orders, pageName = activeOrderPageContext) {
     const state = getOrderPageState(pageName);
+    if (pageName === ORDER_PAGE_VIEW) {
+        clearOrderBatchSelection(false);
+    }
+    orders = Array.isArray(orders) ? orders : [];
     // 按照流水号从高到低排序
     orders.sort((a, b) => {
         const aSerial = parseInt(a.serial_number || a.id) || 0;
@@ -1233,6 +1785,10 @@ function displayOrders(orders, pageName = activeOrderPageContext) {
     tbody.innerHTML = "";
     orders.forEach(order => {
         const row = tbody.insertRow();
+        const serialNumber = String(order.serial_number || order.id || "").trim();
+        const selectionCell = pageName === ORDER_PAGE_VIEW
+            ? `<td><input type="checkbox" data-order-select value="${escapeHtml(serialNumber)}" onchange="handleOrderSelectionChange(this)" aria-label="选择订单 ${escapeHtml(serialNumber)}"></td>`
+            : "";
 
         // 格式化日期显示
         let displayDate = "";
@@ -1268,6 +1824,7 @@ function displayOrders(orders, pageName = activeOrderPageContext) {
         displayDate = formatDateOnly(order.receive_date);
 
         row.innerHTML = `
+            ${selectionCell}
             <td><button class="link-button" onclick="showOrderDetails(${order.id})">${order.serial_number || order.id}</button></td>
             <td>${order.company_name}</td>
             <td>${order.orderer}</td>
@@ -1292,6 +1849,7 @@ function displayOrders(orders, pageName = activeOrderPageContext) {
             </td>
         `;
     });
+    applyRenderedTablePagination(state.tableId);
 }
 
 function renderOrderDetailView(order) {
@@ -1648,6 +2206,15 @@ function ensureBillingPageStructure() {
             <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
                 <button type="button" onclick="loadBillingRecords()">加载账单信息</button>
             </div>
+            <div id="billingBatchDateControls" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px 16px; border: 1px solid #E5E7EB; border-radius: 8px; background-color: #F9FAFB;">
+                <label for="billingBatchDateField" style="width: auto; margin: 0;">批量修改字段:</label>
+                <select id="billingBatchDateField" onchange="updateBatchDateInputControl('billing')">
+                    <option value="billing_completed_time">账单完成时间</option>
+                </select>
+                <input type="date" id="billingBatchDateValue">
+                <span>已选择 <strong id="billingBatchDateSelectedCount">0</strong> 个流水号</span>
+                <button type="button" id="billingBatchDateButton" onclick="batchUpdateModuleDate('billing')" disabled>批量修改日期</button>
+            </div>
             <table id="billingTable">
                 <thead>
                     <tr>
@@ -1779,7 +2346,10 @@ async function loadBillingRecords() {
 
         const tbody = document.querySelector("#billingTable tbody");
         if (tbody) {
+            clearBatchDateSelection("billing", false);
             tbody.innerHTML = (data.records || []).map(buildBillingRecordRow).join("");
+            applyRenderedTablePagination("billingTable");
+            updateBatchDateSelectionState("billing");
         }
 
         if (currentBillingSerialNumber) {
@@ -2963,7 +3533,7 @@ function syncBillingTableColumns() {
         return;
     }
 
-    headerRow.innerHTML = getOrderSummaryFieldDefinitions()
+    headerRow.innerHTML = '<th><input type="checkbox" data-batch-order-select-all="billing" onchange="toggleAllBatchDateSelection(\'billing\', this)" aria-label="全选账单流水号"></th>' + getOrderSummaryFieldDefinitions()
         .map((field) => `<th>${escapeHtml(field.label)}</th>`)
         .join("");
 }
@@ -2983,7 +3553,7 @@ function buildBillingRecordRow(record) {
         return `<td>${escapeHtml(value)}</td>`;
     }).join("");
 
-    return `<tr>${cells}</tr>`;
+    return `<tr>${buildBatchDateSelectionCell("billing", serialNumber)}${cells}</tr>`;
 }
 
 function buildBillingBaseInfoItems(record) {
@@ -4079,6 +4649,7 @@ function displayUsers(users) {
             </td>
         `;
     });
+    applyRenderedTablePagination("usersTable");
 }
 
 function showUserForm(user = null) {
@@ -4173,6 +4744,46 @@ async function loadPackages() {
     } catch (error) {
         showMessage("加载包装信息失败: " + error.message, "error");
     }
+}
+
+function ensurePackagePaginationContainer() {
+    const table = document.getElementById("packagesTable");
+    if (!table || document.getElementById("packagesPagination")) {
+        return;
+    }
+
+    const pagination = document.createElement("div");
+    pagination.id = "packagesPagination";
+    pagination.style.cssText = "display: none; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px;";
+    table.insertAdjacentElement("afterend", pagination);
+}
+
+function renderPackagePagination(totalCount) {
+    const pagination = document.getElementById("packagesPagination");
+    if (!pagination) {
+        return;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(totalCount / PACKAGE_PAGE_SIZE));
+    pagination.style.display = "flex";
+    pagination.innerHTML = `
+        <span>共 ${totalCount} 条，第 ${currentPackagePage} / ${totalPages} 页</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <button type="button" onclick="changePackagePage(${currentPackagePage - 1})" ${currentPackagePage <= 1 ? "disabled" : ""}>上一页</button>
+            <button type="button" onclick="changePackagePage(${currentPackagePage + 1})" ${currentPackagePage >= totalPages ? "disabled" : ""}>下一页</button>
+        </div>
+    `;
+}
+
+function changePackagePage(page) {
+    const totalPages = Math.max(1, Math.ceil(currentPackageDisplayGroups.length / PACKAGE_PAGE_SIZE));
+    const nextPage = Number(page);
+    if (!Number.isInteger(nextPage) || nextPage < 1 || nextPage > totalPages) {
+        return;
+    }
+
+    currentPackagePage = nextPage;
+    displayPackages(currentPackageDisplayGroups);
 }
 
 function displayPackages(packages) {
@@ -5058,6 +5669,7 @@ function ensurePackagingPageStructure() {
             </thead>
             <tbody></tbody>
         </table>
+        <div id="packagesPagination" style="display: none; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px;"></div>
     `;
 
     const packagingDbPage = document.getElementById("packagingDBPage");
@@ -5483,15 +6095,23 @@ function updatePackageCardVolume(card) {
 
 function displayPackages(packages) {
     ensurePackagingPageStructure();
+    ensurePackagePaginationContainer();
     const tbody = document.querySelector("#packagesTable tbody");
     if (!tbody) {
         return;
     }
 
     const groupedPackages = Array.isArray(packages?.[0]?.packages) ? packages : groupPackagesBySerial(packages || []);
+    currentPackageDisplayGroups = groupedPackages;
+    const totalPages = Math.max(1, Math.ceil(groupedPackages.length / PACKAGE_PAGE_SIZE));
+    if (currentPackagePage > totalPages) {
+        currentPackagePage = totalPages;
+    }
+    const pageStart = (currentPackagePage - 1) * PACKAGE_PAGE_SIZE;
+    const visibleGroups = groupedPackages.slice(pageStart, pageStart + PACKAGE_PAGE_SIZE);
     tbody.innerHTML = "";
 
-    groupedPackages.forEach(group => {
+    visibleGroups.forEach(group => {
         const row = tbody.insertRow();
         row.innerHTML = `
             <td>${escapeHtml(group.serial_number || "")}</td>
@@ -5514,6 +6134,7 @@ function displayPackages(packages) {
             <td><button type="button" onclick="editPackage('${escapeHtml(group.serial_number || "")}')">编辑</button></td>
         `;
     });
+    renderPackagePagination(groupedPackages.length);
 }
 
 async function loadPackages() {
@@ -5841,6 +6462,7 @@ async function savePackage() {
 function searchPackages() {
     const input = document.getElementById("packageSearchInput");
     currentPackageSearchTerm = input ? input.value.trim() : "";
+    currentPackagePage = 1;
     loadPackages();
 }
 
@@ -6065,6 +6687,7 @@ function displayPackagingDb(boxTypes) {
             </td>
         `;
     });
+    applyRenderedTablePagination("packagingDbTable");
 }
 
 async function loadPackagingDb() {
@@ -6173,11 +6796,14 @@ function displayPickupTrackings(trackings) {
         return;
     }
 
+    clearBatchDateSelection("pickup", false);
     tbody.innerHTML = "";
     trackings.forEach(item => {
         const row = tbody.insertRow();
+        const serialNumber = String(item.serial_number || "").trim();
         row.innerHTML = `
-            <td>${item.serial_number || ""}</td>
+            ${buildBatchDateSelectionCell("pickup", serialNumber)}
+            <td>${escapeHtml(serialNumber)}</td>
             <td>${item.company_name || ""}</td>
             <td>${item.orderer || ""}</td>
             <td>${item.business_type || ""}</td>
@@ -6196,6 +6822,8 @@ function displayPickupTrackings(trackings) {
             <td><button onclick="editPickupTracking('${item.serial_number || ""}')">编辑</button></td>
         `;
     });
+    applyRenderedTablePagination("pickupTrackingsTable");
+    updateBatchDateSelectionState("pickup");
 }
 
 async function editPickupTracking(serialNumber) {
@@ -6505,9 +7133,11 @@ async function loadTransfers() {
 
 function displayTransfers(transfers) {
     const tbody = document.querySelector("#transfersTable tbody");
+    clearBatchDateSelection("transfer", false);
     tbody.innerHTML = "";
     transfers.forEach(transfer => {
         const row = tbody.insertRow();
+        const serialNumber = String(transfer.serial_number || "").trim();
 
         // 格式化日期显示
         const formatDate = (dateStr) => {
@@ -6521,7 +7151,8 @@ function displayTransfers(transfers) {
         };
 
         row.innerHTML = `
-            <td>${transfer.serial_number}</td>
+            ${buildBatchDateSelectionCell("transfer", serialNumber)}
+            <td>${escapeHtml(serialNumber)}</td>
             <td>${transfer.company_name || ""}</td>
             <td>${transfer.orderer || ""}</td>
             <td>${transfer.business_type || ""}</td>
@@ -6538,10 +7169,12 @@ function displayTransfers(transfers) {
             <td>${formatDateOnly(transfer.arrival_port_time)}</td>
             <td>${formatDateOnly(transfer.complete_docs_send_time)}</td>
             <td>
-                <button onclick="editTransfer('${transfer.serial_number}')">编辑</button>
+                <button onclick="editTransfer('${escapeHtml(serialNumber)}')">编辑</button>
             </td>
         `;
     });
+    applyRenderedTablePagination("transfersTable");
+    updateBatchDateSelectionState("transfer");
 }
 
 async function editTransfer(serialNumber) {
@@ -6997,6 +7630,7 @@ function displayGuests(guests) {
             </td>
         `;
     });
+    applyRenderedTablePagination("guestsTable");
 }
 
 function showGuestForm(guest = null) {
@@ -7058,6 +7692,7 @@ function displayProducts(products) {
             </td>
         `;
     });
+    applyRenderedTablePagination("productsTable");
 }
 
 function showProductForm(product = null) {
@@ -7548,6 +8183,7 @@ function displaySenders(senders) {
             </td>
         `;
     });
+    applyRenderedTablePagination("sendersTable");
 }
 
 function showSenderForm(sender = null) {
@@ -7773,6 +8409,7 @@ function displayCustomers(customers) {
             </td>
         `;
     });
+    applyRenderedTablePagination("customersTable");
 }
 
 function showCustomerForm(customer = null) {
@@ -8069,6 +8706,10 @@ window.onload = function() {
     checkAuthState();
     ensureBillingPageStructure();
     ensureOrderBillingSection();
+    updateAllBatchDateControlsVisibility();
+    ["pickup", "customs", "transfer", "billing"].forEach((moduleName) => {
+        updateBatchDateInputControl(moduleName, false);
+    });
 
     initReceiveDateInputs();
 
@@ -8177,12 +8818,15 @@ async function loadCustomsClearance() {
 
 function displayCustomsClearance(records) {
     const tbody = document.querySelector("#customsTable tbody");
+    clearBatchDateSelection("customs", false);
     tbody.innerHTML = "";
     records.forEach(record => {
         const row = tbody.insertRow();
+        const serialNumber = String(record.serial_number || "").trim();
 
         row.innerHTML = `
-            <td>${record.serial_number || ""}</td>
+            ${buildBatchDateSelectionCell("customs", serialNumber)}
+            <td>${escapeHtml(serialNumber)}</td>
             <td>${record.company_name || ""}</td>
             <td>${record.orderer || ""}</td>
             <td>${record.business_type || ""}</td>
@@ -8204,6 +8848,8 @@ function displayCustomsClearance(records) {
             </td>
         `;
     });
+    applyRenderedTablePagination("customsTable");
+    updateBatchDateSelectionState("customs");
 }
 
 async function editCustomsClearance(id) {
