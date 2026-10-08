@@ -148,12 +148,23 @@ async function run() {
   const customsRouter = createCustomsRouter(customsDb, customsUserDb);
   response = await request(
     customsRouter,
+    { field: "receive_date", serial_numbers: ["A001"], value: "2026-09-15" }
+  );
+  assert.strictEqual(response.status, 400);
+  response = await request(
+    customsRouter,
     { field: "tax_payment_time", serial_numbers: ["A001"], value: "2026-02-30" }
   );
   assert.strictEqual(response.status, 400);
   response = await request(
     customsRouter,
     { field: "tax_payment_time", serial_numbers: ["A001"], value: "2026-09-15T10:30" }
+  );
+  assert.strictEqual(response.status, 200);
+  assert.strictEqual(customsDb.state.values.get("A001"), "2026-09-15 10:30:00");
+  response = await request(
+    customsRouter,
+    { field: "tax_payment_time", serial_numbers: ["A001"], value: "2026-09-15T25:30" }
   );
   assert.strictEqual(response.status, 400);
   customsRole = "user";
@@ -168,7 +179,7 @@ async function run() {
     { field: "tax_payment_time", serial_numbers: ["A001"], value: "2026-09-15" }
   );
   assert.strictEqual(response.status, 200);
-  assert.strictEqual(customsDb.state.values.get("A001"), "2026-09-15");
+  assert.strictEqual(customsDb.state.values.get("A001"), "2026-09-15 00:00:00");
 
   const transferDb = createStatefulDb("transfer", { failSync: true });
   const transferRouter = createTransferRouter(transferDb, createUserDb());
@@ -187,8 +198,8 @@ async function run() {
     { field: "arrival_port_time", serial_numbers: ["A001"], value: "2026-09-15" }
   );
   assert.strictEqual(response.status, 200);
-  assert.strictEqual(transferDb.state.values.get("A001"), "2026-09-15");
-  assert.strictEqual(transferDb.state.syncValues.get("A001"), "2026-09-15");
+  assert.strictEqual(transferDb.state.values.get("A001"), "2026-09-15 00:00:00");
+  assert.strictEqual(transferDb.state.syncValues.get("A001"), "2026-09-15 00:00:00");
 
   const billingDb = createStatefulDb("billing");
   response = await request(

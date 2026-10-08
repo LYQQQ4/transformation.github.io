@@ -222,6 +222,7 @@ function showMainApp() {
     updateDeleteOrdersMenuVisibility();
     updateBatchReceiveDateControlsVisibility();
     updateAllBatchDateControlsVisibility();
+    updateOrderBatchDateFieldOptions();
     // 默认显示查看货物订单页面
     showPage("viewOrders");
 }
@@ -709,76 +710,61 @@ const ORDER_PAGE_VIEW = "viewOrders";
 const ORDER_PAGE_DELETE = "deleteOrders";
 let activeOrderPageContext = ORDER_PAGE_VIEW;
 const selectedOrderSerialNumbers = new Set();
-let batchReceiveDateSubmitting = false;
-const batchDateModuleConfigs = {
-    pickup: {
-        tableId: "pickupTrackingsTable",
-        fieldId: "pickupBatchDateField",
-        valueId: "pickupBatchDateValue",
-        buttonId: "pickupBatchDateButton",
-        countId: "pickupBatchDateSelectedCount",
-        endpoint: `${API_BASE}/pickup-trackings/batch-date`,
-        reload: loadPickupTrackings,
+let orderBatchDateSubmitting = false;
+/*
+    order: {
+        endpoint: `${API_BASE}/orders/batch-date`,
         fields: {
-            pickup_date: { label: "提货日期", includeTime: false },
-            arrival_time: { label: "到货时间", includeTime: false }
+            receive_date: { label: "\u63a5\u6536\u6307\u4ee4\u65e5\u671f", includeTime: false }
+        }
+    },
+    pickup: {
+        endpoint: `${API_BASE}/pickup-trackings/batch-date`,
+        fields: {
+            pickup_date: { label: "\u63d0\u8d27\u65e5\u671f", includeTime: false },
+            arrival_time: { label: "\u5230\u8d27\u65f6\u95f4", includeTime: true }
         }
     },
     customs: {
-        tableId: "customsTable",
-        fieldId: "customsBatchDateField",
-        valueId: "customsBatchDateValue",
-        buttonId: "customsBatchDateButton",
-        countId: "customsBatchDateSelectedCount",
         endpoint: `${API_BASE}/customs-clearance/batch-date`,
-        reload: loadCustomsClearance,
         fields: {
-            customs_start_time: { label: "报关开始时间", includeTime: false },
-            tax_payment_time: { label: "付税时间", includeTime: false },
-            release_time: { label: "放行时间", includeTime: false }
+            customs_start_time: { label: "\u62a5\u5173\u5f00\u59cb\u65f6\u95f4", includeTime: true },
+            tax_payment_time: { label: "\u7f34\u7a0e\u65f6\u95f4", includeTime: true },
+            release_time: { label: "\u653e\u884c\u65f6\u95f4", includeTime: true }
         }
     },
     transfer: {
-        tableId: "transfersTable",
-        fieldId: "transferBatchDateField",
-        valueId: "transferBatchDateValue",
-        buttonId: "transferBatchDateButton",
-        countId: "transferBatchDateSelectedCount",
         endpoint: `${API_BASE}/transfers/batch-date`,
-        reload: loadTransfers,
         fields: {
-            pickup_date: { label: "提货日期", includeTime: false },
-            arrival_port_time: { label: "到货时间", includeTime: false },
-            clearance_time: { label: "放行时间", includeTime: false },
-            delivery_time: { label: "送达时间", includeTime: false },
-            complete_docs_send_time: { label: "完整单据回复时间", includeTime: false }
+            pickup_date: { label: "\u63d0\u8d27\u65e5\u671f", includeTime: false },
+            arrival_port_time: { label: "\u5230\u8d27\u65f6\u95f4", includeTime: true },
+            clearance_time: { label: "\u653e\u884c\u65f6\u95f4", includeTime: true },
+            delivery_time: { label: "\u9001\u8fbe\u65f6\u95f4", includeTime: true },
+            complete_docs_send_time: { label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4", includeTime: true }
         }
     },
     billing: {
-        tableId: "billingTable",
-        fieldId: "billingBatchDateField",
-        valueId: "billingBatchDateValue",
-        buttonId: "billingBatchDateButton",
-        countId: "billingBatchDateSelectedCount",
         endpoint: `${API_BASE}/billing/batch-date`,
-        reload: loadBillingRecords,
         fields: {
-            billing_completed_time: { label: "账单完成时间", includeTime: false }
+            billing_completed_time: { label: "\u8d26\u5355\u5b8c\u6210\u65f6\u95f4", includeTime: false }
         }
     }
+*/
+const orderBatchDateFieldMap = {
+    receive_date: { label: "\u63a5\u6536\u6307\u4ee4\u65e5\u671f", includeTime: false },
+    pickup_date: { label: "\u63d0\u8d27\u65e5\u671f", includeTime: false },
+    pickup_arrival_time: { label: "\u63d0\u8d27\u8ddf\u8e2a\u5230\u8d27\u65f6\u95f4", includeTime: true },
+    customs_start_time: { label: "\u62a5\u5173\u5f00\u59cb\u65f6\u95f4", includeTime: true },
+    tax_payment_time: { label: "\u7f34\u7a0e\u65f6\u95f4", includeTime: true },
+    release_time: { label: "\u62a5\u5173\u653e\u884c\u65f6\u95f4", includeTime: true },
+    transfer_pickup_date: { label: "\u8fd0\u8f93\u63d0\u8d27\u65e5\u671f", includeTime: false },
+    arrival_port_time: { label: "\u8fd0\u8f93\u5230\u6e2f\u65f6\u95f4", includeTime: true },
+    clearance_time: { label: "\u8fd0\u8f93\u653e\u884c\u65f6\u95f4", includeTime: true },
+    delivery_time: { label: "\u8fd0\u8f93\u9001\u8fbe\u65f6\u95f4", includeTime: true },
+    complete_docs_send_time: { label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4", includeTime: true },
+    billing_completed_time: { label: "\u8d26\u5355\u5b8c\u6210\u65e5\u671f", includeTime: false }
 };
-const selectedBatchDateSerialNumbers = {
-    pickup: new Set(),
-    customs: new Set(),
-    transfer: new Set(),
-    billing: new Set()
-};
-const batchDateSubmittingState = {
-    pickup: false,
-    customs: false,
-    transfer: false,
-    billing: false
-};
+
 const orderPageState = {
     [ORDER_PAGE_VIEW]: {
         filters: {},
@@ -873,11 +859,7 @@ function applyRenderedTablePagination(tableId, resetPage = true) {
 
 function updateTablePaginationSelectionState(tableId) {
     if (tableId === "ordersTable") {
-        updateBatchReceiveDateSelectionState();
-    }
-    const moduleEntry = Object.entries(batchDateModuleConfigs).find(([, config]) => config.tableId === tableId);
-    if (moduleEntry) {
-        updateBatchDateSelectionState(moduleEntry[0]);
+        updateOrderBatchDateSelectionState();
     }
 }
 
@@ -957,7 +939,7 @@ function isAdminUser() {
 }
 
 function updateBatchReceiveDateControlsVisibility() {
-    const controls = document.getElementById("batchReceiveDateControls");
+    const controls = document.getElementById("orderBatchDateControls");
     if (!controls) {
         return;
     }
@@ -966,31 +948,21 @@ function updateBatchReceiveDateControlsVisibility() {
     if (!isAdminUser()) {
         clearOrderBatchSelection();
     } else {
-        updateBatchReceiveDateSelectionState();
+        updateOrderBatchDateSelectionState();
     }
 }
 
 function updateAllBatchDateControlsVisibility() {
-    Object.entries(batchDateModuleConfigs).forEach(([moduleName]) => {
-        const controls = document.getElementById(`${moduleName}BatchDateControls`);
-        if (!controls) {
-            return;
-        }
-        controls.style.display = isAdminUser() ? "flex" : "none";
-        if (!isAdminUser()) {
-            clearBatchDateSelection(moduleName);
-        } else {
-            updateBatchDateInputControl(moduleName, false);
-            updateBatchDateSelectionState(moduleName);
-        }
-    });
+    updateBatchReceiveDateControlsVisibility();
 }
 
 function updateBatchReceiveDateSelectionState() {
     const checkboxes = Array.from(document.querySelectorAll("#ordersTable input[data-order-select]"));
     const selectAll = document.querySelector("#ordersTable input[data-order-select-all]");
-    const countElement = document.getElementById("batchReceiveDateSelectedCount");
-    const submitButton = document.getElementById("batchReceiveDateButton");
+    const countElement = document.getElementById("orderBatchDateSelectedCount");
+    const submitButton = document.getElementById("orderBatchDateButton");
+    const selectAllButton = document.getElementById("orderBatchDateSelectAllButton");
+    const clearSelectionButton = document.getElementById("orderBatchDateClearSelectionButton");
 
     if (countElement) {
         countElement.textContent = String(selectedOrderSerialNumbers.size);
@@ -1002,8 +974,22 @@ function updateBatchReceiveDateSelectionState() {
         selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
     }
 
+    const fieldConfig = getOrderBatchDateConfig().fieldConfig;
+    const input = document.getElementById("orderBatchDateValue");
+    const hasValue = Boolean(input?.value?.trim());
     if (submitButton) {
-        submitButton.disabled = batchReceiveDateSubmitting || selectedOrderSerialNumbers.size === 0;
+        submitButton.disabled = orderBatchDateSubmitting ||
+            selectedOrderSerialNumbers.size === 0 ||
+            !fieldConfig ||
+            !hasValue;
+    }
+    if (selectAllButton) {
+        selectAllButton.disabled = checkboxes.length === 0;
+        selectAllButton.textContent = checkboxes.length > 0 &&
+            selectedOrderSerialNumbers.size === checkboxes.length ? "取消全选" : "全选";
+    }
+    if (clearSelectionButton) {
+        clearSelectionButton.disabled = selectedOrderSerialNumbers.size === 0;
     }
 }
 
@@ -1018,12 +1004,12 @@ function clearOrderBatchSelection(clearDate = true) {
         selectAll.indeterminate = false;
     }
     if (clearDate) {
-        const dateInput = document.getElementById("batchReceiveDate");
+        const dateInput = document.getElementById("orderBatchDateValue");
         if (dateInput) {
             dateInput.value = "";
         }
     }
-    updateBatchReceiveDateSelectionState();
+    updateOrderBatchDateSelectionState();
 }
 
 function handleOrderSelectionChange(checkbox) {
@@ -1037,258 +1023,119 @@ function handleOrderSelectionChange(checkbox) {
     } else {
         selectedOrderSerialNumbers.delete(serialNumber);
     }
-    updateBatchReceiveDateSelectionState();
+    updateOrderBatchDateSelectionState();
 }
 
 function toggleAllOrderSelection(checkbox) {
-    const checked = Boolean(checkbox?.checked);
-    document.querySelectorAll("#ordersTable input[data-order-select]").forEach((item) => {
+    const items = Array.from(document.querySelectorAll("#ordersTable input[data-order-select]"));
+    const checked = checkbox
+        ? Boolean(checkbox.checked)
+        : !(items.length > 0 && selectedOrderSerialNumbers.size === items.length);
+    items.forEach((item) => {
         item.checked = checked;
         handleOrderSelectionChange(item);
     });
-    updateBatchReceiveDateSelectionState();
+    updateOrderBatchDateSelectionState();
 }
 
-function isValidLocalDateInput(value) {
-    const normalized = String(value || "").trim();
-    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!match) {
-        return false;
-    }
-
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    const date = new Date(year, month - 1, day);
-    return !Number.isNaN(date.getTime()) &&
-        date.getFullYear() === year &&
-        date.getMonth() + 1 === month &&
-        date.getDate() === day;
+function getOrderBatchDateConfig() {
+    const field = document.getElementById("orderBatchDateField")?.value || "";
+    return {
+        field,
+        fieldConfig: orderBatchDateFieldMap[field] || null
+    };
 }
 
-async function batchFillReceiveDate() {
-    if (!isAdminUser()) {
-        showMessage("仅管理员可批量填写接收指令日期", "error");
+function updateOrderBatchDateFieldOptions() {
+    const fieldInput = document.getElementById("orderBatchDateField");
+    if (!fieldInput) {
         return;
     }
 
-    const serialNumbers = Array.from(selectedOrderSerialNumbers);
-    const receiveDate = document.getElementById("batchReceiveDate")?.value.trim() || "";
-    if (serialNumbers.length === 0) {
-        showMessage("请先选择要更新的订单", "error");
-        return;
+    const currentField = fieldInput.value;
+    fieldInput.innerHTML = Object.entries(orderBatchDateFieldMap)
+        .map(([field, definition]) => `<option value="${field}">${definition.label}</option>`)
+        .join("");
+    if (orderBatchDateFieldMap[currentField]) {
+        fieldInput.value = currentField;
     }
-    if (!isValidLocalDateInput(receiveDate)) {
-        showMessage("请选择有效的接收指令日期", "error");
-        return;
-    }
-
-    batchReceiveDateSubmitting = true;
-    updateBatchReceiveDateSelectionState();
-
-    try {
-        const response = await fetch(`${API_BASE}/orders/batch-receive-date`, {
-            method: "PUT",
-            headers: getAuthHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify({
-                serial_numbers: serialNumbers,
-                receive_date: receiveDate
-            })
-        });
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data.error || "批量填写日期失败");
-        }
-
-        const notFound = Array.isArray(data.not_found_serial_numbers)
-            ? data.not_found_serial_numbers
-            : [];
-        clearOrderBatchSelection();
-        await loadOrders(ORDER_PAGE_VIEW);
-        const notFoundMessage = notFound.length > 0
-            ? `，未找到流水号：${notFound.join("、")}`
-            : "";
-        showMessage(`已更新 ${data.updated_count || 0} 个订单${notFoundMessage}`, notFound.length > 0 ? "info" : "success");
-    } catch (error) {
-        showMessage(`批量填写日期失败: ${error.message}`, "error");
-    } finally {
-        batchReceiveDateSubmitting = false;
-        updateBatchReceiveDateSelectionState();
-    }
+    updateOrderBatchDateInputControl();
 }
 
-function getBatchDateModuleState(moduleName) {
-    return selectedBatchDateSerialNumbers[moduleName] || null;
-}
-
-function getBatchDateFieldConfig(moduleName) {
-    const config = batchDateModuleConfigs[moduleName];
-    const field = document.getElementById(config?.fieldId)?.value || "";
-    return config?.fields?.[field] || null;
-}
-
-function updateBatchDateInputControl(moduleName, clearValue = true) {
-    const config = batchDateModuleConfigs[moduleName];
-    const input = document.getElementById(config?.valueId);
-    const fieldConfig = getBatchDateFieldConfig(moduleName);
+function updateOrderBatchDateInputControl() {
+    const input = document.getElementById("orderBatchDateValue");
+    const { fieldConfig } = getOrderBatchDateConfig();
     if (!input || !fieldConfig) {
         return;
     }
 
-    input.type = "date";
-    input.step = "1";
-    if (clearValue) {
-        input.value = "";
-    }
+    input.type = fieldConfig.includeTime ? "datetime-local" : "date";
+    input.step = fieldConfig.includeTime ? "1" : "1";
+    input.value = "";
+    updateOrderBatchDateSelectionState();
 }
 
-function isValidBatchDateInput(value) {
+function updateOrderBatchDateSelectionState() {
+    updateBatchReceiveDateSelectionState();
+}
+
+function isValidOrderBatchDateValue(value, includeTime) {
     const normalized = String(value || "").trim();
-    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const match = includeTime
+        ? normalized.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/)
+        : normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!match) {
         return false;
     }
 
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    const date = new Date(year, month - 1, day);
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
     if (
         Number.isNaN(date.getTime()) ||
-        date.getFullYear() !== year ||
-        date.getMonth() + 1 !== month ||
-        date.getDate() !== day
+        date.getFullYear() !== Number(match[1]) ||
+        date.getMonth() + 1 !== Number(match[2]) ||
+        date.getDate() !== Number(match[3])
     ) {
         return false;
     }
 
-    return true;
+    return !includeTime ||
+        Number(match[4]) <= 23 &&
+        Number(match[5]) <= 59 &&
+        Number(match[6] || 0) <= 59;
 }
 
-function updateBatchDateSelectionState(moduleName) {
-    const config = batchDateModuleConfigs[moduleName];
-    const selected = getBatchDateModuleState(moduleName);
-    if (!config || !selected) {
-        return;
-    }
-
-    const checkboxes = Array.from(document.querySelectorAll(
-        `#${config.tableId} input[data-batch-order-select="${moduleName}"]`
-    ));
-    const selectAll = document.querySelector(
-        `#${config.tableId} input[data-batch-order-select-all="${moduleName}"]`
-    );
-    const countElement = document.getElementById(config.countId);
-    const submitButton = document.getElementById(config.buttonId);
-
-    if (countElement) {
-        countElement.textContent = String(selected.size);
-    }
-    if (selectAll) {
-        const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
-        selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
-        selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
-    }
-    if (submitButton) {
-        submitButton.disabled = batchDateSubmittingState[moduleName] || selected.size === 0;
-    }
-}
-
-function clearBatchDateSelection(moduleName, clearValue = true) {
-    const config = batchDateModuleConfigs[moduleName];
-    const selected = getBatchDateModuleState(moduleName);
-    if (!config || !selected) {
-        return;
-    }
-
-    selected.clear();
-    document.querySelectorAll(
-        `#${config.tableId} input[data-batch-order-select="${moduleName}"]`
-    ).forEach((checkbox) => {
-        checkbox.checked = false;
-    });
-    const selectAll = document.querySelector(
-        `#${config.tableId} input[data-batch-order-select-all="${moduleName}"]`
-    );
-    if (selectAll) {
-        selectAll.checked = false;
-        selectAll.indeterminate = false;
-    }
-    if (clearValue) {
-        const input = document.getElementById(config.valueId);
-        if (input) {
-            input.value = "";
-        }
-    }
-    updateBatchDateSelectionState(moduleName);
-}
-
-function handleBatchDateSelectionChange(moduleName, checkbox) {
-    const selected = getBatchDateModuleState(moduleName);
-    const serialNumber = String(checkbox?.value || "").trim();
-    if (!selected || !serialNumber) {
-        return;
-    }
-
-    if (checkbox.checked) {
-        selected.add(serialNumber);
-    } else {
-        selected.delete(serialNumber);
-    }
-    updateBatchDateSelectionState(moduleName);
-}
-
-function toggleAllBatchDateSelection(moduleName, checkbox) {
-    const config = batchDateModuleConfigs[moduleName];
-    if (!config) {
-        return;
-    }
-
-    document.querySelectorAll(
-        `#${config.tableId} input[data-batch-order-select="${moduleName}"]`
-    ).forEach((item) => {
-        item.checked = Boolean(checkbox?.checked);
-        handleBatchDateSelectionChange(moduleName, item);
-    });
-    updateBatchDateSelectionState(moduleName);
-}
-
-async function batchUpdateModuleDate(moduleName) {
-    const config = batchDateModuleConfigs[moduleName];
-    const selected = getBatchDateModuleState(moduleName);
-    const field = document.getElementById(config?.fieldId)?.value || "";
-    const input = document.getElementById(config?.valueId);
-    const fieldConfig = config?.fields?.[field];
-
-    if (!config || !selected || !fieldConfig) {
-        showMessage("请选择需要修改的日期字段", "error");
-        return;
-    }
+async function batchUpdateOrderDate() {
     if (!isAdminUser()) {
         showMessage("仅管理员可批量修改日期", "error");
         return;
     }
-    if (selected.size === 0) {
+
+    const { field, fieldConfig } = getOrderBatchDateConfig();
+    const input = document.getElementById("orderBatchDateValue");
+    const value = input?.value?.trim() || "";
+    const serialNumbers = Array.from(selectedOrderSerialNumbers);
+    if (serialNumbers.length === 0) {
         showMessage("请先选择要更新的流水号", "error");
         return;
     }
-
-    const value = input?.value?.trim() || "";
-    if (!isValidBatchDateInput(value)) {
-        showMessage(`请选择有效的${fieldConfig.label}`, "error");
+    if (!fieldConfig) {
+        showMessage("请选择要修改的日期字段", "error");
+        return;
+    }
+    if (!isValidOrderBatchDateValue(value, fieldConfig.includeTime)) {
+        showMessage(`请输入有效的${fieldConfig.label}`, "error");
         return;
     }
 
-    batchDateSubmittingState[moduleName] = true;
-    updateBatchDateSelectionState(moduleName);
+    orderBatchDateSubmitting = true;
+    updateOrderBatchDateSelectionState();
     try {
-        const response = await fetch(config.endpoint, {
+        const response = await fetch(`${API_BASE}/orders/batch-date`, {
             method: "PUT",
             headers: getAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({
-                module: moduleName,
                 field,
-                serial_numbers: Array.from(selected),
+                serial_numbers: serialNumbers,
                 value
             })
         });
@@ -1300,26 +1147,21 @@ async function batchUpdateModuleDate(moduleName) {
         const notFound = Array.isArray(data.not_found_serial_numbers)
             ? data.not_found_serial_numbers
             : [];
-        clearBatchDateSelection(moduleName);
-        await config.reload();
-        const notFoundMessage = notFound.length > 0
-            ? `，未找到流水号：${notFound.map((item) => escapeHtml(item)).join("、")}`
+        clearOrderBatchSelection();
+        await loadOrders(ORDER_PAGE_VIEW);
+        const suffix = notFound.length > 0
+            ? `，未找到流水号：${notFound.join("、")}`
             : "";
         showMessage(
-            `${fieldConfig.label}已更新 ${data.updated_count || 0} 个流水号${notFoundMessage}`,
+            `${fieldConfig.label}已更新 ${data.updated_count || 0} 个流水号${suffix}`,
             notFound.length > 0 ? "info" : "success"
         );
     } catch (error) {
         showMessage(`批量修改${fieldConfig.label}失败: ${error.message}`, "error");
     } finally {
-        batchDateSubmittingState[moduleName] = false;
-        updateBatchDateSelectionState(moduleName);
+        orderBatchDateSubmitting = false;
+        updateOrderBatchDateSelectionState();
     }
-}
-
-function buildBatchDateSelectionCell(moduleName, serialNumber) {
-    const safeSerialNumber = escapeHtml(serialNumber || "");
-    return `<td><input type="checkbox" data-batch-order-select="${moduleName}" value="${safeSerialNumber}" onchange="handleBatchDateSelectionChange('${moduleName}', this)" aria-label="选择流水号 ${safeSerialNumber}"></td>`;
 }
 
 function getAuthHeaders(extraHeaders = {}) {
@@ -2206,15 +2048,6 @@ function ensureBillingPageStructure() {
             <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
                 <button type="button" onclick="loadBillingRecords()">加载账单信息</button>
             </div>
-            <div id="billingBatchDateControls" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px 16px; border: 1px solid #E5E7EB; border-radius: 8px; background-color: #F9FAFB;">
-                <label for="billingBatchDateField" style="width: auto; margin: 0;">批量修改字段:</label>
-                <select id="billingBatchDateField" onchange="updateBatchDateInputControl('billing')">
-                    <option value="billing_completed_time">账单完成时间</option>
-                </select>
-                <input type="date" id="billingBatchDateValue">
-                <span>已选择 <strong id="billingBatchDateSelectedCount">0</strong> 个流水号</span>
-                <button type="button" id="billingBatchDateButton" onclick="batchUpdateModuleDate('billing')" disabled>批量修改日期</button>
-            </div>
             <table id="billingTable">
                 <thead>
                     <tr>
@@ -2346,10 +2179,8 @@ async function loadBillingRecords() {
 
         const tbody = document.querySelector("#billingTable tbody");
         if (tbody) {
-            clearBatchDateSelection("billing", false);
             tbody.innerHTML = (data.records || []).map(buildBillingRecordRow).join("");
             applyRenderedTablePagination("billingTable");
-            updateBatchDateSelectionState("billing");
         }
 
         if (currentBillingSerialNumber) {
@@ -3533,7 +3364,7 @@ function syncBillingTableColumns() {
         return;
     }
 
-    headerRow.innerHTML = '<th><input type="checkbox" data-batch-order-select-all="billing" onchange="toggleAllBatchDateSelection(\'billing\', this)" aria-label="全选账单流水号"></th>' + getOrderSummaryFieldDefinitions()
+    headerRow.innerHTML = getOrderSummaryFieldDefinitions()
         .map((field) => `<th>${escapeHtml(field.label)}</th>`)
         .join("");
 }
@@ -3553,7 +3384,7 @@ function buildBillingRecordRow(record) {
         return `<td>${escapeHtml(value)}</td>`;
     }).join("");
 
-    return `<tr>${buildBatchDateSelectionCell("billing", serialNumber)}${cells}</tr>`;
+    return `<tr>${cells}</tr>`;
 }
 
 function buildBillingBaseInfoItems(record) {
@@ -6796,13 +6627,11 @@ function displayPickupTrackings(trackings) {
         return;
     }
 
-    clearBatchDateSelection("pickup", false);
     tbody.innerHTML = "";
     trackings.forEach(item => {
         const row = tbody.insertRow();
         const serialNumber = String(item.serial_number || "").trim();
         row.innerHTML = `
-            ${buildBatchDateSelectionCell("pickup", serialNumber)}
             <td>${escapeHtml(serialNumber)}</td>
             <td>${item.company_name || ""}</td>
             <td>${item.orderer || ""}</td>
@@ -6823,7 +6652,6 @@ function displayPickupTrackings(trackings) {
         `;
     });
     applyRenderedTablePagination("pickupTrackingsTable");
-    updateBatchDateSelectionState("pickup");
 }
 
 async function editPickupTracking(serialNumber) {
@@ -7133,7 +6961,6 @@ async function loadTransfers() {
 
 function displayTransfers(transfers) {
     const tbody = document.querySelector("#transfersTable tbody");
-    clearBatchDateSelection("transfer", false);
     tbody.innerHTML = "";
     transfers.forEach(transfer => {
         const row = tbody.insertRow();
@@ -7151,7 +6978,6 @@ function displayTransfers(transfers) {
         };
 
         row.innerHTML = `
-            ${buildBatchDateSelectionCell("transfer", serialNumber)}
             <td>${escapeHtml(serialNumber)}</td>
             <td>${transfer.company_name || ""}</td>
             <td>${transfer.orderer || ""}</td>
@@ -7174,7 +7000,6 @@ function displayTransfers(transfers) {
         `;
     });
     applyRenderedTablePagination("transfersTable");
-    updateBatchDateSelectionState("transfer");
 }
 
 async function editTransfer(serialNumber) {
@@ -8707,10 +8532,6 @@ window.onload = function() {
     ensureBillingPageStructure();
     ensureOrderBillingSection();
     updateAllBatchDateControlsVisibility();
-    ["pickup", "customs", "transfer", "billing"].forEach((moduleName) => {
-        updateBatchDateInputControl(moduleName, false);
-    });
-
     initReceiveDateInputs();
 
     // Add event listener for search input (Enter key)
@@ -8818,14 +8639,12 @@ async function loadCustomsClearance() {
 
 function displayCustomsClearance(records) {
     const tbody = document.querySelector("#customsTable tbody");
-    clearBatchDateSelection("customs", false);
     tbody.innerHTML = "";
     records.forEach(record => {
         const row = tbody.insertRow();
         const serialNumber = String(record.serial_number || "").trim();
 
         row.innerHTML = `
-            ${buildBatchDateSelectionCell("customs", serialNumber)}
             <td>${escapeHtml(serialNumber)}</td>
             <td>${record.company_name || ""}</td>
             <td>${record.orderer || ""}</td>
@@ -8849,7 +8668,6 @@ function displayCustomsClearance(records) {
         `;
     });
     applyRenderedTablePagination("customsTable");
-    updateBatchDateSelectionState("customs");
 }
 
 async function editCustomsClearance(id) {

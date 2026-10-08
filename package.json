@@ -15,6 +15,7 @@
     "test:order-summary": "node scripts/order_management_feature_test.js && node scripts/report_management_feature_test.js",
     "test:batch-receive-date": "node scripts/batch_receive_date_test.js",
     "test:batch-date-modules": "node scripts/batch_date_modules_test.js",
+    "test:batch-date-unified": "node scripts/batch_date_unified_test.js",
     "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:stop": "pm2 stop ecosystem.config.js",
     "pm2:restart": "pm2 restart ecosystem.config.js",

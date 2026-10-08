@@ -17,6 +17,10 @@ const {
 } = require("../lib/reporting");
 const { createHttpError, requireAdminAccess } = require("../lib/request_auth");
 const { validateUserProfileId } = require("../lib/user_profiles");
+const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
+const {
+  validateUnifiedBatchDateRequest,
+} = require("../lib/batch_date");
 
 // 配置multer用于文件上传
 const upload = multer({
@@ -495,7 +499,98 @@ module.exports = (db, userDb = null) => {
     }
   });
 
-  router.put(["/batch-receive-date", "/batch-date"], async (req, res) => {
+  // Unified batch date entry point for the order list page.
+  router.put("/batch-date", async (req, res) => {
+    let connection = null;
+    let transactionStarted = false;
+
+    try {
+      await requireAdminAccess(userDb, req, "统一批量日期修改");
+      const validated = validateUnifiedBatchDateRequest(req.body);
+      if (validated.error) {
+        return res.status(400).json({ error: validated.error });
+      }
+
+      const { field, definition, serialNumbers, value } = validated;
+      if (definition.moduleName === "billing") {
+        await ensureBillingInfoSchema(db);
+      }
+
+      connection = await db.getConnection();
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      const placeholders = serialNumbers.map(() => "?").join(", ");
+      const lookupTableName = definition.moduleName === "billing"
+        ? "orders"
+        : definition.tableName;
+      const [existingRows] = await connection.execute(
+        `SELECT serial_number FROM ${lookupTableName} WHERE serial_number IN (${placeholders})`,
+        serialNumbers
+      );
+      const existingSerialNumbers = new Set(
+        existingRows.map((row) => String(row.serial_number || "").trim())
+      );
+      const foundSerialNumbers = serialNumbers.filter((serialNumber) => existingSerialNumbers.has(serialNumber));
+      const notFoundSerialNumbers = serialNumbers.filter((serialNumber) => !existingSerialNumbers.has(serialNumber));
+
+      if (definition.moduleName === "billing") {
+        for (const serialNumber of foundSerialNumbers) {
+          await connection.execute(
+            `INSERT INTO ${definition.tableName} (serial_number, ${definition.columnName})
+             VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE ${definition.columnName} = VALUES(${definition.columnName})`,
+            [serialNumber, value]
+          );
+        }
+      } else if (foundSerialNumbers.length > 0) {
+        const updatePlaceholders = foundSerialNumbers.map(() => "?").join(", ");
+        await connection.execute(
+          `UPDATE ${definition.tableName}
+           SET ${definition.columnName} = ?
+           WHERE serial_number IN (${updatePlaceholders})`,
+          [value, ...foundSerialNumbers]
+        );
+
+        if (definition.moduleName === "pickup" || definition.moduleName === "transfer") {
+          const syncField = field === "transfer_pickup_date"
+            ? "pickup_date"
+            : (field === "pickup_arrival_time" ? "arrival_time" : field);
+          const shouldSync = definition.moduleName === "pickup" ||
+            syncField === "pickup_date" ||
+            syncField === "arrival_port_time";
+          if (shouldSync) {
+            for (const serialNumber of foundSerialNumbers) {
+              await syncTrackingFieldsBySerial(connection, serialNumber, {
+                [syncField]: value,
+                excludeTables: [definition.tableName],
+              });
+            }
+          }
+        }
+      }
+
+      await connection.commit();
+      transactionStarted = false;
+      return res.json({
+        message: "批量填写日期成功",
+        field,
+        updated_count: foundSerialNumbers.length,
+        not_found_serial_numbers: notFoundSerialNumbers,
+      });
+    } catch (err) {
+      if (connection && transactionStarted) {
+        await connection.rollback();
+      }
+      return res.status(err.statusCode || 500).json({ error: err.message });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
+    }
+  });
+
+  router.put("/batch-receive-date", async (req, res) => {
     let connection = null;
     let transactionStarted = false;
 

@@ -147,8 +147,13 @@ async function run() {
   state.failUpdate = false;
 
   const frontend = require("fs").readFileSync("frontend/app.js", "utf8");
+  const frontendHtml = require("fs").readFileSync("frontend/index.html", "utf8");
   assert.ok(frontend.includes("data-order-select-all"));
-  assert.ok(frontend.includes("batchFillReceiveDate"));
+  assert.ok(!frontend.includes("orderBatchDateModule"));
+  assert.ok(frontend.includes("orderBatchDateFieldMap"));
+  assert.ok(frontend.includes("batchUpdateOrderDate"));
+  assert.ok(frontendHtml.includes('id="orderBatchDateField"'));
+  assert.ok(frontendHtml.includes("oninput=\"updateOrderBatchDateSelectionState()\""));
   assert.ok(frontend.includes("clearOrderBatchSelection(false)"));
 
   console.log("batch_receive_date_test: ok");
