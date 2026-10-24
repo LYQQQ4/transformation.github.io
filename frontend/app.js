@@ -1518,7 +1518,7 @@ function ensureOrderIndexStructure(pageName = activeOrderPageContext) {
                 <th>接收指令日期</th>
                 <th>起始地</th>
                 <th>目的地</th>
-                <th>贸易术语</th>
+                <th>${pageName === ORDER_PAGE_VIEW ? "运单号" : "贸易术语"}</th>
                 <th>货物品名</th>
                 <th>提货时间</th>
                 <th>开始报关时间</th>
@@ -1676,7 +1676,7 @@ function displayOrders(orders, pageName = activeOrderPageContext) {
             <td>${displayDate}</td>
             <td>${order.origin}</td>
             <td>${order.destination}</td>
-            <td>${order.trade_term || ""}</td>
+            <td>${pageName === ORDER_PAGE_VIEW ? (order.tracking_number || "") : (order.trade_term || "")}</td>
             <td>${order.product_name || ""}</td>
             <td>${formatDateOnly(order.pickup_date)}</td>
             <td>${formatDateOnly(order.customs_start_time)}</td>
@@ -2620,6 +2620,8 @@ function normalizeBillingRecord(record = null, forcedTemplateKey = "") {
         charge_weight: record?.charge_weight || "",
         billing_completed_time: record?.billing_completed_time || "",
         billing_period: record?.billing_period || record?.billing_period_raw || "",
+        cost_total: record?.cost_total,
+        sales_total: record?.sales_total,
         billing_template_key: templateKey,
         billing_template_label: templateContext.template.label,
         billing_template_title: templateContext.template.title,
@@ -3396,23 +3398,12 @@ function renderBillingDetail(container, record, options = {}) {
         return;
     }
 
-    const {
-        editable = true,
-        containerId = "",
-        forcedTemplateKey = ""
-    } = options;
-    const normalized = normalizeBillingRecord(record, forcedTemplateKey);
-    const detailKey = containerId || normalized.serial_number || "billing";
+    const normalized = normalizeBillingRecord(record, options.forcedTemplateKey || "");
+    const detailKey = options.containerId || normalized.serial_number || "billing";
     const baseItems = buildBillingBaseInfoItems(normalized);
 
     container.innerHTML = `
         <div class="detail-grid">${buildDetailGridItems(baseItems)}</div>
-        ${editable ? `
-            <div class="button-group">
-                <button type="button" onclick="showBillingFeeModal('${escapeHtml(detailKey)}', 'cost_items')">\u7f16\u8f91\u6210\u672c\u660e\u7ec6</button>
-                <button type="button" onclick="showBillingFeeModal('${escapeHtml(detailKey)}', 'billing_items')">\u7f16\u8f91\u9500\u552e\u660e\u7ec6</button>
-            </div>
-        ` : ""}
     `;
 
     container.dataset.serialNumber = normalized.serial_number || "";
@@ -3420,7 +3411,7 @@ function renderBillingDetail(container, record, options = {}) {
     container.dataset.billingTemplateKey = normalized.billing_template_key || BILLING_TEMPLATE_FALLBACK_KEY;
     container.dataset.billingRecordJson = JSON.stringify(normalized);
     container.dataset.renderOptions = JSON.stringify({
-        editable,
+        editable: false,
         showSaveButton: false,
         collapsed: true,
         containerId: detailKey
@@ -4245,7 +4236,7 @@ async function saveOrder() {
         if (form.dataset.editId) {
             response = await fetch(`${API_BASE}/orders/${form.dataset.editId}`, {
                 method: "PUT",
-                headers: { "Content-Type": "application/json" },
+                headers: getAuthHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify(orderData)
             });
         } else {
@@ -6744,11 +6735,11 @@ function showPickupTrackingForm(trackingData = null) {
                 </div>
                 <div class="form-group">
                     <label>备注1:</label>
-                    <textarea id="pickupTrackingRemark1"></textarea>
+                    <textarea id="pickupTrackingRemark1" maxlength="1000"></textarea>
                 </div>
                 <div class="form-group">
                     <label>备注2:</label>
-                    <textarea id="pickupTrackingRemark2"></textarea>
+                    <textarea id="pickupTrackingRemark2" maxlength="1000"></textarea>
                 </div>
                 <div class="button-group">
                     <button type="button" onclick="savePickupTracking()">保存</button>
@@ -6892,7 +6883,7 @@ async function savePickupTracking() {
     try {
         const response = await fetch(`${API_BASE}/pickup-trackings/serial/${encodeURIComponent(serialNumber)}`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: getAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(payload)
         });
 
@@ -7094,11 +7085,11 @@ function showTransferForm(transferData = null) {
                 </div>
                 <div class="form-group">
                     <label>备注1:</label>
-                    <textarea id="transferRemark1"></textarea>
+                    <textarea id="transferRemark1" maxlength="1000"></textarea>
                 </div>
                 <div class="form-group">
                     <label>备注2:</label>
-                    <textarea id="transferRemark2"></textarea>
+                    <textarea id="transferRemark2" maxlength="1000"></textarea>
                 </div>
                 <div class="button-group">
                     <button type="button" onclick="saveTransfer()">保存</button>
@@ -7243,7 +7234,7 @@ async function saveTransfer() {
         const encoded = encodeURIComponent(serialNumber);
         const response = await fetch(`${API_BASE}/transfers/serial/${encoded}`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: getAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(transferData)
         });
 
@@ -8754,11 +8745,11 @@ function showCustomsForm(recordData = null) {
                 </div>
                 <div class="form-group">
                     <label>备注1:</label>
-                    <textarea id="customsRemark1"></textarea>
+                    <textarea id="customsRemark1" maxlength="1000"></textarea>
                 </div>
                 <div class="form-group">
                     <label>备注2:</label>
-                    <textarea id="customsRemark2"></textarea>
+                    <textarea id="customsRemark2" maxlength="1000"></textarea>
                 </div>
                 <div class="button-group">
                     <button type="button" onclick="saveCustomsClearance()">保存</button>
@@ -8891,7 +8882,7 @@ async function saveCustomsClearance() {
             // 更新现有记录
             response = await fetch(`${API_BASE}/customs-clearance/${id}`, {
                 method: "PUT",
-                headers: { "Content-Type": "application/json" },
+                headers: getAuthHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify(recordData)
             });
         } else {
@@ -8902,14 +8893,14 @@ async function saveCustomsClearance() {
                 const existingData = await checkResponse.json();
                 response = await fetch(`${API_BASE}/customs-clearance/${existingData.record.id}`, {
                     method: "PUT",
-                    headers: { "Content-Type": "application/json" },
+                    headers: getAuthHeaders({ "Content-Type": "application/json" }),
                     body: JSON.stringify(recordData)
                 });
             } else if (checkResponse.status === 404) {
                 // 记录不存在，创建新记录
                 response = await fetch(`${API_BASE}/customs-clearance`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: getAuthHeaders({ "Content-Type": "application/json" }),
                     body: JSON.stringify(recordData)
                 });
             } else {

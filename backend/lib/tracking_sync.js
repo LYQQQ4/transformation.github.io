@@ -62,8 +62,6 @@ async function syncTrackingFieldsBySerial(connection, serialNumber, payload = {}
         { payloadKey: "contract_number", columnName: "contract_number" },
         { payloadKey: "cargo_flow_info", columnName: "cargo_flow_info" },
         { payloadKey: "value_added_services", columnName: "value_added_services" },
-        { payloadKey: "remark1", columnName: "remark1" },
-        { payloadKey: "remark2", columnName: "remark2" },
       ],
     });
   }
@@ -84,24 +82,10 @@ async function syncTrackingFieldsBySerial(connection, serialNumber, payload = {}
         { payloadKey: "contract_number", columnName: "contract_number" },
         { payloadKey: "cargo_flow_info", columnName: "cargo_flow_info" },
         { payloadKey: "value_added_services", columnName: "value_added_services" },
-        { payloadKey: "remark1", columnName: "remark1" },
-        { payloadKey: "remark2", columnName: "remark2" },
       ],
     });
   }
 
-  if (!excludeTables.has("customs_clearance_tracking")) {
-    await executeSyncUpdate(connection, {
-      tableName: "customs_clearance_tracking",
-      serialNumber,
-      payload,
-      required: true,
-      fieldMappings: [
-        { payloadKey: "remark1", columnName: "remark1" },
-        { payloadKey: "remark2", columnName: "remark2" },
-      ],
-    });
-  }
 }
 
 module.exports = {

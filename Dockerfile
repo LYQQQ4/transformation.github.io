@@ -1,7 +1,7 @@
 # 使用官方 Node.js 运行时作为基础镜像
 # 说明：项目依赖包含 sqlite3（native 模块），需要 node-gyp 编译环境（python/make/g++）。
 # alpine 需要额外的 musl 编译链，踩坑较多；这里改用 Debian 系镜像更稳。
-FROM node:18-bullseye-slim
+FROM docker.m.daocloud.io/library/node:18-bookworm-slim
 
 # 设置工作目录
 WORKDIR /app

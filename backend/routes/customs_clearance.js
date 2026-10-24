@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { sanitizeNullableString } = require("../lib/tracking_fields");
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
-const { requireAdminAccess } = require("../lib/request_auth");
+const { hasOrderRemarkFields, lockOrderBySerial, syncOrderRemarksBySerial } = require("../lib/order_remarks");
+const { requireAdminAccess, requireUserAccess } = require("../lib/request_auth");
 const { validateBatchDateRequest } = require("../lib/batch_date");
 
 function normalizeCustomsSerialNumber(value) {
@@ -20,6 +21,8 @@ module.exports = (db, userDb = null) => {
       const [rows] = await db.execute(`
         SELECT
           c.*,
+          o.remark1 AS remark1,
+          o.remark2 AS remark2,
           o.company_name,
           o.orderer,
           o.business_type,
@@ -49,6 +52,8 @@ module.exports = (db, userDb = null) => {
       const [rows] = await db.execute(
         `SELECT
            c.*,
+           o.remark1 AS remark1,
+           o.remark2 AS remark2,
            o.company_name,
            o.orderer,
            o.business_type,
@@ -87,6 +92,8 @@ module.exports = (db, userDb = null) => {
       const [rows] = await db.execute(
         `SELECT
            c.*,
+           o.remark1 AS remark1,
+           o.remark2 AS remark2,
            o.company_name,
            o.orderer,
            o.business_type,
@@ -175,6 +182,9 @@ module.exports = (db, userDb = null) => {
     const connection = await db.getConnection();
     let transactionStarted = false;
     try {
+      if (hasOrderRemarkFields(req.body)) {
+        await requireUserAccess(userDb, req, "order remark update");
+      }
       const {
         serial_number,
         transport_mode,
@@ -193,6 +203,9 @@ module.exports = (db, userDb = null) => {
 
       await connection.beginTransaction();
       transactionStarted = true;
+      if (hasOrderRemarkFields(req.body)) {
+        await lockOrderBySerial(connection, serial_number);
+      }
 
       const sql = `
         INSERT INTO customs_clearance_tracking (
@@ -220,10 +233,11 @@ module.exports = (db, userDb = null) => {
 
       await syncTrackingFieldsBySerial(connection, serial_number, {
         transport_mode: sanitizeNullableString(transport_mode),
-        remark1: sanitizeNullableString(remark1),
-        remark2: sanitizeNullableString(remark2),
         excludeTables: ["customs_clearance_tracking"],
       });
+      if (hasOrderRemarkFields(req.body)) {
+        await syncOrderRemarksBySerial(connection, serial_number, req.body);
+      }
 
       await connection.commit();
       res.status(201).json({
@@ -234,7 +248,7 @@ module.exports = (db, userDb = null) => {
       if (transactionStarted) {
         await connection.rollback();
       }
-      res.status(500).json({ error: err.message });
+      res.status(err.statusCode || 500).json({ error: err.message });
     } finally {
       connection.release();
     }
@@ -244,6 +258,9 @@ module.exports = (db, userDb = null) => {
     const connection = await db.getConnection();
     let transactionStarted = false;
     try {
+      if (hasOrderRemarkFields(req.body)) {
+        await requireUserAccess(userDb, req, "order remark update");
+      }
       const {
         serial_number,
         transport_mode,
@@ -262,6 +279,7 @@ module.exports = (db, userDb = null) => {
 
       await connection.beginTransaction();
       transactionStarted = true;
+      await lockOrderBySerial(connection, serial_number);
 
       const sql = `
         UPDATE customs_clearance_tracking SET
@@ -295,10 +313,9 @@ module.exports = (db, userDb = null) => {
 
       await syncTrackingFieldsBySerial(connection, serial_number, {
         transport_mode: sanitizeNullableString(transport_mode),
-        remark1: sanitizeNullableString(remark1),
-        remark2: sanitizeNullableString(remark2),
         excludeTables: ["customs_clearance_tracking"],
       });
+      await syncOrderRemarksBySerial(connection, serial_number, req.body);
 
       await connection.commit();
       res.json({ message: "报关信息跟踪记录更新成功" });
@@ -306,7 +323,7 @@ module.exports = (db, userDb = null) => {
       if (transactionStarted) {
         await connection.rollback();
       }
-      res.status(500).json({ error: err.message });
+      res.status(err.statusCode || 500).json({ error: err.message });
     } finally {
       connection.release();
     }
@@ -316,6 +333,9 @@ module.exports = (db, userDb = null) => {
     const connection = await db.getConnection();
     let transactionStarted = false;
     try {
+      if (hasOrderRemarkFields(req.body)) {
+        await requireUserAccess(userDb, req, "order remark update");
+      }
       const serialNumber = normalizeCustomsSerialNumber(req.params.serial_number);
       if (!serialNumber || serialNumber === "undefined") {
         return res.status(400).json({ error: "serial_number is required" });
@@ -334,6 +354,7 @@ module.exports = (db, userDb = null) => {
 
       await connection.beginTransaction();
       transactionStarted = true;
+      await lockOrderBySerial(connection, serialNumber);
 
       const sql = `
         UPDATE customs_clearance_tracking SET
@@ -365,10 +386,9 @@ module.exports = (db, userDb = null) => {
 
       await syncTrackingFieldsBySerial(connection, serialNumber, {
         transport_mode: sanitizeNullableString(transport_mode),
-        remark1: sanitizeNullableString(remark1),
-        remark2: sanitizeNullableString(remark2),
         excludeTables: ["customs_clearance_tracking"],
       });
+      await syncOrderRemarksBySerial(connection, serialNumber, req.body);
 
       await connection.commit();
       res.json({ message: "报关信息跟踪记录更新成功" });
@@ -377,7 +397,7 @@ module.exports = (db, userDb = null) => {
       if (transactionStarted) {
         await connection.rollback();
       }
-      res.status(500).json({ error: err.message });
+      res.status(err.statusCode || 500).json({ error: err.message });
     } finally {
       connection.release();
     }

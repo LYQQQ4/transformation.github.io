@@ -7,7 +7,8 @@ const {
   normalizeTransferSharedPayload,
 } = require("../lib/tracking_fields");
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
-const { requireAdminAccess } = require("../lib/request_auth");
+const { hasOrderRemarkFields, lockOrderBySerial, syncOrderRemarksBySerial } = require("../lib/order_remarks");
+const { requireAdminAccess, requireUserAccess } = require("../lib/request_auth");
 const { validateBatchDateRequest } = require("../lib/batch_date");
 
 // 配置multer用于文件上传
@@ -216,6 +217,8 @@ const TRANSFER_SELECT_COLUMNS = `
           t.serial_number,
           t.transport_mode,
           ${buildTransferSharedSelect("t")},
+          o.remark1 AS remark1,
+          o.remark2 AS remark2,
           t.pickup_date,
           t.arrival_port_time,
           t.clearance_time,
@@ -376,6 +379,9 @@ ${TRANSFER_SELECT_COLUMNS}
     const connection = await db.getConnection();
     let transactionStarted = false;
     try {
+      if (hasOrderRemarkFields(req.body)) {
+        await requireUserAccess(userDb, req, "order remark update");
+      }
       // Generate serial number if not provided
       let serialNumber = req.body.serial_number;
       if (!serialNumber) {
@@ -421,6 +427,9 @@ ${TRANSFER_SELECT_COLUMNS}
 
       await connection.beginTransaction();
       transactionStarted = true;
+      if (hasOrderRemarkFields(req.body)) {
+        await lockOrderBySerial(connection, serialNumber);
+      }
 
       const [result] = await connection.execute(sql, params);
 
@@ -433,10 +442,11 @@ ${TRANSFER_SELECT_COLUMNS}
         contract_number: sharedFields.contract_number,
         cargo_flow_info: sharedFields.cargo_flow_info,
         value_added_services: sharedFields.value_added_services,
-        remark1: sharedFields.remark1,
-        remark2: sharedFields.remark2,
         excludeTables: ["transfer"],
       });
+      if (hasOrderRemarkFields(req.body)) {
+        await syncOrderRemarksBySerial(connection, serialNumber, req.body);
+      }
 
       await connection.commit();
 
@@ -449,7 +459,7 @@ ${TRANSFER_SELECT_COLUMNS}
       if (transactionStarted) {
         await connection.rollback();
       }
-      res.status(500).json({ error: err.message });
+      res.status(err.statusCode || 500).json({ error: err.message });
     } finally {
       connection.release();
     }
@@ -460,6 +470,9 @@ ${TRANSFER_SELECT_COLUMNS}
     const connection = await db.getConnection();
     let transactionStarted = false;
     try {
+      if (hasOrderRemarkFields(req.body)) {
+        await requireUserAccess(userDb, req, "order remark update");
+      }
       const serialNumber = normalizeTransferSerialNumber(req.params.serial_number);
       if (!serialNumber || serialNumber === "undefined") {
         return res.status(400).json({ error: "serial_number is required" });
@@ -504,6 +517,7 @@ ${TRANSFER_SELECT_COLUMNS}
 
       await connection.beginTransaction();
       transactionStarted = true;
+      await lockOrderBySerial(connection, serialNumber);
 
       const [result] = await connection.execute(sql, params);
 
@@ -522,10 +536,9 @@ ${TRANSFER_SELECT_COLUMNS}
         contract_number: sharedFields.contract_number,
         cargo_flow_info: sharedFields.cargo_flow_info,
         value_added_services: sharedFields.value_added_services,
-        remark1: sharedFields.remark1,
-        remark2: sharedFields.remark2,
         excludeTables: ["transfer"],
       });
+      await syncOrderRemarksBySerial(connection, serialNumber, req.body);
 
       await connection.commit();
       res.json({ message: "Transfer updated successfully" });
@@ -534,7 +547,7 @@ ${TRANSFER_SELECT_COLUMNS}
       if (transactionStarted) {
         await connection.rollback();
       }
-      res.status(500).json({ error: err.message });
+      res.status(err.statusCode || 500).json({ error: err.message });
     } finally {
       connection.release();
     }
@@ -545,6 +558,9 @@ ${TRANSFER_SELECT_COLUMNS}
     const connection = await db.getConnection();
     let transactionStarted = false;
     try {
+      if (hasOrderRemarkFields(req.body)) {
+        await requireUserAccess(userDb, req, "order remark update");
+      }
       const {
         serial_number,
         transport_mode,
@@ -585,6 +601,7 @@ ${TRANSFER_SELECT_COLUMNS}
 
       await connection.beginTransaction();
       transactionStarted = true;
+      await lockOrderBySerial(connection, sanitizeTransferValue(serial_number));
 
       const [result] = await connection.execute(sql, params);
 
@@ -603,10 +620,9 @@ ${TRANSFER_SELECT_COLUMNS}
         contract_number: sharedFields.contract_number,
         cargo_flow_info: sharedFields.cargo_flow_info,
         value_added_services: sharedFields.value_added_services,
-        remark1: sharedFields.remark1,
-        remark2: sharedFields.remark2,
         excludeTables: ["transfer"],
       });
+      await syncOrderRemarksBySerial(connection, sanitizeTransferValue(serial_number), req.body);
 
       await connection.commit();
       res.json({ message: "Transfer updated successfully" });
@@ -614,7 +630,7 @@ ${TRANSFER_SELECT_COLUMNS}
       if (transactionStarted) {
         await connection.rollback();
       }
-      res.status(500).json({ error: err.message });
+      res.status(err.statusCode || 500).json({ error: err.message });
     } finally {
       connection.release();
     }
@@ -770,6 +786,9 @@ ${TRANSFER_SELECT_COLUMNS}
           try {
             await rowConnection.beginTransaction();
             rowTransactionStarted = true;
+            if (hasOrderRemarkFields(validationResult.data)) {
+              await lockOrderBySerial(rowConnection, serialNumber);
+            }
 
             [updateResult] = await rowConnection.execute(sql, [
               sanitizeTransferValue(transport_mode), sharedFields.tracking_number, sharedFields.contract_number,
@@ -789,10 +808,11 @@ ${TRANSFER_SELECT_COLUMNS}
                 contract_number: sharedFields.contract_number,
                 cargo_flow_info: sharedFields.cargo_flow_info,
                 value_added_services: sharedFields.value_added_services,
-                remark1: sharedFields.remark1,
-                remark2: sharedFields.remark2,
                 excludeTables: ["transfer"],
               });
+              if (hasOrderRemarkFields(validationResult.data)) {
+                await syncOrderRemarksBySerial(rowConnection, serialNumber, validationResult.data);
+              }
             }
 
             await rowConnection.commit();

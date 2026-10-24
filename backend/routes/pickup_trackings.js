@@ -5,7 +5,8 @@ const {
   sanitizeNullableString,
 } = require("../lib/tracking_fields");
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
-const { requireAdminAccess } = require("../lib/request_auth");
+const { hasOrderRemarkFields, lockOrderBySerial, syncOrderRemarksBySerial } = require("../lib/order_remarks");
+const { requireAdminAccess, requireUserAccess } = require("../lib/request_auth");
 const { validateBatchDateRequest } = require("../lib/batch_date");
 
 function normalizeOptionalTrackingValue(value) {
@@ -105,8 +106,8 @@ const PICKUP_SELECT_COLUMNS = `
           t.contract_number,
           t.cargo_flow_info,
           t.value_added_services,
-          t.remark1,
-          t.remark2,
+          o.remark1 AS remark1,
+          o.remark2 AS remark2,
           t.created_at,
           t.updated_at,
           o.company_name,
@@ -226,6 +227,9 @@ ${PICKUP_SELECT_COLUMNS}
     const connection = await db.getConnection();
     let transactionStarted = false;
     try {
+      if (hasOrderRemarkFields(req.body)) {
+        await requireUserAccess(userDb, req, "order remark update");
+      }
       const sharedFields = normalizeTransferSharedPayload(req.body);
       const {
         transport_mode,
@@ -261,6 +265,7 @@ ${PICKUP_SELECT_COLUMNS}
       const serialNumber = sanitizeNullableString(req.params.serial_number);
       await connection.beginTransaction();
       transactionStarted = true;
+      await lockOrderBySerial(connection, serialNumber);
 
       const [transferResult] = await connection.execute(
         "UPDATE transfer SET tracking_number = ? WHERE serial_number = ?",
@@ -322,10 +327,9 @@ ${PICKUP_SELECT_COLUMNS}
         contract_number,
         cargo_flow_info,
         value_added_services,
-        remark1,
-        remark2,
         excludeTables: ["pickup_transport_tracking"],
       });
+      await syncOrderRemarksBySerial(connection, serialNumber, req.body);
 
       await connection.commit();
       res.json({ message: "Pickup transport tracking updated successfully" });
@@ -333,7 +337,7 @@ ${PICKUP_SELECT_COLUMNS}
       if (transactionStarted) {
         await connection.rollback();
       }
-      res.status(500).json({ error: err.message });
+      res.status(err.statusCode || 500).json({ error: err.message });
     } finally {
       connection.release();
     }

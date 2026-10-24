@@ -32,8 +32,6 @@ function buildTransferSharedSelect(alias = "t") {
     `${alias}.contract_number AS contract_number`,
     `${alias}.cargo_flow_info AS cargo_flow_info`,
     `${alias}.value_added_services AS value_added_services`,
-    `${alias}.remark1 AS remark1`,
-    `${alias}.remark2 AS remark2`,
   ].join(",\n          ");
 }
 

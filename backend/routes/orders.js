@@ -15,7 +15,8 @@ const {
   enrichOrderBillingFields,
   ensureBillingInfoSchema,
 } = require("../lib/reporting");
-const { createHttpError, requireAdminAccess } = require("../lib/request_auth");
+const { createHttpError, requireAdminAccess, requireUserAccess } = require("../lib/request_auth");
+const { hasOrderRemarkFields, normalizeOrderRemarkPatch, syncOrderRemarksBySerial } = require("../lib/order_remarks");
 const { validateUserProfileId } = require("../lib/user_profiles");
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
 const {
@@ -106,10 +107,11 @@ async function ensureOrderPhoneSchema(db) {
   return orderPhoneSchemaReadyPromise;
 }
 
-function buildOrderSelectSql(whereClause = "") {
+function buildOrderSelectSql(whereClause = "", { includeTrackingNumber = false } = {}) {
   return `
     SELECT
       o.*,
+      ${includeTrackingNumber ? "t.tracking_number AS tracking_number," : ""}
       p.customs_title AS index_title,
       p.pickup_date AS pickup_date,
       c.customs_start_time AS customs_start_time,
@@ -452,7 +454,7 @@ module.exports = (db, userDb = null) => {
       }
 
       const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-      const [rows] = await db.execute(`${buildOrderSelectSql(whereClause)} ORDER BY o.serial_number DESC`, params);
+      const [rows] = await db.execute(`${buildOrderSelectSql(whereClause, { includeTrackingNumber: true })} ORDER BY o.serial_number DESC`, params);
       res.json({ orders: rows.map((row) => enrichOrderBillingFields(row)) });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -689,6 +691,7 @@ module.exports = (db, userDb = null) => {
       const product_name = req.body.product_name;
       const remark1 = req.body.remark1;
       const remark2 = req.body.remark2;
+      const remarkPatch = normalizeOrderRemarkPatch(req.body);
       const enrichedOrderData = await enrichOrderPayloadWithUserProfiles(userDb, {
         company_name,
         orderer,
@@ -742,7 +745,7 @@ module.exports = (db, userDb = null) => {
         // 尝试插入orders表，如果serial_number已存在会失败
         try {
           const sql = "INSERT INTO orders (company_name, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2, serial_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-          const [result] = await connection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, serialNumber]);
+          const [result] = await connection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, remarkPatch.remark1 ?? null, remarkPatch.remark2 ?? null, serialNumber]);
 
           // 同时在package表中插入记录，使用相同的serial_number，只填入serial_number，其他字段为空
           const packageSql = "INSERT INTO \`package\` (serial_number, package_label, package_order) VALUES (?, ?, ?)";
@@ -759,6 +762,7 @@ module.exports = (db, userDb = null) => {
           // 同时在customs_clearance_tracking表中插入记录，使用相同的serial_number
           const customsClearanceSql = "INSERT INTO customs_clearance_tracking (serial_number) VALUES (?)";
           await connection.execute(customsClearanceSql, [serialNumber]);
+          await syncOrderRemarksBySerial(connection, serialNumber, remarkPatch);
 
           await connection.commit();
           res.json({ id: result.insertId, serial_number: serialNumber, message: "Order created successfully" });
@@ -790,7 +794,12 @@ module.exports = (db, userDb = null) => {
 
   // PUT update order
   router.put("/:id", async (req, res) => {
+    const connection = await db.getConnection();
+    let transactionStarted = false;
     try {
+      if (hasOrderRemarkFields(req.body)) {
+        await requireUserAccess(userDb, req, "order remark update");
+      }
       await ensureOrderPhoneSchema(db);
       const company_name = String(req.body?.company_name ?? "").trim();
       if (!company_name) {
@@ -814,6 +823,7 @@ module.exports = (db, userDb = null) => {
       const product_name = req.body.product_name;
       const remark1 = req.body.remark1;
       const remark2 = req.body.remark2;
+      const remarkPatch = normalizeOrderRemarkPatch(req.body);
       const enrichedOrderData = await enrichOrderPayloadWithUserProfiles(userDb, {
         company_name,
         orderer,
@@ -836,15 +846,31 @@ module.exports = (db, userDb = null) => {
       });
       const normalizedReceiveDate = normalizeOptionalDateValue(enrichedOrderData.receive_date) || null;
 
-      const sql = "UPDATE orders SET company_name = ?, orderer = ?, receive_date = ?, business_type = ?, customer_id = ?, sender_id = ?, shipping_address = ?, sender_name = ?, sender_phone = ?, delivery_address = ?, receiver_name = ?, receiver_phone = ?, origin = ?, destination = ?, trade_term = ?, product_name = ?, remark1 = ?, remark2 = ? WHERE id = ?";
-      const [result] = await db.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, req.params.id]);
-      if (result.affectedRows === 0) {
+      await connection.beginTransaction();
+      transactionStarted = true;
+      const [orderRows] = await connection.execute(
+        "SELECT id, serial_number FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
+        [req.params.id]
+      );
+      if (!orderRows.length) {
+        await connection.rollback();
+        transactionStarted = false;
         res.status(404).json({ error: "Order not found" });
         return;
       }
+      const sql = "UPDATE orders SET company_name = ?, orderer = ?, receive_date = ?, business_type = ?, customer_id = ?, sender_id = ?, shipping_address = ?, sender_name = ?, sender_phone = ?, delivery_address = ?, receiver_name = ?, receiver_phone = ?, origin = ?, destination = ?, trade_term = ?, product_name = ? WHERE id = ?";
+      await connection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, req.params.id]);
+      await syncOrderRemarksBySerial(connection, orderRows[0].serial_number, remarkPatch);
+      await connection.commit();
+      transactionStarted = false;
       res.json({ message: "Order updated successfully" });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      if (transactionStarted) {
+        await connection.rollback();
+      }
+      res.status(err.statusCode || 500).json({ error: err.message });
+    } finally {
+      connection.release();
     }
   });
 
@@ -1092,7 +1118,8 @@ module.exports = (db, userDb = null) => {
             try {
               const sql = "INSERT INTO orders (company_name, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2, serial_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
               const normalizedImportReceiveDate = normalizeOptionalDateValue(enrichedOrderData.receive_date) || null;
-              const [insertResult] = await rowConnection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedImportReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, enrichedOrderData.remark1 || null, enrichedOrderData.remark2 || null, serialNumber]);
+              const importRemarkPatch = normalizeOrderRemarkPatch(enrichedOrderData);
+              const [insertResult] = await rowConnection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedImportReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, importRemarkPatch.remark1 ?? null, importRemarkPatch.remark2 ?? null, serialNumber]);
 
               // 同时在package表中插入记录，使用相同的serial_number
               const packageSql = "INSERT INTO \`package\` (serial_number, package_label, package_order) VALUES (?, ?, ?)";
@@ -1109,6 +1136,7 @@ module.exports = (db, userDb = null) => {
               // 同时在customs_clearance_tracking表中插入记录，使用相同的serial_number
               const customsClearanceSql = "INSERT INTO customs_clearance_tracking (serial_number) VALUES (?)";
               await rowConnection.execute(customsClearanceSql, [serialNumber]);
+              await syncOrderRemarksBySerial(rowConnection, serialNumber, importRemarkPatch);
 
               await rowConnection.commit();
 
