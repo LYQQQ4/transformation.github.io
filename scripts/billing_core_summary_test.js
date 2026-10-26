@@ -78,7 +78,7 @@ function testCoreBillingPresentation() {
   const renderEnd = appSource.indexOf("function getSharedTrackingFieldValue(", renderStart);
   const renderSource = appSource.slice(renderStart, renderEnd);
   assert.ok(renderSource.includes("buildBillingBaseInfoItems("));
-  assert.ok(!renderSource.includes("showBillingFeeModal("));
+  assert.ok(renderSource.includes("showBillingFeeModal('billingPage')"));
   assert.ok(!renderSource.includes("saveBillingRecord("));
 
   const normalizeStart = appSource.indexOf("function normalizeBillingRecord(");
@@ -106,12 +106,12 @@ function testCoreBillingPresentation() {
   const functionsEnd = appSource.indexOf("function getSharedTrackingFieldValue(", tableStart);
   vm.runInContext(appSource.slice(tableStart, functionsEnd), context);
   context.syncBillingTableColumns();
-  assert.strictEqual((header.innerHTML.match(/<th>/g) || []).length, 17);
+  assert.strictEqual((header.innerHTML.match(/<th>/g) || []).length, 18);
   assert.ok(header.innerHTML.includes("<th>成本</th>"));
   assert.ok(header.innerHTML.includes("<th>销售</th>"));
   const record = { serial_number: "A001", company_name: "Company", cost_total: 0, sales_total: "100.3" };
   const row = context.buildBillingRecordRow(record);
-  assert.strictEqual((row.match(/<td>/g) || []).length, 17);
+  assert.strictEqual((row.match(/<td>/g) || []).length, 18);
   assert.ok(row.includes("showBillingDetail('A001')"));
   assert.ok(row.includes("<td>Company</td>"));
   assert.ok(row.includes("<td>0</td>"));
@@ -120,8 +120,14 @@ function testCoreBillingPresentation() {
   assert.ok(container.innerHTML.includes("Company"));
   assert.ok(container.innerHTML.includes("成本"));
   assert.ok(container.innerHTML.includes("销售"));
-  assert.ok(!container.innerHTML.includes("<button"));
+  assert.ok(container.innerHTML.includes("更新信息"));
+  assert.ok(!container.innerHTML.includes("编辑成本明细"));
+  assert.ok(!container.innerHTML.includes("编辑销售明细"));
   assert.ok(!container.innerHTML.includes("<input"));
+  context.renderBillingDetail(container, record, { editable: false, containerId: "billingPage" });
+  assert.ok(!container.innerHTML.includes("<button"));
+  context.renderBillingDetail(container, record, { editable: true, containerId: "orderDetail" });
+  assert.ok(!container.innerHTML.includes("<button"));
 }
 
 function run() {

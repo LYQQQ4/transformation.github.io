@@ -2018,17 +2018,28 @@ function toggleBillingSection(sectionId) {
     section.style.display = section.style.display === "none" ? "block" : "none";
 }
 
-function serializeBillingFeeItems(container, tableType) {
-    const items = normalizeBillingFeeItems([]);
-    container.querySelectorAll(`[data-table-type="${tableType}"]`).forEach((input) => {
-        const rowIndex = Number.parseInt(input.dataset.rowIndex, 10);
-        const field = input.dataset.field;
-        if (!Number.isInteger(rowIndex) || !items[rowIndex] || !field) {
-            return;
+function serializeBillingFeeItems(container, tableType, templateKey = BILLING_TEMPLATE_FALLBACK_KEY) {
+    const fields = getBillingTemplateFieldDefinitions(templateKey);
+    const items = Array.from(container.querySelectorAll(`[data-billing-row="${tableType}"]`)).map((row) => {
+        const categoryInput = row.querySelector('[data-field="category"]');
+        const item = { category: categoryInput ? categoryInput.value.trim() : row.dataset.category };
+        if (!item.category) {
+            throw new Error("请填写费用类别");
         }
-        items[rowIndex][field] = input.value;
+        fields.forEach((field) => {
+            const input = row.querySelector(`[data-field="${field.key}"]`);
+            if (!input) {
+                throw new Error("费用明细未完整加载，请重新打开后再保存");
+            }
+            item[field.key] = input.value;
+        });
+        return item;
     });
-    return items;
+    const categories = items.map((item) => BILLING_TEMPLATE_API.normalizeLookupKey(item.category));
+    if (new Set(categories).size !== categories.length) {
+        throw new Error("费用类别不能重复，请在原费用项中修改");
+    }
+    return normalizeBillingItemsForPersistence(items, templateKey);
 }
 
 function ensureBillingPageStructure() {
@@ -2982,20 +2993,23 @@ function buildBillingFeeEditorTableHtml(tableType, items, options = {}) {
                 }
                 return `<td>${buildBillingFieldInputHtml(tableType, rowIndex, field, value)}</td>`;
             }).join("")}
+            ${editable ? `<td><button type="button" onclick="this.closest('tr').remove()">移除</button></td>` : ""}
         </tr>
     `).join("");
 
     return `
-        <div data-billing-modal-editor="true" style="margin-top: 16px; overflow-x: auto;">
+        <div data-billing-modal-editor="${tableType}" style="margin-top: 16px; overflow-x: auto;">
             <table>
                 <thead>
                     <tr>
                         <th>费用类别</th>
                         ${fieldDefinitions.map((field) => `<th>${field.label}</th>`).join("")}
+                        ${editable ? "<th>操作</th>" : ""}
                     </tr>
                 </thead>
                 <tbody>${bodyHtml}</tbody>
             </table>
+            ${editable ? `<button type="button" onclick="addBillingFeeModalRow('${tableType}')">新增费用项</button>` : ""}
         </div>
     `;
 }
@@ -3091,68 +3105,180 @@ function getBillingModalRecordMeta(record) {
 
 function hideBillingFeeModal() {
     const modal = document.getElementById("billingFeeModal");
-    if (modal) {
+    if (modal && modal.dataset.submitting !== "true") {
         modal.remove();
     }
 }
 
-function showBillingFeeModal(detailKey, tableType) {
-    const draftRecord = buildBillingDraftRecord(detailKey);
-    if (!draftRecord) {
-        showMessage("未找到账单编辑上下文", "error");
+function addBillingFeeModalRow(tableType) {
+    const modal = document.getElementById("billingFeeModal");
+    if (!modal || modal.dataset.submitting === "true" || !["cost_items", "billing_items"].includes(tableType)) {
+        return;
+    }
+    const editor = modal.querySelector(`[data-billing-modal-editor="${tableType}"]`);
+    const templateKey = modal.dataset.billingTemplateKey;
+    const rows = Array.from(editor.querySelectorAll(`[data-billing-row="${tableType}"]`));
+    const categories = new Set(rows.map((row) => row.dataset.category));
+    const category = BILLING_TEMPLATE_API.getBillingTemplate(templateKey).categories
+        .find((item) => !categories.has(item.label))?.label;
+    if (!category && templateKey !== BILLING_TEMPLATE_FALLBACK_KEY) {
+        showMessage("所有模板费用项均已显示，请直接填写空白费用项");
+        return;
+    }
+    const rowIndex = rows.length;
+    editor.querySelector("tbody").insertAdjacentHTML("beforeend", `
+        <tr data-billing-row="${tableType}" data-category="${escapeHtml(category || "")}">
+            <td>${category ? escapeHtml(category) : '<input type="text" data-field="category" aria-label="费用类别" required>'}</td>
+            ${getBillingTemplateFieldDefinitions(templateKey).map((field) => `<td>${buildBillingFieldInputHtml(tableType, rowIndex, field, "")}</td>`).join("")}
+            <td><button type="button" onclick="this.closest('tr').remove()">移除</button></td>
+        </tr>
+    `);
+    bindBillingFormulaInputs(modal);
+}
+
+function renderBillingFeeModalEditors(modal, record) {
+    const templateKey = record.billing_template_key || BILLING_TEMPLATE_FALLBACK_KEY;
+    modal.dataset.billingTemplateKey = templateKey;
+    const costTotal = record.cost_total ?? window.OrderSummaryFields?.sumFeeItemAmounts(record.cost_items) ?? "";
+    const salesTotal = record.sales_total ?? window.OrderSummaryFields?.sumFeeItemAmounts(record.billing_items) ?? "";
+    const billingPeriod = record.billing_period || window.OrderSummaryFields?.deriveBillingPeriod({
+        billing_items: record.billing_items
+    }) || "";
+    modal.querySelector('[data-billing-fee-editors="true"]').innerHTML = `
+        <div class="form-group">
+            <label for="billingCostResult">成本结果:</label>
+            <input type="text" inputmode="decimal" id="billingCostResult" value="${escapeHtml(costTotal)}" data-billing-formula-enabled="true" data-field="amount">
+        </div>
+        <div class="form-group">
+            <label for="billingSalesResult">销售结果:</label>
+            <input type="text" inputmode="decimal" id="billingSalesResult" value="${escapeHtml(salesTotal)}" data-billing-formula-enabled="true" data-field="amount">
+        </div>
+        <div class="form-group">
+            <label for="billingPeriodResult">账期:</label>
+            <input type="text" id="billingPeriodResult" value="${escapeHtml(billingPeriod)}">
+        </div>
+    `;
+    bindBillingFormulaInputs(modal);
+}
+
+function switchBillingFeeModalTemplate() {
+    const modal = document.getElementById("billingFeeModal");
+    if (!modal || modal.dataset.submitting === "true") {
+        return;
+    }
+    const select = modal.querySelector('[data-billing-template="true"]');
+    const previousKey = modal.dataset.billingTemplateKey;
+    try {
+        if (!validateBillingFormulaInputs(modal)) {
+            throw new Error("存在无效公式，请先修正后再切换模板");
+        }
+        const costItems = serializeBillingFeeItems(modal, "cost_items", previousKey);
+        const billingItems = serializeBillingFeeItems(modal, "billing_items", previousKey);
+        if (!BILLING_TEMPLATE_API.isTemplateCompatibleWithItems(select.value, costItems, billingItems)) {
+            throw new Error("目标模板不包含已有费用项，请先核对并移除不兼容的费用项");
+        }
+        renderBillingFeeModalEditors(modal, {
+            billing_template_key: select.value,
+            cost_items: normalizeBillingFeeItems(costItems, select.value),
+            billing_items: normalizeBillingFeeItems(billingItems, select.value)
+        });
+    } catch (error) {
+        select.value = previousKey;
+        showMessage("切换账单模板失败: " + error.message, "error");
+    }
+}
+
+async function showBillingFeeModal(detailKey, tableType = "", serialNumber = "") {
+    const container = getBillingDetailContainer(detailKey);
+    if (detailKey !== "billingPage" || tableType || !container ||
+        !getBillingRenderOptions(container, detailKey).editable) {
+        return;
+    }
+    if (document.getElementById("billingFeeModal")?.dataset.submitting === "true") {
         return;
     }
 
+    const serial = serialNumber || container.dataset.serialNumber;
+    if (!serial) {
+        showMessage("未找到账单流水号", "error");
+        return;
+    }
     hideBillingFeeModal();
 
-    const meta = getBillingSectionMeta(tableType);
     const modal = document.createElement("div");
     modal.className = "modal";
     modal.id = "billingFeeModal";
     modal.dataset.detailKey = detailKey;
-    modal.dataset.tableType = tableType;
+    modal.dataset.serialNumber = serial;
     modal.onclick = function(event) {
         if (event.target === modal) {
             hideBillingFeeModal();
         }
     };
 
-    const modalMeta = getBillingModalRecordMeta(draftRecord);
     modal.innerHTML = `
         <div class="modal-content" style="max-width: 1120px; width: 96%;">
             <div class="modal-header">
-                <h3>${meta.editLabel}</h3>
+                <h3>更新账单信息</h3>
                 <button class="modal-close" onclick="hideBillingFeeModal()">&times;</button>
             </div>
-            ${modalMeta.length > 0 ? `<div class="detail-grid">${buildDetailGridItems(modalMeta)}</div>` : ""}
-            ${buildBillingFeeEditorTableHtml(tableType, draftRecord[tableType], {
-                editable: true,
-                templateKey: draftRecord.billing_template_key
-            })}
-            <div class="button-group">
-                <button type="button" onclick="saveBillingFeeModal()">保存</button>
-                <button type="button" onclick="hideBillingFeeModal()">取消</button>
-            </div>
+            <div class="info" role="status">加载中...</div>
         </div>
     `;
-
     document.body.appendChild(modal);
     modal.style.display = "block";
-    bindBillingFormulaInputs(modal);
+
+    try {
+        const record = await fetchBillingRecordBySerial(serial);
+        if (document.getElementById("billingFeeModal") !== modal) {
+            return;
+        }
+        modal.dataset.billingRecordJson = JSON.stringify(record);
+        modal.querySelector('[role="status"]').remove();
+        modal.querySelector(".modal-content").insertAdjacentHTML("beforeend", `
+            <form id="billingFormData">
+                <div class="form-group">
+                    <label for="billingSerialNumber">流水号:</label>
+                    <input type="text" id="billingSerialNumber" value="${escapeHtml(record.serial_number)}" required readonly>
+                </div>
+                <div class="form-group">
+                    <label for="billingCompletedTime_${detailKey}">账单完成时间:</label>
+                    <input type="date" id="billingCompletedTime_${detailKey}" value="${escapeHtml(String(record.billing_completed_time || "").split("T")[0])}">
+                </div>
+                <div data-billing-fee-editors="true"></div>
+                <div class="button-group">
+                    <button data-billing-save="true">保存</button>
+                    <button type="button" onclick="hideBillingFeeModal()">取消</button>
+                </div>
+            </form>
+        `);
+        renderBillingFeeModalEditors(modal, record);
+        modal.dataset.loaded = "true";
+        modal.querySelector("form").onsubmit = function(event) {
+            event.preventDefault();
+            saveBillingFeeModal();
+        };
+    } catch (error) {
+        if (document.getElementById("billingFeeModal") === modal) {
+            hideBillingFeeModal();
+            showMessage("加载账单详情失败: " + error.message, "error");
+        }
+    }
 }
 
-async function persistBillingDraftRecord(detailKey, draftRecord) {
+async function persistBillingDraftRecord(detailKey, draftRecord, options = {}) {
     const container = getBillingDetailContainer(detailKey);
-    if (!container || !draftRecord) {
+    const editor = options.editor || container;
+    if (!container || !draftRecord || container.dataset.submitting === "true") {
         return null;
     }
 
-    if (!validateBillingFormulaInputs(container)) {
+    if (!validateBillingFormulaInputs(editor)) {
         showMessage("存在无效公式，请先修正后再保存", "error");
         return null;
     }
 
-    const serialNumber = draftRecord.serial_number || container.dataset.serialNumber || currentOrderBillingData?.serial_number || currentBillingSerialNumber;
+    const serialNumber = editor.dataset.serialNumber;
     if (!serialNumber) {
         showMessage("未找到账单流水号", "error");
         return null;
@@ -3166,66 +3292,115 @@ async function persistBillingDraftRecord(detailKey, draftRecord) {
         billing_items: normalizeBillingItemsForPersistence(draftRecord.billing_items, templateKey)
     };
 
+    container.dataset.submitting = "true";
     try {
         const response = await fetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: getAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(payload)
         });
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error || "保存账单信息失败");
         }
+        if (!data.record || data.record.serial_number !== serialNumber) {
+            throw new Error("服务器未返回当前账单的最新记录，请重新加载核对");
+        }
 
         const nextRecord = normalizeBillingRecord(data.record);
         currentOrderBillingData = nextRecord;
         renderBillingDetail(container, nextRecord, getBillingRenderOptions(container, detailKey));
-        showMessage("账单信息保存成功");
 
+        showMessage("账单信息保存成功");
         if (detailKey === "billingPage") {
-            loadBillingRecords();
+            currentBillingSerialNumber = serialNumber;
+            await loadBillingRecords();
         }
         if (currentOrderDetailSerial && currentOrderDetailSerial === serialNumber) {
-            loadOrderBillingDetails(serialNumber);
+            await loadOrderBillingDetails(serialNumber);
         }
-
         return nextRecord;
     } catch (error) {
         showMessage("保存账单信息失败: " + error.message, "error");
         return null;
+    } finally {
+        container.dataset.submitting = "false";
     }
 }
 
 async function saveBillingFeeModal() {
     const modal = document.getElementById("billingFeeModal");
-    if (!modal) {
+    if (!modal || modal.dataset.loaded !== "true" || modal.dataset.submitting === "true") {
         return;
     }
 
     const detailKey = modal.dataset.detailKey || "";
-    const tableType = modal.dataset.tableType || "";
-    if (!detailKey || !tableType) {
-        hideBillingFeeModal();
+    const container = getBillingDetailContainer(detailKey);
+    if (detailKey !== "billingPage" || !container ||
+        !getBillingRenderOptions(container, detailKey).editable) {
         return;
     }
-
+    const form = modal.querySelector("form");
+    if (!form || !form.reportValidity()) {
+        return;
+    }
     if (!validateBillingFormulaInputs(modal)) {
         showMessage("存在无效公式，请先修正后再保存", "error");
         return;
     }
-
-    const draftRecord = buildBillingDraftRecord(detailKey);
-    if (!draftRecord) {
+    const draftRecord = getBillingStoredRecord(modal);
+    if (!modal.dataset.serialNumber) {
+        showMessage("未找到账单流水号", "error");
+        return;
+    }
+    try {
+        const templateKey = modal.dataset.billingTemplateKey;
+        const resultCategory = BILLING_TEMPLATE_API.getBillingTemplate(templateKey).categories[0]?.label;
+        if (!resultCategory) {
+            throw new Error("当前账单模板缺少结果承载类别");
+        }
+        const costAmountInput = form.querySelector("#billingCostResult");
+        const salesAmountInput = form.querySelector("#billingSalesResult");
+        const billingPeriodInput = form.querySelector("#billingPeriodResult");
+        if (!costAmountInput || !salesAmountInput || !billingPeriodInput) {
+            throw new Error("账单结果未完整加载，请重新打开后再保存");
+        }
+        const costAmount = normalizeBillingComputedFieldValue("amount", costAmountInput.value);
+        const salesAmount = normalizeBillingComputedFieldValue("amount", salesAmountInput.value);
+        if (!costAmount.ok || !salesAmount.ok) {
+            throw new Error("成本或销售结果中的金额公式无效");
+        }
+        draftRecord.cost_items = costAmount.value === "" ? [] : [{
+            category: resultCategory,
+            amount: costAmount.value
+        }];
+        draftRecord.billing_items = salesAmount.value === "" && !billingPeriodInput.value.trim()
+            ? []
+            : [{
+                category: resultCategory,
+                amount: salesAmount.value,
+                billing_period: billingPeriodInput.value.trim()
+            }];
+        draftRecord.billing_template_key = templateKey;
+        draftRecord.billing_completed_time = form.querySelector(`#billingCompletedTime_${detailKey}`).value;
+    } catch (error) {
+        showMessage("保存账单信息失败: " + error.message, "error");
         return;
     }
 
-    const editorContainer = modal.querySelector('[data-billing-modal-editor="true"]');
-    const templateKey = draftRecord.billing_template_key || BILLING_TEMPLATE_FALLBACK_KEY;
-    draftRecord[tableType] = serializeBillingFeeItems(editorContainer || modal, tableType, templateKey);
-
-    const savedRecord = await persistBillingDraftRecord(detailKey, draftRecord);
-    if (savedRecord) {
-        hideBillingFeeModal();
+    modal.dataset.submitting = "true";
+    modal.querySelectorAll("button, input, select").forEach((control) => { control.disabled = true; });
+    const saveButton = form.querySelector('[data-billing-save="true"]');
+    saveButton.textContent = "保存中...";
+    try {
+        const savedRecord = await persistBillingDraftRecord(detailKey, draftRecord, { editor: modal });
+        if (savedRecord) {
+            modal.remove();
+        }
+    } finally {
+        modal.dataset.submitting = "false";
+        modal.querySelectorAll("button, input, select").forEach((control) => { control.disabled = false; });
+        saveButton.textContent = "保存";
     }
 }
 
@@ -3368,7 +3543,7 @@ function syncBillingTableColumns() {
 
     headerRow.innerHTML = getOrderSummaryFieldDefinitions()
         .map((field) => `<th>${escapeHtml(field.label)}</th>`)
-        .join("");
+        .join("") + "<th>操作</th>";
 }
 
 function buildBillingRecordRow(record) {
@@ -3386,7 +3561,7 @@ function buildBillingRecordRow(record) {
         return `<td>${escapeHtml(value)}</td>`;
     }).join("");
 
-    return `<tr>${cells}</tr>`;
+    return `<tr>${cells}<td><button type="button" onclick="showBillingFeeModal('billingPage', '', '${escapeHtml(serialNumber)}')">更新信息</button></td></tr>`;
 }
 
 function buildBillingBaseInfoItems(record) {
@@ -3404,6 +3579,9 @@ function renderBillingDetail(container, record, options = {}) {
 
     container.innerHTML = `
         <div class="detail-grid">${buildDetailGridItems(baseItems)}</div>
+        ${detailKey === "billingPage" && options.editable !== false
+            ? `<div class="button-group"><button type="button" onclick="showBillingFeeModal('billingPage')">更新信息</button></div>`
+            : ""}
     `;
 
     container.dataset.serialNumber = normalized.serial_number || "";
@@ -3411,7 +3589,7 @@ function renderBillingDetail(container, record, options = {}) {
     container.dataset.billingTemplateKey = normalized.billing_template_key || BILLING_TEMPLATE_FALLBACK_KEY;
     container.dataset.billingRecordJson = JSON.stringify(normalized);
     container.dataset.renderOptions = JSON.stringify({
-        editable: false,
+        editable: detailKey === "billingPage" && options.editable !== false,
         showSaveButton: false,
         collapsed: true,
         containerId: detailKey

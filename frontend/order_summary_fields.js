@@ -67,22 +67,21 @@
   }
 
   function deriveBillingPeriod(row = {}) {
-    const directValue = normalizeText(row.billing_period_raw || row.billing_period);
-    if (directValue) {
-      return directValue;
-    }
-
     const periods = [];
     const seen = new Set();
-    parseFeeItems(row.billing_items_raw || row.billing_items).forEach((item) => {
-      const period = normalizeText(item?.billing_period);
-      if (period && !seen.has(period)) {
-        seen.add(period);
-        periods.push(period);
-      }
-    });
+    const hasBillingItems = row.billing_items_raw !== undefined || row.billing_items !== undefined;
+    if (hasBillingItems) {
+      parseFeeItems(row.billing_items_raw ?? row.billing_items).forEach((item) => {
+        const period = normalizeText(item?.billing_period);
+        if (period && !seen.has(period)) {
+          seen.add(period);
+          periods.push(period);
+        }
+      });
+      return periods.join(" / ");
+    }
 
-    return periods.join(" / ");
+    return normalizeText(row.billing_period_raw || row.billing_period);
   }
 
   function getOrderSummaryFieldValue(row = {}, fieldKey) {
