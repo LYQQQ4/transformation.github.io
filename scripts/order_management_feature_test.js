@@ -81,7 +81,7 @@ function testOrderSummaryTotalsAndFormatting() {
   assert.strictEqual(orderSummaryFields.formatOrderSummaryValue("company_name", ""), "该项未填");
 }
 
-function testTotalReportSummarySelectedFieldsAndEmptyText() {
+function testTotalReportSummaryFixedFieldsAndEmptyText() {
   const summary = buildTotalReportSummaryRows(
     [{
       serial_number: "202607001",
@@ -97,13 +97,13 @@ function testTotalReportSummarySelectedFieldsAndEmptyText() {
 
   assert.deepStrictEqual(
     summary.columns.map((column) => column.key),
-    ["company_name", "cost_total", "sales_total"]
+    orderSummaryFields.TOTAL_REPORT_FIELD_DEFINITIONS.map((field) => field.key)
   );
   assert.strictEqual(summary.rows[0].cost_total, "10");
   assert.strictEqual(summary.rows[0].sales_total, "20");
 
   const emptySummary = buildTotalReportSummaryRows(
-    [{ serial_number: "202607002" }],
+    [{}],
     { selectedFieldKeys: ["company_name", "cost_total", "sales_total", "billing_period"] }
   );
   emptySummary.columns.forEach((column) => {
@@ -116,7 +116,7 @@ function run() {
   testFilledStatusSql();
   testOrderSummaryFieldDefinitions();
   testOrderSummaryTotalsAndFormatting();
-  testTotalReportSummarySelectedFieldsAndEmptyText();
+  testTotalReportSummaryFixedFieldsAndEmptyText();
   console.log("order_management_feature_test: ok");
 }
 

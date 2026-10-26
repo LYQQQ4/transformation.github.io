@@ -6,7 +6,6 @@ const {
   buildTotalReportSummaryRows,
   ensureBillingInfoSchema,
   ensureReportSchema,
-  normalizeSelectedReportFieldKeys,
 } = require("../lib/reporting");
 
 function normalizeReportType(value) {
@@ -15,30 +14,6 @@ function normalizeReportType(value) {
 
 function normalizeSerialNumberKeyword(value) {
   return String(value || "").trim();
-}
-
-function parseSelectedReportFields(value) {
-  if (Array.isArray(value)) {
-    return normalizeSelectedReportFieldKeys(
-      value.flatMap((item) => String(item || "").split(","))
-    );
-  }
-
-  const normalizedValue = String(value || "").trim();
-  if (!normalizedValue) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(normalizedValue);
-    if (Array.isArray(parsed)) {
-      return normalizeSelectedReportFieldKeys(parsed);
-    }
-  } catch {
-    // Fall back to comma-separated parsing.
-  }
-
-  return normalizeSelectedReportFieldKeys(normalizedValue.split(","));
 }
 
 function buildReportBaseSql(whereClause = "") {
@@ -61,6 +36,10 @@ function buildReportBaseSql(whereClause = "") {
       t.tracking_number,
       pt.pickup_date,
       COALESCE(t.arrival_port_time, pt.arrival_time) AS arrival_time,
+      COALESCE(
+        NULLIF(TRIM(pt.transport_supplier), ''),
+        NULLIF(TRIM(t.supplier), '')
+      ) AS transport_supplier,
       COALESCE(
         NULLIF(TRIM(pt.cargo_flow_info), ''),
         NULLIF(TRIM(t.cargo_flow_info), '')
@@ -131,7 +110,6 @@ function buildReportBaseSql(whereClause = "") {
 
 function buildReportFilter(req) {
   const serialNumber = normalizeSerialNumberKeyword(req.query.serial_number);
-  const selectedFieldKeys = parseSelectedReportFields(req.query.selected_fields);
   const conditions = [];
   const params = [];
 
@@ -142,7 +120,6 @@ function buildReportFilter(req) {
 
   return {
     serialNumber,
-    selectedFieldKeys,
     whereClause: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
     params,
   };
@@ -164,9 +141,7 @@ async function loadReportSummary(db, reportType, filter) {
       filter.params
     );
 
-    return buildTotalReportSummaryRows(rows, {
-      selectedFieldKeys: filter.selectedFieldKeys,
-    });
+    return buildTotalReportSummaryRows(rows);
   } finally {
     connection.release();
   }
@@ -187,7 +162,7 @@ module.exports = (db, userDb) => {
       return res.json({
         report_type: "total",
         serial_number: filter.serialNumber,
-        selected_fields: filter.selectedFieldKeys || [],
+        selected_fields: summary.columns.map((column) => column.key),
         columns: summary.columns,
         rows: summary.rows,
         empty_value_text: summary.emptyValueText,

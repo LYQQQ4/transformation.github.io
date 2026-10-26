@@ -878,11 +878,6 @@ function changeTablePage(tableId, page) {
 }
 const REPORT_TYPE_TOTAL = "total";
 const REPORT_EMPTY_VALUE_TEXT = "\u8be5\u9879\u672a\u586b";
-const TOTAL_REPORT_FIELD_GROUPS = [{
-    key: "order_summary",
-    label: "\u8ba2\u5355\u6458\u8981",
-    fields: ORDER_SUMMARY_FIELD_API?.ORDER_SUMMARY_FIELD_DEFINITIONS || []
-}];
 
 function getOrderSummaryFieldDefinitions() {
     return ORDER_SUMMARY_FIELD_API?.ORDER_SUMMARY_FIELD_DEFINITIONS || [];
@@ -1187,83 +1182,21 @@ function showReportManagementMessage(message = "", type = "info") {
     messageEl.className = type;
 }
 
-function buildReportFieldSelectorHtml() {
-    return `
-        <div id="reportFieldSelectorContainer" style="margin-bottom: 16px; padding: 16px; border: 1px solid #E5E7EB; border-radius: 8px; background: #F9FAFB;">
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
-                <strong>\u8f93\u51fa\u9879\u9009\u62e9</strong>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                    <button type="button" onclick="setAllReportFieldsSelected(true)">\u5168\u9009</button>
-                    <button type="button" onclick="setAllReportFieldsSelected(false)">\u5168\u4e0d\u9009</button>
-                </div>
-            </div>
-            <div style="display: grid; gap: 12px;">
-                ${TOTAL_REPORT_FIELD_GROUPS.map((group) => `
-                    <div data-report-field-group="${group.key}">
-                        <div style="font-weight: 600; margin-bottom: 8px;">${escapeHtml(group.label)}</div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 8px 16px;">
-                            ${group.fields.map((field) => `
-                                <label style="display: inline-flex; align-items: center; gap: 6px; width: 220px; margin: 0;">
-                                    <input type="checkbox" data-report-field-key="${escapeHtml(field.key)}" checked>
-                                    <span>${escapeHtml(field.label)}</span>
-                                </label>
-                            `).join("")}
-                        </div>
-                    </div>
-                `).join("")}
-            </div>
-        </div>
-    `;
-}
-
-function ensureReportManagementFieldSelector() {
-    const messageEl = document.getElementById("reportManagementMessage");
-    if (!messageEl || document.getElementById("reportFieldSelectorContainer")) {
-        return;
-    }
-
-    messageEl.insertAdjacentHTML("beforebegin", buildReportFieldSelectorHtml());
-}
-
-window.addEventListener("load", ensureReportManagementFieldSelector);
-
-function getSelectedReportFieldKeys() {
-    const checkboxes = document.querySelectorAll('#reportFieldSelectorContainer input[data-report-field-key]:checked');
-    return Array.from(checkboxes).map((checkbox) => checkbox.dataset.reportFieldKey || "").filter(Boolean);
-}
-
-function setAllReportFieldsSelected(checked) {
-    const checkboxes = document.querySelectorAll('#reportFieldSelectorContainer input[data-report-field-key]');
-    checkboxes.forEach((checkbox) => {
-        checkbox.checked = checked;
-    });
-}
-
-function appendSelectedReportFields(params, selectedFieldKeys) {
-    if (!Array.isArray(selectedFieldKeys)) {
-        return;
-    }
-
-    params.set("selected_fields", JSON.stringify(selectedFieldKeys));
-}
-
-function getReportRequestUrl(reportType, serialNumber, selectedFieldKeys) {
+function getReportRequestUrl(reportType, serialNumber) {
     const params = new URLSearchParams();
     params.set("report_type", reportType || REPORT_TYPE_TOTAL);
     if (serialNumber) {
         params.set("serial_number", serialNumber);
     }
-    appendSelectedReportFields(params, selectedFieldKeys);
     return `${API_BASE}/reports/summary?${params.toString()}`;
 }
 
-function getReportExportUrl(reportType, serialNumber, selectedFieldKeys) {
+function getReportExportUrl(reportType, serialNumber) {
     const params = new URLSearchParams();
     params.set("report_type", reportType || REPORT_TYPE_TOTAL);
     if (serialNumber) {
         params.set("serial_number", serialNumber);
     }
-    appendSelectedReportFields(params, selectedFieldKeys);
     return `${API_BASE}/reports/export?${params.toString()}`;
 }
 
@@ -1384,8 +1317,6 @@ async function legacyExportReports() {
 }
 
 async function queryReports() {
-    ensureReportManagementFieldSelector();
-
     if (!currentUser?.id) {
         showMessage("请先登录后再使用报表管理", "error");
         showAuthSection();
@@ -1394,17 +1325,10 @@ async function queryReports() {
 
     const reportType = document.getElementById("reportTypeSelect")?.value || REPORT_TYPE_TOTAL;
     const serialNumber = document.getElementById("reportSerialInput")?.value.trim() || "";
-    const selectedFieldKeys = getSelectedReportFieldKeys();
-
-    if (selectedFieldKeys.length === 0) {
-        renderReportTable([], []);
-        showReportManagementMessage("\u8bf7\u81f3\u5c11\u9009\u62e9\u4e00\u9879\u8f93\u51fa\u5185\u5bb9", "info");
-        return;
-    }
 
     try {
         showReportManagementMessage("\u6b63\u5728\u67e5\u8be2\u62a5\u8868...", "info");
-        const response = await fetch(getReportRequestUrl(reportType, serialNumber, selectedFieldKeys), {
+        const response = await fetch(getReportRequestUrl(reportType, serialNumber), {
             headers: getAuthHeaders()
         });
         const data = await response.json();
@@ -1430,8 +1354,6 @@ async function queryReports() {
 }
 
 async function exportReports() {
-    ensureReportManagementFieldSelector();
-
     if (!currentUser?.id) {
         showMessage("请先登录后再使用报表管理", "error");
         showAuthSection();
@@ -1440,16 +1362,10 @@ async function exportReports() {
 
     const reportType = document.getElementById("reportTypeSelect")?.value || REPORT_TYPE_TOTAL;
     const serialNumber = document.getElementById("reportSerialInput")?.value.trim() || "";
-    const selectedFieldKeys = getSelectedReportFieldKeys();
-
-    if (selectedFieldKeys.length === 0) {
-        showReportManagementMessage("\u8bf7\u81f3\u5c11\u9009\u62e9\u4e00\u9879\u8f93\u51fa\u5185\u5bb9", "info");
-        return;
-    }
 
     try {
         showReportManagementMessage("\u6b63\u5728\u5bfc\u51fa\u62a5\u8868...", "info");
-        const response = await fetch(getReportExportUrl(reportType, serialNumber, selectedFieldKeys), {
+        const response = await fetch(getReportExportUrl(reportType, serialNumber), {
             headers: getAuthHeaders()
         });
 

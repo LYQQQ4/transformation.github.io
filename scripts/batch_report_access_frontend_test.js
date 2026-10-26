@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 const { BATCH_DATE_FIELD_MAP } = require("../backend/lib/batch_date");
+const { buildTotalReportSummaryRows } = require("../backend/lib/reporting");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "frontend/app.js"), "utf8");
 const html = fs.readFileSync(path.join(__dirname, "..", "frontend/index.html"), "utf8");
@@ -14,7 +15,7 @@ function createContext(currentUser) {
     "orderBatchDateControls", "orderBatchDateField", "orderBatchDateValue",
     "orderBatchDateSelectedCount", "orderBatchDateButton", "orderBatchDateSelectAllButton",
     "orderBatchDateClearSelectionButton", "deleteOrdersLink", "reportManagementLink",
-    "reportFieldSelectorContainer", "reportManagementMessage", "reportTypeSelect", "reportSerialInput",
+    "reportManagementMessage", "reportTypeSelect", "reportSerialInput",
     "ordersImportBar", "importResults", "viewOrdersPage", "viewOrdersLink",
     "deleteOrdersPage", "reportManagementPage",
   ]) {
@@ -24,7 +25,6 @@ function createContext(currentUser) {
       classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name) },
     });
   }
-  const selectedFields = [{ dataset: { reportFieldKey: "serial_number" }, checked: true }];
   const pages = ["viewOrdersPage", "deleteOrdersPage", "reportManagementPage"].map((id) => elements.get(id));
   const links = ["viewOrdersLink", "deleteOrdersLink", "reportManagementLink"].map((id) => elements.get(id));
   const context = vm.createContext({
@@ -38,7 +38,6 @@ function createContext(currentUser) {
       getElementById: (id) => elements.get(id),
       querySelector: () => null,
       querySelectorAll(selector) {
-        if (selector.includes("data-report-field-key")) return selectedFields;
         if (selector === ".page") return pages;
         if (selector === ".sidebar a") return links;
         return [];
@@ -56,8 +55,7 @@ function createContext(currentUser) {
         ok: true,
         json: async () => ({
           updated_count: 1, not_found_serial_numbers: [],
-          columns: [{ key: "serial_number", label: "Serial" }],
-          rows: [{ serial_number: "A001" }],
+          ...buildTotalReportSummaryRows([{ serial_number: "A001" }]),
           empty_value_text: "empty",
         }),
         blob: async () => ({ size: 100 }),
@@ -107,11 +105,9 @@ async function testLoggedInUser(role) {
     const url = new URL(request.url, "http://localhost");
     assert.equal(url.searchParams.get("serial_number"), "A001");
     assert.equal(url.searchParams.get("report_type"), "total");
+    assert.equal(url.searchParams.has("selected_fields"), false);
   }
-  assert.deepEqual(
-    JSON.parse(new URL(state.requests[0].url, "http://localhost").searchParams.get("selected_fields")),
-    ["serial_number"]
-  );
+  assert.equal(state.rendered[0].length, 34);
   assert.deepEqual(state.downloads, ["report_export.xlsx", "report_export.xlsx"]);
   assert.equal(state.rendered[1][0].serial_number, "A001");
 
@@ -158,12 +154,172 @@ async function testUnauthenticatedUser(currentUser) {
   assert.equal(state.downloads.length, 0);
 }
 
+function testReportPagination() {
+  const { context, elements } = createContext({ id: 1, role: "user" });
+  const thead = { innerHTML: "" };
+  let bodyHtml = "";
+  const tbody = {
+    rows: [],
+    get innerHTML() { return bodyHtml; },
+    set innerHTML(value) {
+      bodyHtml = value;
+      this.rows = Array.from(value.matchAll(/<tr>/g), () => ({ style: {} }));
+    },
+  };
+  const pagination = { innerHTML: "", style: {} };
+  elements.set("reportManagementTablePagination", pagination);
+  context.document.querySelector = (selector) => {
+    if (selector === "#reportManagementTable thead") return thead;
+    if (selector === "#reportManagementTable tbody") return tbody;
+    return null;
+  };
+  context.escapeHtml = (value) => String(value);
+  const start = source.indexOf("function formatReportCellValue(");
+  const end = source.indexOf("async function legacyQueryReports(", start);
+  vm.runInContext(source.slice(start, end), context);
+  const summary = buildTotalReportSummaryRows(Array.from({ length: 31 }, (_, index) => ({
+    serial_number: `A${index}`,
+  })));
+  context.renderReportTable(summary.columns, summary.rows);
+  assert.equal((thead.innerHTML.match(/<th>/g) || []).length, 34);
+  assert.equal((bodyHtml.match(/<td>/g) || []).length, 31 * 34);
+  const visibleRows = () => tbody.rows.filter((row) => row.style.display !== "none").length;
+  assert.equal(visibleRows(), 15);
+  context.changeTablePage("reportManagementTable", 2);
+  assert.equal(visibleRows(), 15);
+  assert.equal(tbody.rows[0].style.display, "none");
+  assert.equal(tbody.rows[15].style.display, "");
+  context.changeTablePage("reportManagementTable", 3);
+  assert.equal(visibleRows(), 1);
+  context.changeTablePage("reportManagementTable", 4);
+  assert.equal(visibleRows(), 1);
+  context.renderReportTable(summary.columns, []);
+  assert.equal((thead.innerHTML.match(/<th>/g) || []).length, 34);
+  assert.equal(visibleRows(), 0);
+}
+
+async function testReportRequestStates() {
+  const { context, elements, state } = createContext({ id: 1, role: "user" });
+  const message = elements.get("reportManagementMessage");
+  context.fetch = async () => {
+    assert.match(message.textContent, /正在查询报表/);
+    assert.equal(message.className, "info");
+    return { ok: true, json: async () => ({ ...buildTotalReportSummaryRows([]), empty_value_text: "empty" }) };
+  };
+  await context.queryReports();
+  assert.equal(state.rendered[0].length, 34);
+  assert.equal(state.rendered[1].length, 0);
+  assert.equal(state.rendered[2], "empty");
+  assert.match(message.textContent, /未查询到/);
+
+  context.fetch = async () => ({ ok: false, json: async () => ({ error: "test failure" }) });
+  await context.queryReports();
+  assert.equal(message.className, "error");
+  assert.match(message.textContent, /查询报表失败: test failure/);
+  assert.equal(state.rendered[0].length, 0);
+  await context.exportReports();
+  assert.equal(message.className, "error");
+  assert.match(message.textContent, /导出报表失败: test failure/);
+  assert.equal(state.downloads.length, 0);
+
+  context.fetch = async () => {
+    assert.match(message.textContent, /正在导出报表/);
+    return { ok: true, blob: async () => ({ size: 0 }) };
+  };
+  await context.exportReports();
+  assert.equal(message.className, "error");
+  assert.match(message.textContent, /导出的报表为空/);
+  assert.equal(state.downloads.length, 0);
+}
+
+function testReportPagination() {
+  const { context, elements } = createContext({ id: 1, role: "user" });
+  const thead = { innerHTML: "" };
+  let bodyHtml = "";
+  const tbody = {
+    rows: [],
+    get innerHTML() { return bodyHtml; },
+    set innerHTML(value) {
+      bodyHtml = value;
+      this.rows = Array.from(value.matchAll(/<tr>/g), () => ({ style: {} }));
+    },
+  };
+  const pagination = { innerHTML: "", style: {} };
+  elements.set("reportManagementTablePagination", pagination);
+  context.document.querySelector = (selector) => {
+    if (selector === "#reportManagementTable thead") return thead;
+    if (selector === "#reportManagementTable tbody") return tbody;
+    return null;
+  };
+  context.escapeHtml = (value) => String(value);
+  const start = source.indexOf("function formatReportCellValue(");
+  const end = source.indexOf("async function legacyQueryReports(", start);
+  vm.runInContext(source.slice(start, end), context);
+  const summary = buildTotalReportSummaryRows(Array.from({ length: 31 }, (_, index) => ({
+    serial_number: `A${index}`,
+  })));
+  context.renderReportTable(summary.columns, summary.rows);
+  assert.equal((thead.innerHTML.match(/<th>/g) || []).length, 34);
+  assert.equal((bodyHtml.match(/<td>/g) || []).length, 31 * 34);
+  const visibleRows = () => tbody.rows.filter((row) => row.style.display !== "none").length;
+  assert.equal(visibleRows(), 15);
+  context.changeTablePage("reportManagementTable", 2);
+  assert.equal(visibleRows(), 15);
+  assert.equal(tbody.rows[0].style.display, "none");
+  assert.equal(tbody.rows[15].style.display, "");
+  context.changeTablePage("reportManagementTable", 3);
+  assert.equal(visibleRows(), 1);
+  context.changeTablePage("reportManagementTable", 4);
+  assert.equal(visibleRows(), 1);
+  context.renderReportTable(summary.columns, []);
+  assert.equal((thead.innerHTML.match(/<th>/g) || []).length, 34);
+  assert.equal(visibleRows(), 0);
+}
+
+async function testReportRequestStates() {
+  const { context, elements, state } = createContext({ id: 1, role: "user" });
+  const message = elements.get("reportManagementMessage");
+  context.fetch = async () => {
+    assert.match(message.textContent, /正在查询报表/);
+    assert.equal(message.className, "info");
+    return { ok: true, json: async () => ({ ...buildTotalReportSummaryRows([]), empty_value_text: "empty" }) };
+  };
+  await context.queryReports();
+  assert.equal(state.rendered[0].length, 34);
+  assert.equal(state.rendered[1].length, 0);
+  assert.equal(state.rendered[2], "empty");
+  assert.match(message.textContent, /未查询到/);
+
+  context.fetch = async () => ({ ok: false, json: async () => ({ error: "test failure" }) });
+  await context.queryReports();
+  assert.equal(message.className, "error");
+  assert.match(message.textContent, /查询报表失败: test failure/);
+  assert.equal(state.rendered[0].length, 0);
+  await context.exportReports();
+  assert.equal(message.className, "error");
+  assert.match(message.textContent, /导出报表失败: test failure/);
+  assert.equal(state.downloads.length, 0);
+
+  context.fetch = async () => {
+    assert.match(message.textContent, /正在导出报表/);
+    return { ok: true, blob: async () => ({ size: 0 }) };
+  };
+  await context.exportReports();
+  assert.equal(message.className, "error");
+  assert.match(message.textContent, /导出的报表为空/);
+  assert.equal(state.downloads.length, 0);
+}
+
 async function run() {
   assert.ok(html.includes("onclick=\"showPage('reportManagement')\""));
   assert.ok(html.includes('onclick="queryReports()"'));
   assert.ok(html.includes('onclick="exportReports()"'));
   for (const role of ["admin", "user"]) await testLoggedInUser(role);
   for (const user of [null, {}]) await testUnauthenticatedUser(user);
+  testReportPagination();
+  await testReportRequestStates();
+  testReportPagination();
+  await testReportRequestStates();
   console.log("batch_report_access_frontend_test: ok");
 }
 

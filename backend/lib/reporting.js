@@ -12,10 +12,6 @@ function isFilledValue(value) {
   return normalizeTextValue(value) !== "";
 }
 
-function isEmptyReportValue(value) {
-  return normalizeTextValue(value) === "";
-}
-
 function parseStoredFeeItems(value) {
   return orderSummaryFields.parseFeeItems(value);
 }
@@ -106,26 +102,7 @@ function buildFilledStatusSql(columnName, filledStatus) {
 }
 
 const REPORT_EMPTY_VALUE_TEXT = orderSummaryFields.ORDER_SUMMARY_EMPTY_VALUE_TEXT;
-const TOTAL_REPORT_FIELD_DEFINITIONS = orderSummaryFields.ORDER_SUMMARY_FIELD_DEFINITIONS;
-
-function normalizeSelectedReportFieldKeys(selectedFieldKeys) {
-  if (!Array.isArray(selectedFieldKeys)) {
-    return null;
-  }
-
-  const allowedKeys = new Set(TOTAL_REPORT_FIELD_DEFINITIONS.map((field) => field.key));
-  const seen = new Set();
-  return selectedFieldKeys
-    .map((fieldKey) => normalizeTextValue(fieldKey))
-    .filter((fieldKey) => {
-      if (!fieldKey || !allowedKeys.has(fieldKey) || seen.has(fieldKey)) {
-        return false;
-      }
-
-      seen.add(fieldKey);
-      return true;
-    });
-}
+const TOTAL_REPORT_FIELD_DEFINITIONS = orderSummaryFields.TOTAL_REPORT_FIELD_DEFINITIONS;
 
 function formatTotalReportValue(columnKey, value, options = {}) {
   return orderSummaryFields.formatOrderSummaryValue(columnKey, value, {
@@ -159,26 +136,23 @@ function combineTrackingRemarks(row = {}, remarkNumber) {
 }
 
 function buildTotalReportSummaryRows(rows = [], options = {}) {
-  const normalizedRows = rows.map((row) => enrichOrderBillingFields(row));
-  const selectedFieldKeys = normalizeSelectedReportFieldKeys(options.selectedFieldKeys);
-  const selectedFieldKeySet = selectedFieldKeys ? new Set(selectedFieldKeys) : null;
+  const normalizedRows = rows.map((row) => ({
+    ...enrichOrderBillingFields(row),
+    remark1: normalizeTextValue(row.order_remark1 ?? row.remark1) || combineTrackingRemarks(row, 1),
+    remark2: normalizeTextValue(row.order_remark2 ?? row.remark2) || combineTrackingRemarks(row, 2),
+  }));
   const emptyValueText = normalizeTextValue(options.emptyValueText) || REPORT_EMPTY_VALUE_TEXT;
-  const hasDataMap = new Map(TOTAL_REPORT_FIELD_DEFINITIONS.map((field) => [field.key, false]));
 
   const rawRows = normalizedRows.map((row) => {
     const summary = {};
     TOTAL_REPORT_FIELD_DEFINITIONS.forEach((field) => {
       const value = field.getValue(row);
       summary[field.key] = value ?? "";
-      if (!isEmptyReportValue(value)) {
-        hasDataMap.set(field.key, true);
-      }
     });
     return summary;
   });
 
   const columns = TOTAL_REPORT_FIELD_DEFINITIONS
-    .filter((field) => selectedFieldKeySet ? selectedFieldKeySet.has(field.key) : field.key === "serial_number" || hasDataMap.get(field.key))
     .map((field) => ({
       key: field.key,
       label: field.label,
@@ -209,7 +183,6 @@ module.exports = {
   enrichOrderBillingFields,
   formatTotalReportValue,
   isFilledValue,
-  normalizeSelectedReportFieldKeys,
   normalizeTextValue,
   parseStoredFeeItems,
 };

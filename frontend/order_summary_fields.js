@@ -109,6 +109,15 @@
   }
 
   function formatDate(value) {
+    if (value instanceof Date) {
+      if (!Number.isFinite(value.getTime())) {
+        return "";
+      }
+
+      // Preserve the local calendar date returned by the MySQL connection.
+      return `${String(value.getFullYear()).padStart(4, "0")}/${String(value.getMonth() + 1).padStart(2, "0")}/${String(value.getDate()).padStart(2, "0")}`;
+    }
+
     const text = normalizeText(value);
     const match = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/u);
     if (!match) {
@@ -143,9 +152,55 @@
     getValue: (row) => getOrderSummaryFieldValue(row, field.key),
   }));
 
+  const TOTAL_REPORT_FIELD_DEFINITIONS = [
+    { key: "serial_number", label: "\u6d41\u6c34\u53f7" },
+    { key: "company_name", label: "\u516c\u53f8\u540d\u79f0" },
+    { key: "orderer", label: "\u6307\u4ee4\u4eba" },
+    { key: "business_type", label: "\u4e1a\u52a1\u7c7b\u578b" },
+    { key: "sender_id", label: "\u53d1\u4ef6\u4ebaID" },
+    { key: "customer_id", label: "\u5ba2\u6237ID" },
+    { key: "receive_date", label: "\u63a5\u6536\u6307\u4ee4\u65e5\u671f" },
+    { key: "origin", label: "\u8d77\u59cb\u5730" },
+    { key: "destination", label: "\u76ee\u7684\u5730" },
+    { key: "trade_term", label: "\u8d38\u6613\u672f\u8bed" },
+    { key: "product_name", label: "\u8d27\u7269\u54c1\u540d" },
+    { key: "transport_mode", label: "\u8fd0\u8f93\u65b9\u5f0f" },
+    { key: "tracking_number", label: "\u8fd0\u5355\u53f7" },
+    { key: "pickup_date", label: "\u63d0\u8d27\u65f6\u95f4", format: "date" },
+    { key: "cargo_flow_info", label: "\u8d27\u7269\u6d41\u8f6c\u4fe1\u606f" },
+    { key: "transport_supplier", label: "\u8fd0\u8f93\u4f9b\u5e94\u5546" },
+    { key: "value_added_services", label: "\u589e\u503c\u670d\u52a1\u5907\u6ce8" },
+    { key: "remark1", label: "\u5907\u6ce81" },
+    { key: "remark2", label: "\u5907\u6ce82" },
+    { key: "arrival_time", label: "\u5230\u8d27\u65f6\u95f4", format: "date" },
+    { key: "customs_port", label: "\u62a5\u5173\u53e3\u5cb8" },
+    { key: "customs_start_time", label: "\u5f00\u59cb\u62a5\u5173\u65f6\u95f4", format: "date" },
+    { key: "tax_payment_time", label: "\u4ed8\u7a0e\u65f6\u95f4", format: "date" },
+    { key: "release_time", label: "\u653e\u884c\u65f6\u95f4", format: "date" },
+    { key: "customs_declaration_number", label: "\u62a5\u5173\u5355\u53f7" },
+    { key: "customs_supplier", label: "\u62a5\u5173\u4f9b\u5e94\u5546" },
+    { key: "arrival_port_time", label: "\u5230\u6e2f\u65f6\u95f4", format: "date" },
+    { key: "complete_docs_send_time", label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4", format: "date" },
+    { key: "pieces_total", label: "\u4ef6\u6570" },
+    { key: "weight_total", label: "\u91cd\u91cf" },
+    { key: "volume_total", label: "\u4f53\u79ef" },
+    { key: "cost_total", label: "\u6210\u672c" },
+    { key: "sales_total", label: "\u9500\u552e" },
+    { key: "billing_period", label: "\u8d26\u671f" },
+  ].map((field) => {
+    const summaryField = ORDER_SUMMARY_FIELD_DEFINITIONS.find((item) => item.key === field.key);
+    return {
+      ...summaryField,
+      ...field,
+      outputKey: field.key,
+      section: "order_summary",
+      getValue: summaryField?.getValue || ((row) => row[field.key] ?? ""),
+    };
+  });
+
   function formatOrderSummaryValue(fieldKey, value, options = {}) {
     const emptyValueText = normalizeText(options.emptyValueText) || ORDER_SUMMARY_EMPTY_VALUE_TEXT;
-    const field = ORDER_SUMMARY_FIELD_DEFINITIONS.find((item) => item.key === fieldKey);
+    const field = TOTAL_REPORT_FIELD_DEFINITIONS.find((item) => item.key === fieldKey);
     const text = normalizeText(value);
 
     if (!text) {
@@ -153,7 +208,7 @@
     }
 
     if (field?.format === "date") {
-      return formatDate(text);
+      return formatDate(value) || emptyValueText;
     }
 
     if (field?.format === "amount") {
@@ -175,6 +230,7 @@
   return {
     ORDER_SUMMARY_EMPTY_VALUE_TEXT,
     ORDER_SUMMARY_FIELD_DEFINITIONS,
+    TOTAL_REPORT_FIELD_DEFINITIONS,
     deriveBillingPeriod,
     enrichOrderSummaryFields,
     formatOrderSummaryValue,
