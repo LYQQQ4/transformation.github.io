@@ -73,14 +73,6 @@ const BATCH_DATE_FIELD_DEFINITIONS = {
       label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4",
     },
   },
-  billing: {
-    billing_completed_time: {
-      tableName: "billing_info",
-      columnName: "billing_completed_time",
-      includeTime: false,
-      label: "\u8d26\u5355\u5b8c\u6210\u65e5\u671f",
-    },
-  },
 };
 
 // Flat public keys avoid ambiguity between fields with the same business label.
@@ -96,7 +88,6 @@ const BATCH_DATE_FIELD_MAP = {
   clearance_time: { moduleName: "transfer", ...BATCH_DATE_FIELD_DEFINITIONS.transfer.clearance_time },
   delivery_time: { moduleName: "transfer", ...BATCH_DATE_FIELD_DEFINITIONS.transfer.delivery_time },
   complete_docs_send_time: { moduleName: "transfer", ...BATCH_DATE_FIELD_DEFINITIONS.transfer.complete_docs_send_time },
-  billing_completed_time: { moduleName: "billing", ...BATCH_DATE_FIELD_DEFINITIONS.billing.billing_completed_time },
 };
 
 function getBatchDateFieldDefinition(moduleName, fieldName) {

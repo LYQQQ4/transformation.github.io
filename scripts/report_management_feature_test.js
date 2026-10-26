@@ -74,8 +74,11 @@ function testFrontendUsesSharedDefinition() {
 }
 
 function createReportDb(rows) {
+  const state = { queryCount: 0, connectionCount: 0, releaseCount: 0 };
   return {
+    state,
     async execute(sql, params = []) {
+      state.queryCount += 1;
       if (sql.includes("SHOW TABLES LIKE 'package'")) {
         return [[{ Tables_in_order_system: "package" }]];
       }
@@ -85,17 +88,21 @@ function createReportDb(rows) {
       return [[]];
     },
     async getConnection() {
+      state.connectionCount += 1;
       return {
-        async execute(sql) {
+        async execute(sql, params = []) {
           if (sql.includes("SET SESSION group_concat_max_len")) {
             return [[]];
           }
           if (sql.includes("SELECT")) {
+            assert.ok(sql.includes("b.billing_completed_time"));
+            assert.ok(sql.includes("WHERE o.serial_number LIKE ?"));
+            assert.deepStrictEqual(params, ["%202609%"]);
             return [rows];
           }
           return [[]];
         },
-        release() {},
+        release() { state.releaseCount += 1; },
       };
     },
   };
@@ -103,8 +110,9 @@ function createReportDb(rows) {
 
 function createUserDb(role) {
   return {
-    async execute() {
-      return [[{ id: 1, role }]];
+    async execute(sql, params) {
+      assert.strictEqual(sql, "SELECT id, role FROM users WHERE id = ? LIMIT 1");
+      return params[0] === "1" ? [[{ id: 1, role }]] : [[]];
     },
   };
 }
@@ -131,8 +139,8 @@ async function testReportEndpointsAndExcelExport() {
     pieces_total: 2,
     cost_items_raw: JSON.stringify([{ amount: "100" }, { amount: "20.5" }]),
     billing_items_raw: JSON.stringify([{ amount: "300" }, { amount: "20", billing_period: "2026-09" }]),
-  }];
-  const router = createReportsRouter(createReportDb(rows), createUserDb("admin"));
+    billing_completed_time: "2026-09-30",
+  }, { serial_number: "202609008", company_name: null }];
   const selectedFields = encodeURIComponent(JSON.stringify([
     "billing_period",
     "sales_total",
@@ -140,44 +148,76 @@ async function testReportEndpointsAndExcelExport() {
     "company_name",
     "unknown",
   ]));
-  const headers = { "x-user-id": "1" };
+  let adminSummary;
+  let adminExport;
+  for (const role of ["admin", "user"]) {
+    const db = createReportDb(rows);
+    const router = createReportsRouter(db, createUserDb(role));
+    const query = `report_type=total&serial_number=202609&selected_fields=${selectedFields}`;
+    const headers = { "x-user-id": "1" };
+    const summaryResponse = await requestReport(router, `/api/reports/summary?${query}`, headers);
+    assert.strictEqual(summaryResponse.status, 200);
+    const summary = await summaryResponse.json();
+    assert.deepStrictEqual(
+      Object.keys(summary).sort(),
+      ["columns", "empty_value_text", "report_type", "rows", "selected_fields", "serial_number"]
+    );
+    assert.strictEqual(summary.report_type, "total");
+    assert.strictEqual(summary.serial_number, "202609");
+    assert.deepStrictEqual(summary.selected_fields, [
+      "billing_period", "sales_total", "cost_total", "company_name",
+    ]);
+    assert.deepStrictEqual(
+      summary.columns.map((column) => column.key),
+      ["company_name", "cost_total", "sales_total", "billing_period"]
+    );
+    assert.strictEqual(summary.rows[0].cost_total, "120.5");
+    assert.strictEqual(summary.rows[0].sales_total, "320");
+    assert.strictEqual(summary.rows[0].billing_period, "2026-09");
+    assert.strictEqual(summary.empty_value_text, "\u8be5\u9879\u672a\u586b");
+    assert.ok(Object.values(summary.rows[1]).every((value) => value === summary.empty_value_text));
 
-  const summaryResponse = await requestReport(
-    router,
-    `/api/reports/summary?report_type=total&selected_fields=${selectedFields}`,
-    headers
-  );
-  assert.strictEqual(summaryResponse.status, 200);
-  const summary = await summaryResponse.json();
-  assert.deepStrictEqual(
-    summary.columns.map((column) => column.key),
-    ["company_name", "cost_total", "sales_total", "billing_period"]
-  );
-  assert.strictEqual(summary.rows[0].cost_total, "120.5");
-  assert.strictEqual(summary.rows[0].sales_total, "320");
-  assert.strictEqual(summary.rows[0].billing_period, "2026-09");
+    const exportResponse = await requestReport(router, `/api/reports/export?${query}`, headers);
+    assert.strictEqual(exportResponse.status, 200);
+    assert.strictEqual(
+      exportResponse.headers.get("content-type"),
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    assert.strictEqual(exportResponse.headers.get("content-disposition"), 'attachment; filename="report_export.xlsx"');
+    const workbook = XLSX.read(Buffer.from(await exportResponse.arrayBuffer()), { type: "buffer" });
+    assert.deepStrictEqual(workbook.SheetNames, ["\u62a5\u8868"]);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const exportedRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false });
+    assert.deepStrictEqual(exportedRows[0], summary.columns.map((column) => column.label));
+    assert.deepStrictEqual(exportedRows[1], ["A公司", "120.5", "320", "2026-09"]);
+    assert.deepStrictEqual(exportedRows[2], Array(4).fill(summary.empty_value_text));
+    assert.strictEqual(db.state.connectionCount, 2);
+    assert.strictEqual(db.state.releaseCount, 2);
 
-  const exportResponse = await requestReport(
-    router,
-    `/api/reports/export?report_type=total&selected_fields=${selectedFields}`,
-    headers
-  );
-  assert.strictEqual(exportResponse.status, 200);
-  const workbook = XLSX.read(Buffer.from(await exportResponse.arrayBuffer()), { type: "buffer" });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const exportedRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false });
-  assert.deepStrictEqual(
-    exportedRows[0],
-    summary.columns.map((column) => column.label)
-  );
-  assert.deepStrictEqual(exportedRows[1], ["A公司", "120.5", "320", "2026-09"]);
+    if (role === "admin") {
+      adminSummary = summary;
+      adminExport = exportedRows;
+    } else {
+      assert.deepStrictEqual(summary, adminSummary);
+      assert.deepStrictEqual(exportedRows, adminExport);
+    }
 
-  const deniedResponse = await requestReport(
-    createReportsRouter(createReportDb(rows), createUserDb("user")),
-    "/api/reports/summary?report_type=total",
-    headers
-  );
-  assert.strictEqual(deniedResponse.status, 403);
+    const beforeUnauthenticated = { ...db.state };
+    for (const endpoint of ["summary", "export"]) {
+      for (const unauthenticatedHeaders of [{}, { "x-user-id": "999" }]) {
+        const denied = await requestReport(router, `/api/reports/${endpoint}?${query}`, unauthenticatedHeaders);
+        assert.strictEqual(denied.status, 401);
+        assert.ok((await denied.json()).error);
+      }
+    }
+    assert.deepStrictEqual(db.state, beforeUnauthenticated);
+
+    for (const endpoint of ["summary", "export"]) {
+      const invalid = await requestReport(router, `/api/reports/${endpoint}?report_type=unknown`, headers);
+      assert.strictEqual(invalid.status, 400);
+      assert.ok((await invalid.json()).error);
+    }
+  }
 }
 
 async function run() {

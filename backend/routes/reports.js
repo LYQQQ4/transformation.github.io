@@ -1,7 +1,7 @@
 const express = require("express");
 const XLSX = require("xlsx");
 
-const { requireAdminAccess } = require("../lib/request_auth");
+const { requireUserAccess } = require("../lib/request_auth");
 const {
   buildTotalReportSummaryRows,
   ensureBillingInfoSchema,
@@ -177,7 +177,7 @@ module.exports = (db, userDb) => {
 
   router.get("/summary", async (req, res) => {
     try {
-      await requireAdminAccess(userDb, req, "\u62a5\u8868\u7ba1\u7406");
+      await requireUserAccess(userDb, req, "\u62a5\u8868\u7ba1\u7406");
       await ensureBillingInfoSchema(db);
 
       const reportType = normalizeReportType(req.query.report_type);
@@ -199,7 +199,7 @@ module.exports = (db, userDb) => {
 
   router.get("/export", async (req, res) => {
     try {
-      await requireAdminAccess(userDb, req, "\u62a5\u8868\u7ba1\u7406");
+      await requireUserAccess(userDb, req, "\u62a5\u8868\u7ba1\u7406");
       await ensureBillingInfoSchema(db);
 
       const reportType = normalizeReportType(req.query.report_type);

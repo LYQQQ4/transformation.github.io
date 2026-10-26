@@ -8,7 +8,7 @@ const {
 } = require("../lib/tracking_fields");
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
 const { hasOrderRemarkFields, lockOrderBySerial, syncOrderRemarksBySerial } = require("../lib/order_remarks");
-const { requireAdminAccess, requireUserAccess } = require("../lib/request_auth");
+const { requireUserAccess } = require("../lib/request_auth");
 const { validateBatchDateRequest } = require("../lib/batch_date");
 
 // 配置multer用于文件上传
@@ -318,7 +318,7 @@ ${TRANSFER_SELECT_COLUMNS}
     let transactionStarted = false;
 
     try {
-      await requireAdminAccess(userDb, req, "送货运输批量日期修改");
+      await requireUserAccess(userDb, req, "送货运输批量日期修改");
       const validated = validateBatchDateRequest("transfer", req.body);
       if (validated.error) {
         return res.status(400).json({ error: validated.error });

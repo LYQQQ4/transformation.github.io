@@ -132,7 +132,34 @@ async function run() {
     serial_numbers: ["A001"],
     receive_date: "2026-09-15",
   }, { "x-user-id": "1" });
-  assert.strictEqual(response.status, 403);
+  assert.strictEqual(response.status, 200);
+  assert.strictEqual(response.body.updated_count, 1);
+  assert.strictEqual(state.orders.get("A001"), "2026-09-15");
+
+  const beginBeforeInvalid = state.beginCount;
+  for (const headers of [{}, { "x-user-id": "999" }]) {
+    response = await request(app, {
+      serial_numbers: ["A001"],
+      receive_date: "2026-09-15",
+    }, headers);
+    assert.strictEqual(response.status, 401);
+    assert.ok(response.body.error);
+  }
+  for (const role of ["admin", "user"]) {
+    state.role = role;
+    for (const payload of [
+      { field: "billing_completed_time", serial_numbers: ["A001"], value: "2026-09-15" },
+      { serial_numbers: [], receive_date: "2026-09-15" },
+      { serial_numbers: [123], receive_date: "2026-09-15" },
+      { serial_numbers: [" "], receive_date: "2026-09-15" },
+      { serial_numbers: ["A001"], receive_date: "2026-02-30" },
+    ]) {
+      response = await request(app, payload, { "x-user-id": "1" });
+      assert.strictEqual(response.status, 400);
+      assert.ok(response.body.error);
+    }
+  }
+  assert.strictEqual(state.beginCount, beginBeforeInvalid);
 
   state.role = "admin";
   const beforeFailure = state.orders.get("A001");
@@ -144,6 +171,7 @@ async function run() {
   assert.strictEqual(response.status, 500);
   assert.strictEqual(state.orders.get("A001"), beforeFailure);
   assert.strictEqual(state.rollbackCount, 1);
+  assert.strictEqual(state.releaseCount, state.beginCount);
   state.failUpdate = false;
 
   const frontend = require("fs").readFileSync("frontend/app.js", "utf8");

@@ -742,12 +742,6 @@ let orderBatchDateSubmitting = false;
             delivery_time: { label: "\u9001\u8fbe\u65f6\u95f4", includeTime: true },
             complete_docs_send_time: { label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4", includeTime: true }
         }
-    },
-    billing: {
-        endpoint: `${API_BASE}/billing/batch-date`,
-        fields: {
-            billing_completed_time: { label: "\u8d26\u5355\u5b8c\u6210\u65f6\u95f4", includeTime: false }
-        }
     }
 */
 const orderBatchDateFieldMap = {
@@ -761,8 +755,7 @@ const orderBatchDateFieldMap = {
     arrival_port_time: { label: "\u8fd0\u8f93\u5230\u6e2f\u65f6\u95f4", includeTime: true },
     clearance_time: { label: "\u8fd0\u8f93\u653e\u884c\u65f6\u95f4", includeTime: true },
     delivery_time: { label: "\u8fd0\u8f93\u9001\u8fbe\u65f6\u95f4", includeTime: true },
-    complete_docs_send_time: { label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4", includeTime: true },
-    billing_completed_time: { label: "\u8d26\u5355\u5b8c\u6210\u65e5\u671f", includeTime: false }
+    complete_docs_send_time: { label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4", includeTime: true }
 };
 
 const orderPageState = {
@@ -944,8 +937,8 @@ function updateBatchReceiveDateControlsVisibility() {
         return;
     }
 
-    controls.style.display = isAdminUser() ? "flex" : "none";
-    if (!isAdminUser()) {
+    controls.style.display = currentUser?.id ? "flex" : "none";
+    if (!currentUser?.id) {
         clearOrderBatchSelection();
     } else {
         updateOrderBatchDateSelectionState();
@@ -1105,8 +1098,9 @@ function isValidOrderBatchDateValue(value, includeTime) {
 }
 
 async function batchUpdateOrderDate() {
-    if (!isAdminUser()) {
-        showMessage("仅管理员可批量修改日期", "error");
+    if (!currentUser?.id) {
+        showMessage("请先登录后再批量修改日期", "error");
+        showAuthSection();
         return;
     }
 
@@ -1180,7 +1174,7 @@ function updateDeleteOrdersMenuVisibility() {
 
     const reportManagementLink = document.getElementById("reportManagementLink");
     if (reportManagementLink) {
-        reportManagementLink.style.display = isAdminUser() ? "block" : "none";
+        reportManagementLink.style.display = currentUser?.id ? "block" : "none";
     }
 }
 
@@ -1311,9 +1305,9 @@ function renderReportTable(columns = [], rows = [], emptyValueText = REPORT_EMPT
 }
 
 async function legacyQueryReports() {
-    if (!isAdminUser()) {
-        showMessage("仅管理员可使用报表管理", "error");
-        showPage("viewOrders");
+    if (!currentUser?.id) {
+        showMessage("请先登录后再使用报表管理", "error");
+        showAuthSection();
         return;
     }
 
@@ -1344,9 +1338,9 @@ async function legacyQueryReports() {
 }
 
 async function legacyExportReports() {
-    if (!isAdminUser()) {
-        showMessage("仅管理员可使用报表管理", "error");
-        showPage("viewOrders");
+    if (!currentUser?.id) {
+        showMessage("请先登录后再使用报表管理", "error");
+        showAuthSection();
         return;
     }
 
@@ -1392,9 +1386,9 @@ async function legacyExportReports() {
 async function queryReports() {
     ensureReportManagementFieldSelector();
 
-    if (!isAdminUser()) {
-        showMessage("\u4ec5\u7ba1\u7406\u5458\u53ef\u4f7f\u7528\u62a5\u8868\u7ba1\u7406", "error");
-        showPage("viewOrders");
+    if (!currentUser?.id) {
+        showMessage("请先登录后再使用报表管理", "error");
+        showAuthSection();
         return;
     }
 
@@ -1438,9 +1432,9 @@ async function queryReports() {
 async function exportReports() {
     ensureReportManagementFieldSelector();
 
-    if (!isAdminUser()) {
-        showMessage("\u4ec5\u7ba1\u7406\u5458\u53ef\u4f7f\u7528\u62a5\u8868\u7ba1\u7406", "error");
-        showPage("viewOrders");
+    if (!currentUser?.id) {
+        showMessage("请先登录后再使用报表管理", "error");
+        showAuthSection();
         return;
     }
 
@@ -8638,12 +8632,9 @@ function showPage(pageName) {
         activeOrderPageContext = ORDER_PAGE_DELETE;
         loadDeleteOrders();
     } else if (pageName === "reportManagement") {
-        if (!isAdminUser()) {
-            showMessage("仅管理员可进入报表管理", "error");
-            document.getElementById("viewOrdersPage").style.display = "block";
-            document.getElementById("viewOrdersLink").classList.add("active");
-            activeOrderPageContext = ORDER_PAGE_VIEW;
-            loadOrders(ORDER_PAGE_VIEW);
+        if (!currentUser?.id) {
+            showMessage("请先登录后再进入报表管理", "error");
+            showAuthSection();
             return;
         }
         document.getElementById("reportManagementPage").style.display = "block";

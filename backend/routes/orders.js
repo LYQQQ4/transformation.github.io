@@ -507,27 +507,20 @@ module.exports = (db, userDb = null) => {
     let transactionStarted = false;
 
     try {
-      await requireAdminAccess(userDb, req, "统一批量日期修改");
+      await requireUserAccess(userDb, req, "统一批量日期修改");
       const validated = validateUnifiedBatchDateRequest(req.body);
       if (validated.error) {
         return res.status(400).json({ error: validated.error });
       }
 
       const { field, definition, serialNumbers, value } = validated;
-      if (definition.moduleName === "billing") {
-        await ensureBillingInfoSchema(db);
-      }
-
       connection = await db.getConnection();
       await connection.beginTransaction();
       transactionStarted = true;
 
       const placeholders = serialNumbers.map(() => "?").join(", ");
-      const lookupTableName = definition.moduleName === "billing"
-        ? "orders"
-        : definition.tableName;
       const [existingRows] = await connection.execute(
-        `SELECT serial_number FROM ${lookupTableName} WHERE serial_number IN (${placeholders})`,
+        `SELECT serial_number FROM ${definition.tableName} WHERE serial_number IN (${placeholders})`,
         serialNumbers
       );
       const existingSerialNumbers = new Set(
@@ -536,16 +529,7 @@ module.exports = (db, userDb = null) => {
       const foundSerialNumbers = serialNumbers.filter((serialNumber) => existingSerialNumbers.has(serialNumber));
       const notFoundSerialNumbers = serialNumbers.filter((serialNumber) => !existingSerialNumbers.has(serialNumber));
 
-      if (definition.moduleName === "billing") {
-        for (const serialNumber of foundSerialNumbers) {
-          await connection.execute(
-            `INSERT INTO ${definition.tableName} (serial_number, ${definition.columnName})
-             VALUES (?, ?)
-             ON DUPLICATE KEY UPDATE ${definition.columnName} = VALUES(${definition.columnName})`,
-            [serialNumber, value]
-          );
-        }
-      } else if (foundSerialNumbers.length > 0) {
+      if (foundSerialNumbers.length > 0) {
         const updatePlaceholders = foundSerialNumbers.map(() => "?").join(", ");
         await connection.execute(
           `UPDATE ${definition.tableName}
@@ -597,7 +581,7 @@ module.exports = (db, userDb = null) => {
     let transactionStarted = false;
 
     try {
-      await requireAdminAccess(userDb, req, "批量填写接收指令日期");
+      await requireUserAccess(userDb, req, "批量填写接收指令日期");
 
       const serialNumbers = normalizeBatchSerialNumbers(req.body?.serial_numbers);
       if (!serialNumbers) {

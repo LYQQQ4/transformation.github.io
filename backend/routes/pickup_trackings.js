@@ -6,7 +6,7 @@ const {
 } = require("../lib/tracking_fields");
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
 const { hasOrderRemarkFields, lockOrderBySerial, syncOrderRemarksBySerial } = require("../lib/order_remarks");
-const { requireAdminAccess, requireUserAccess } = require("../lib/request_auth");
+const { requireUserAccess } = require("../lib/request_auth");
 const { validateBatchDateRequest } = require("../lib/batch_date");
 
 function normalizeOptionalTrackingValue(value) {
@@ -170,7 +170,7 @@ ${PICKUP_SELECT_COLUMNS}
     let transactionStarted = false;
 
     try {
-      await requireAdminAccess(userDb, req, "提货运输批量日期修改");
+      await requireUserAccess(userDb, req, "提货运输批量日期修改");
       const validated = validateBatchDateRequest("pickup", req.body);
       if (validated.error) {
         return res.status(400).json({ error: validated.error });

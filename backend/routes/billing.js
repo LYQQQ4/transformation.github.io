@@ -2,8 +2,7 @@ const express = require("express");
 const billingTemplates = require("../../frontend/billing_templates");
 const billingFormula = require("../../frontend/billing_formula");
 const orderSummaryFields = require("../../frontend/order_summary_fields");
-const { requireAdminAccess } = require("../lib/request_auth");
-const { validateBatchDateRequest } = require("../lib/batch_date");
+const { requireUserAccess } = require("../lib/request_auth");
 
 const router = express.Router();
 
@@ -277,59 +276,12 @@ module.exports = (db, userDb = null) => {
   });
 
   router.put("/batch-date", async (req, res) => {
-    let connection = null;
-    let transactionStarted = false;
-
     try {
-      await requireAdminAccess(userDb, req, "账单板块批量日期修改");
-      const validated = validateBatchDateRequest("billing", req.body);
-      if (validated.error) {
-        return res.status(400).json({ error: validated.error });
-      }
-
-      const { field, serialNumbers, value } = validated;
-      await ensureBillingSchema(db);
-      connection = await db.getConnection();
-      await connection.beginTransaction();
-      transactionStarted = true;
-
-      const placeholders = serialNumbers.map(() => "?").join(", ");
-      const [orderRows] = await connection.execute(
-        `SELECT serial_number FROM orders WHERE serial_number IN (${placeholders})`,
-        serialNumbers
-      );
-      const existing = new Set(orderRows.map((row) => String(row.serial_number || "").trim()));
-      const found = serialNumbers.filter((serialNumber) => existing.has(serialNumber));
-      const notFound = serialNumbers.filter((serialNumber) => !existing.has(serialNumber));
-
-      for (const serialNumber of found) {
-        await connection.execute(
-          `INSERT INTO billing_info (serial_number, billing_completed_time)
-           VALUES (?, ?)
-           ON DUPLICATE KEY UPDATE billing_completed_time = VALUES(billing_completed_time)`,
-          [serialNumber, value]
-        );
-      }
-
-      await connection.commit();
-      transactionStarted = false;
-      return res.json({
-        message: "账单板块日期批量更新完成",
-        module: "billing",
-        field,
-        value,
-        updated_count: found.length,
-        not_found_serial_numbers: notFound,
-      });
+      await requireUserAccess(userDb, req, "账单板块批量日期修改");
+      // Keep the retired endpoint explicit for clients using the old batch API.
+      return res.status(400).json({ error: "field is not allowed for this module" });
     } catch (err) {
-      if (connection && transactionStarted) {
-        await connection.rollback();
-      }
       return res.status(err.statusCode || 500).json({ error: err.message });
-    } finally {
-      if (connection) {
-        connection.release();
-      }
     }
   });
 
