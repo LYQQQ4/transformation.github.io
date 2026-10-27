@@ -106,12 +106,14 @@ function testCoreBillingPresentation() {
   const functionsEnd = appSource.indexOf("function getSharedTrackingFieldValue(", tableStart);
   vm.runInContext(appSource.slice(tableStart, functionsEnd), context);
   context.syncBillingTableColumns();
-  assert.strictEqual((header.innerHTML.match(/<th>/g) || []).length, 18);
+  assert.strictEqual((header.innerHTML.match(/<th>/g) || []).length, 19);
+  assert.ok(header.innerHTML.includes("billingSelectPage"));
   assert.ok(header.innerHTML.includes("<th>成本</th>"));
   assert.ok(header.innerHTML.includes("<th>销售</th>"));
   const record = { serial_number: "A001", company_name: "Company", cost_total: 0, sales_total: "100.3" };
   const row = context.buildBillingRecordRow(record);
-  assert.strictEqual((row.match(/<td>/g) || []).length, 18);
+  assert.strictEqual((row.match(/<td>/g) || []).length, 19);
+  assert.ok(row.includes("data-billing-select"));
   assert.ok(row.includes("showBillingDetail('A001')"));
   assert.ok(row.includes("<td>Company</td>"));
   assert.ok(row.includes("<td>0</td>"));

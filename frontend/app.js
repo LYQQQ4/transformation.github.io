@@ -854,6 +854,9 @@ function updateTablePaginationSelectionState(tableId) {
     if (tableId === "ordersTable") {
         updateOrderBatchDateSelectionState();
     }
+    if (tableId === "billingTable") {
+        updateBillingSelectionState();
+    }
 }
 
 function changeTablePage(tableId, page) {
@@ -1998,6 +2001,7 @@ function ensureBillingPageStructure() {
         `;
     }
     syncBillingTableColumns();
+    ensureBillingBatchControls();
 }
 
 function ensureOrderBillingSection() {
@@ -2092,7 +2096,7 @@ function legacyRenderBillingDetail(container, record, options = {}) {
 async function loadBillingRecords() {
     ensureBillingPageStructure();
     try {
-        const response = await fetch(`${API_BASE}/billing`);
+        const response = await fetch(`${API_BASE}/billing`, { headers: getAuthHeaders() });
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error || "加载账单信息失败");
@@ -2100,8 +2104,13 @@ async function loadBillingRecords() {
 
         const tbody = document.querySelector("#billingTable tbody");
         if (tbody) {
+            const validSerials = new Set((data.records || []).map((record) => record.serial_number));
+            selectedBillingSerials.forEach((serial) => {
+                if (!validSerials.has(serial)) selectedBillingSerials.delete(serial);
+            });
             tbody.innerHTML = (data.records || []).map(buildBillingRecordRow).join("");
-            applyRenderedTablePagination("billingTable");
+            applyRenderedTablePagination("billingTable", false);
+            updateBillingSelectionState();
         }
 
         if (currentBillingSerialNumber) {
@@ -2118,7 +2127,7 @@ async function loadBillingRecords() {
 }
 
 async function fetchBillingRecordBySerial(serialNumber) {
-    const response = await fetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`);
+    const response = await fetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, { headers: getAuthHeaders() });
     const data = await response.json();
     if (!response.ok) {
         throw new Error(data.error || "加载账单详情失败");
@@ -3451,7 +3460,7 @@ function syncBillingTableColumns() {
         return;
     }
 
-    headerRow.innerHTML = getOrderSummaryFieldDefinitions()
+    headerRow.innerHTML = "<th><input type=\"checkbox\" id=\"billingSelectPage\" aria-label=\"全选当前页\" title=\"全选当前页\" onchange=\"toggleBillingPageSelection(this.checked)\"></th>" + getOrderSummaryFieldDefinitions()
         .map((field) => `<th>${escapeHtml(field.label)}</th>`)
         .join("") + "<th>操作</th>";
 }
@@ -3471,7 +3480,202 @@ function buildBillingRecordRow(record) {
         return `<td>${escapeHtml(value)}</td>`;
     }).join("");
 
-    return `<tr>${cells}<td><button type="button" onclick="showBillingFeeModal('billingPage', '', '${escapeHtml(serialNumber)}')">更新信息</button></td></tr>`;
+    return `<tr><td><input type="checkbox" data-billing-select value="${escapeHtml(serialNumber)}" aria-label="选择 ${escapeHtml(serialNumber)}" onchange="handleBillingSelection(this)"></td>${cells}<td><button type="button" onclick="showBillingFeeModal('billingPage', '', '${escapeHtml(serialNumber)}')">更新信息</button></td></tr>`;
+}
+
+const selectedBillingSerials = new Set();
+let billingBatchBusy = false;
+let billingLastErrorReport = null;
+
+function ensureBillingBatchControls() {
+    const table = document.getElementById("billingTable");
+    if (!table || document.getElementById("billingBatchControls")) return;
+    const style = document.createElement("style");
+    style.textContent = `
+        .app-container:has(#billingPage[style*="display: block"]) > .main-content {
+            min-width: 0; max-width: calc(100% - 250px); box-sizing: border-box;
+        }
+        #billingBatchControls button { max-width: 100%; white-space: normal; }
+        @media (max-width: 700px) {
+            .app-container:has(#billingPage[style*="display: block"]) { display: block; }
+            .app-container:has(#billingPage[style*="display: block"]) > .main-content {
+                margin-left: 0; max-width: 100%; width: 100%; padding: 12px;
+            }
+            .app-container:has(#billingPage[style*="display: block"]) > .sidebar {
+                position: relative; width: 100%; height: auto; max-height: 144px; padding: 6px 0;
+            }
+            .app-container:has(#billingPage[style*="display: block"]) .sidebar h1,
+            .app-container:has(#billingPage[style*="display: block"]) .sidebar h2 { display: none; }
+            .app-container:has(#billingPage[style*="display: block"]) .sidebar ul {
+                display: flex; flex-wrap: wrap; margin: 0; padding: 0;
+            }
+            .app-container:has(#billingPage[style*="display: block"]) .sidebar a {
+                padding: 4px 6px; font-size: 12px;
+            }
+            #billingPage .section { padding: 12px; }
+            #billingPage .detail-grid { grid-template-columns: minmax(0, 1fr); }
+        }
+    `;
+    document.head.appendChild(style);
+    const controls = document.createElement("div");
+    controls.id = "billingBatchControls";
+    controls.className = "button-group";
+    controls.style.cssText = "display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0;";
+    controls.innerHTML = `
+        <button type="button" id="billingExportButton" onclick="exportBillingExcel()" disabled>导出 Excel（已选 0 条）</button>
+        <button type="button" id="billingImportButton" onclick="document.getElementById('billingImportFile').click()">导入 Excel</button>
+        <button type="button" onclick="clearBillingSelection()">取消选择</button>
+        <input type="file" id="billingImportFile" accept=".xlsx" style="display:none" onchange="importBillingExcel(this)">
+    `;
+    table.insertAdjacentElement("beforebegin", controls);
+    const results = document.createElement("div");
+    results.id = "billingImportResults";
+    results.setAttribute("aria-live", "polite");
+    results.style.cssText = "max-width:100%; overflow-wrap:anywhere;";
+    controls.insertAdjacentElement("afterend", results);
+    const scroll = document.createElement("div");
+    scroll.style.cssText = "max-width:100%; overflow-x:auto;";
+    table.parentNode.insertBefore(scroll, table);
+    scroll.appendChild(table);
+    table.style.whiteSpace = "nowrap";
+}
+
+function updateBillingSelectionState() {
+    const checkboxes = Array.from(document.querySelectorAll("#billingTable input[data-billing-select]"));
+    checkboxes.forEach((checkbox) => { checkbox.checked = selectedBillingSerials.has(checkbox.value); });
+    const visible = checkboxes.filter((checkbox) => checkbox.closest("tr").style.display !== "none");
+    const selected = visible.filter((checkbox) => checkbox.checked).length;
+    const all = document.getElementById("billingSelectPage");
+    if (all) {
+        all.checked = visible.length > 0 && selected === visible.length;
+        all.indeterminate = selected > 0 && selected < visible.length;
+        all.disabled = billingBatchBusy || visible.length === 0;
+    }
+    const button = document.getElementById("billingExportButton");
+    if (button) {
+        button.disabled = billingBatchBusy || selectedBillingSerials.size === 0;
+        button.textContent = `导出 Excel（已选 ${selectedBillingSerials.size} 条）`;
+    }
+    const importButton = document.getElementById("billingImportButton");
+    if (importButton) {
+        importButton.disabled = billingBatchBusy;
+        importButton.textContent = billingBatchBusy ? "处理中..." : "导入 Excel";
+    }
+}
+
+function handleBillingSelection(checkbox) {
+    if (checkbox.checked) selectedBillingSerials.add(checkbox.value);
+    else selectedBillingSerials.delete(checkbox.value);
+    updateBillingSelectionState();
+}
+
+function toggleBillingPageSelection(checked) {
+    document.querySelectorAll("#billingTable input[data-billing-select]").forEach((checkbox) => {
+        if (checkbox.closest("tr").style.display === "none") return;
+        if (checked) selectedBillingSerials.add(checkbox.value);
+        else selectedBillingSerials.delete(checkbox.value);
+    });
+    updateBillingSelectionState();
+}
+
+function clearBillingSelection() {
+    selectedBillingSerials.clear();
+    updateBillingSelectionState();
+}
+
+function downloadBillingBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportBillingExcel() {
+    if (billingBatchBusy) return;
+    if (!selectedBillingSerials.size || selectedBillingSerials.size > 500) {
+        showMessage("请选择 1 至 500 个流水号", "error");
+        return;
+    }
+    billingBatchBusy = true;
+    updateBillingSelectionState();
+    try {
+        const response = await fetch(`${API_BASE}/billing/export`, {
+            method: "POST",
+            headers: getAuthHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ serial_numbers: Array.from(selectedBillingSerials) })
+        });
+        if (!response.ok) throw new Error((await response.json()).error || "导出失败");
+        const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+        downloadBillingBlob(await response.blob(), `账单批量导入模板_${date}.xlsx`);
+    } catch (error) {
+        showMessage("导出账单失败: " + error.message, "error");
+    } finally {
+        billingBatchBusy = false;
+        updateBillingSelectionState();
+    }
+}
+
+function renderBillingImportResult(data) {
+    billingLastErrorReport = data.errorReport || null;
+    const container = document.getElementById("billingImportResults");
+    if (!container) return;
+    const summary = data.summary;
+    const messages = [...data.errors, ...(data.warnings || [])];
+    container.innerHTML = `
+        <p>总行数 ${summary.total}，成功 ${summary.updated}，失败 ${summary.failed}，跳过 ${summary.skipped}，重复行 ${summary.duplicated}</p>
+        ${billingLastErrorReport ? "<button type=\"button\" onclick=\"downloadBillingErrorReport()\">下载错误报告</button>" : ""}
+        ${messages.length ? `<details open><summary>处理明细（${messages.length}）</summary>
+            <div style="overflow-x:auto; max-height:320px;"><table>
+                <thead><tr><th>Excel 行号</th><th>流水号</th><th>字段</th><th>原因</th></tr></thead>
+                <tbody>${messages.map((item) => `<tr><td>${item.row}</td><td>${escapeHtml(item.trackingNumber)}</td><td>${escapeHtml(item.field)}</td><td>${escapeHtml(item.message)}</td></tr>`).join("")}</tbody>
+            </table></div></details>` : ""}
+        <details><summary>行处理状态</summary><div style="max-height:240px; overflow:auto;">
+            ${(data.results || []).map((item) => `<p>第 ${item.row} 行 ${escapeHtml(item.trackingNumber)}：${({ updated: "成功", failed: "失败", skipped: "未修改", duplicated: "重复跳过" })[item.status] || ""}</p>`).join("")}
+        </div></details>
+    `;
+}
+
+function downloadBillingErrorReport() {
+    if (!billingLastErrorReport) return;
+    const bytes = Uint8Array.from(atob(billingLastErrorReport.base64), (value) => value.charCodeAt(0));
+    downloadBillingBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), billingLastErrorReport.filename);
+}
+
+async function importBillingExcel(input) {
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file || billingBatchBusy) return;
+    if (!/\.xlsx$/i.test(file.name) || !file.size || file.size > 5 * 1024 * 1024) {
+        showMessage("请选择不超过 5MB 的 .xlsx 文件", "error");
+        return;
+    }
+    if (!confirm("将按流水号更新已填写且有变化的成本、销售、账期。无效行不更新，有效行统一提交；是否继续？")) return;
+    billingBatchBusy = true;
+    billingLastErrorReport = null;
+    updateBillingSelectionState();
+    const results = document.getElementById("billingImportResults");
+    if (results) results.textContent = "正在导入...";
+    try {
+        const body = new FormData();
+        body.append("file", file);
+        const response = await fetch(`${API_BASE}/billing/import`, {
+            method: "POST", headers: getAuthHeaders(), body
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || "导入失败");
+        renderBillingImportResult(data);
+        showMessage(`账单导入完成：成功 ${data.summary.updated}，失败 ${data.summary.failed}，跳过 ${data.summary.skipped}`,
+            data.summary.failed || data.summary.duplicated ? "error" : "success");
+        await loadBillingRecords();
+    } catch (error) {
+        if (results) results.textContent = "导入失败: " + error.message;
+        showMessage("导入账单失败: " + error.message, "error");
+    } finally {
+        billingBatchBusy = false;
+        updateBillingSelectionState();
+    }
 }
 
 function buildBillingBaseInfoItems(record) {
