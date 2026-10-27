@@ -936,6 +936,10 @@ function updateBatchReceiveDateControlsVisibility() {
     }
 
     controls.style.display = currentUser?.id ? "flex" : "none";
+    const basicInfoControls = document.getElementById("bulkBasicInfoControls");
+    if (basicInfoControls) {
+        basicInfoControls.style.display = currentUser?.id ? "flex" : "none";
+    }
     if (!currentUser?.id) {
         clearOrderBatchSelection();
     } else {
@@ -982,6 +986,171 @@ function updateBatchReceiveDateSelectionState() {
     if (clearSelectionButton) {
         clearSelectionButton.disabled = selectedOrderSerialNumbers.size === 0;
     }
+    updateBulkBasicInfoControls();
+}
+
+function updateBulkBasicInfoControls() {
+    const selectedCount = document.getElementById("bulkBasicInfoSelectedCount");
+    const exportButton = document.getElementById("bulkBasicInfoExportButton");
+    const importButton = document.getElementById("bulkBasicInfoImportButton");
+    const fileInput = document.getElementById("bulkBasicInfoFile");
+    if (selectedCount) selectedCount.textContent = String(selectedOrderSerialNumbers.size);
+    if (exportButton) {
+        exportButton.disabled = !currentUser?.id || selectedOrderSerialNumbers.size === 0;
+    }
+    if (importButton) {
+        importButton.style.display = currentUser?.id ? "inline-block" : "none";
+        importButton.disabled = !currentUser?.id || selectedOrderSerialNumbers.size === 0 || !fileInput?.files?.length;
+    }
+}
+
+function showBulkBasicInfoMessage(message, type = "info") {
+    const element = document.getElementById("bulkBasicInfoMessage");
+    if (!element) return;
+    element.textContent = message;
+    element.className = type;
+}
+
+async function downloadBulkBasicInfoTemplate() {
+    if (!currentUser?.id) {
+        showMessage("请先登录后再导出基础信息模板", "error");
+        return;
+    }
+    const serialNumbers = Array.from(selectedOrderSerialNumbers);
+    if (!serialNumbers.length) {
+        showBulkBasicInfoMessage("请先选择订单流水号", "error");
+        return;
+    }
+    try {
+        const query = new URLSearchParams();
+        serialNumbers.forEach((serialNumber) => query.append("serial_numbers", serialNumber));
+        const response = await fetch(`${API_BASE}/orders/bulk-basic-info-template?${query}`, {
+            headers: getAuthHeaders(),
+        });
+        if (!response.ok) {
+            const result = await response.json();
+            throw new Error(result.error || "导出模板失败");
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "order_basic_info_template.xlsx";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        showBulkBasicInfoMessage(`已导出 ${serialNumbers.length} 个流水号`);
+    } catch (error) {
+        showBulkBasicInfoMessage(error.message, "error");
+    }
+}
+
+let bulkBasicInfoErrors = [];
+
+function renderBulkBasicInfoPreview(preview) {
+    const container = document.getElementById("bulkBasicInfoPreview");
+    if (!container) return;
+    const rows = Array.isArray(preview?.rows) ? preview.rows : [];
+    const rowHtml = rows.map((row) => {
+        const updates = row.updates.map((value) => escapeHtml(value)).join("、") || "无";
+        const errors = row.errors.map((value) => escapeHtml(value)).join("；") || "通过";
+        return `<tr><td>${row.row}</td><td>${escapeHtml(row.serial_number || "")}</td><td>${updates}</td><td>${errors}</td></tr>`;
+    }).join("");
+    container.innerHTML = `
+        <h3>基础信息导入预览</h3>
+        <p>总行数 ${preview.total}，可更新 ${preview.valid}，错误 ${preview.invalid}</p>
+        <div style="overflow-x:auto">
+            <table><thead><tr><th>行</th><th>流水号</th><th>更新字段</th><th>校验结果</th></tr></thead>
+            <tbody>${rowHtml}</tbody></table>
+        </div>`;
+    container.style.display = "block";
+}
+
+async function previewBulkBasicInfo() {
+    if (!currentUser?.id) {
+        showMessage("请先登录后再导入基础信息", "error");
+        return;
+    }
+    const file = document.getElementById("bulkBasicInfoFile")?.files?.[0];
+    if (!file) {
+        showBulkBasicInfoMessage("请选择基础信息 Excel 文件", "error");
+        return;
+    }
+    const formData = new FormData();
+    formData.append("excelFile", file);
+    showBulkBasicInfoMessage("正在校验文件...");
+    try {
+        const response = await fetch(`${API_BASE}/orders/parse-bulk-basic-info`, {
+            method: "POST",
+            headers: getAuthHeaders(),
+            body: formData,
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error([result.error, ...(result.details || [])].filter(Boolean).join("："));
+        }
+        renderBulkBasicInfoPreview(result.preview);
+        if (result.preview.invalid > 0) {
+            showBulkBasicInfoMessage("存在错误行，修正文件后重新预览；本次未提交", "error");
+            return;
+        }
+        const confirmed = window.confirm(
+            `确认更新 ${result.preview.total} 行订单基础信息？每行独立处理。`
+        );
+        if (!confirmed) {
+            showBulkBasicInfoMessage("已取消导入");
+            return;
+        }
+        await submitBulkBasicInfo(file);
+    } catch (error) {
+        showBulkBasicInfoMessage(error.message, "error");
+    }
+}
+
+async function submitBulkBasicInfo(file) {
+    const formData = new FormData();
+    formData.append("excelFile", file);
+    showBulkBasicInfoMessage("正在导入...");
+    try {
+        const response = await fetch(`${API_BASE}/orders/bulk-basic-info`, {
+            method: "POST",
+            headers: getAuthHeaders(),
+            body: formData,
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "导入失败");
+        const results = result.results || {};
+        bulkBasicInfoErrors = results.errors || [];
+        const errorButton = document.getElementById("bulkBasicInfoErrorButton");
+        if (errorButton) errorButton.style.display = bulkBasicInfoErrors.length ? "inline-block" : "none";
+        showBulkBasicInfoMessage(result.message, results.failed ? "error" : "success");
+        if (results.success > 0) loadOrders();
+    } catch (error) {
+        showBulkBasicInfoMessage(error.message, "error");
+    }
+}
+
+function downloadBulkBasicInfoErrors() {
+    if (!bulkBasicInfoErrors.length) return;
+    const escapeCsv = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const lines = [
+        ["行号", "流水号", "错误原因"].map(escapeCsv).join(","),
+        ...bulkBasicInfoErrors.map((item) => [
+            item.row,
+            item.serial_number,
+            (item.errors || []).join("；"),
+        ].map(escapeCsv).join(",")),
+    ];
+    const blob = new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "order_basic_info_import_errors.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
 }
 
 function clearOrderBatchSelection(clearDate = true) {

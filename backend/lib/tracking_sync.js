@@ -39,7 +39,13 @@ async function executeSyncUpdate(connection, options) {
   );
 
   if (required && result.affectedRows === 0) {
-    throw new Error(`${tableName} record not found for serial_number ${serialNumber}`);
+    const [existingRows] = await connection.execute(
+      `SELECT serial_number FROM ${tableName} WHERE serial_number = ? LIMIT 1 FOR UPDATE`,
+      [serialNumber]
+    );
+    if (!existingRows.length) {
+      throw new Error(`${tableName} record not found for serial_number ${serialNumber}`);
+    }
   }
 }
 

@@ -22,6 +22,12 @@ const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
 const {
   validateUnifiedBatchDateRequest,
 } = require("../lib/batch_date");
+const {
+  buildBasicInfoWorkbook,
+  buildPreviewResult,
+  formatDateTime,
+  parseBasicInfoWorkbook,
+} = require("../lib/order_basic_info_import");
 
 // 配置multer用于文件上传
 const upload = multer({
@@ -366,7 +372,354 @@ function validateRequiredFields(payload, requiredFields, fieldMapping) {
   return errors;
 }
 
+const BASIC_INFO_ORDER_FIELDS = [
+  "company_name",
+  "orderer",
+  "business_type",
+  "sender_id",
+  "customer_id",
+  "receive_date",
+  "origin",
+  "destination",
+  "trade_term",
+  "product_name",
+];
+const BASIC_INFO_SHARED_TRACKING_FIELDS = [
+  "transport_mode",
+  "tracking_number",
+  "transport_supplier",
+  "value_added_services",
+];
+const BASIC_INFO_CUSTOMS_FIELDS = ["customs_declaration_number", "customs_supplier"];
+
+function normalizeBasicInfoSerialQuery(value) {
+  const values = Array.isArray(value) ? value : [value];
+  const serialNumbers = [];
+  const seen = new Set();
+  values.forEach((item) => {
+    String(item || "").split(",").forEach((part) => {
+      const serialNumber = part.trim();
+      if (serialNumber && !seen.has(serialNumber)) {
+        seen.add(serialNumber);
+        serialNumbers.push(serialNumber);
+      }
+    });
+  });
+  return serialNumbers;
+}
+
+function hasOwnValue(payload, key) {
+  return Object.prototype.hasOwnProperty.call(payload || {}, key);
+}
+
+function formatBasicInfoError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function buildBasicInfoExportSql(placeholders) {
+  return `
+    SELECT
+      o.id,
+      o.serial_number,
+      o.company_name,
+      o.orderer,
+      o.business_type,
+      o.sender_id,
+      o.customer_id,
+      DATE_FORMAT(o.receive_date, '%Y-%m-%d') AS receive_date,
+      o.origin,
+      o.destination,
+      o.trade_term,
+      o.product_name,
+      COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
+      COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number,
+      COALESCE(pt.transport_supplier, t.supplier) AS transport_supplier,
+      COALESCE(pt.value_added_services, t.value_added_services) AS value_added_services,
+      o.remark1,
+      o.remark2,
+      pt.customs_port,
+      c.customs_declaration_number,
+      c.customs_supplier,
+      o.updated_at,
+      pt.updated_at AS pickup_updated_at,
+      t.update_time AS transfer_updated_at,
+      c.updated_at AS customs_updated_at
+    FROM orders o
+    LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = o.serial_number
+    LEFT JOIN transfer t ON t.serial_number = o.serial_number
+    LEFT JOIN customs_clearance_tracking c ON c.serial_number = o.serial_number
+    WHERE o.serial_number IN (${placeholders})
+  `;
+}
+
+async function ensureBasicInfoImportAuditSchema(db) {
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS order_basic_info_import_log (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      operator_user_id VARCHAR(100) NOT NULL,
+      operation_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      file_name VARCHAR(255) NOT NULL,
+      total_count INT NOT NULL DEFAULT 0,
+      success_count INT NOT NULL DEFAULT 0,
+      failed_count INT NOT NULL DEFAULT 0,
+      serial_numbers JSON NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_order_basic_info_import_log_operator (operator_user_id),
+      INDEX idx_order_basic_info_import_log_time (operation_time)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function validateBasicInfoRows(db, userDb, rows) {
+  const serialNumbers = [...new Set(rows.map((row) => row.serial_number).filter(Boolean))];
+  const existingOrders = new Map();
+  if (serialNumbers.length) {
+    const placeholders = serialNumbers.map(() => "?").join(", ");
+    const [orderRows] = await db.execute(
+      `SELECT serial_number FROM orders WHERE serial_number IN (${placeholders})`,
+      serialNumbers
+    );
+    orderRows.forEach((order) => existingOrders.set(String(order.serial_number), order));
+  }
+
+  for (const row of rows) {
+    if (row.serial_number && !existingOrders.has(row.serial_number)) {
+      row.errors.push("\u6d41\u6c34\u53f7\u4e0d\u5b58\u5728\uff0c\u53ea\u80fd\u66f4\u65b0\u5df2\u6709\u8ba2\u5355");
+    }
+
+    const senderId = hasOwnValue(row.values, "sender_id") ? row.values.sender_id : "";
+    const customerId = hasOwnValue(row.values, "customer_id") ? row.values.customer_id : "";
+    if (senderId || customerId) {
+      const userIdErrors = await collectOrderUserIdErrors(userDb, customerId, senderId, {
+        requireCustomerId: false,
+        requireSenderId: false,
+        validateFormat: true,
+      });
+      row.errors.push(...userIdErrors);
+    }
+  }
+  return rows;
+}
+
+function assertBasicInfoSnapshot(row, currentOrder) {
+  const checks = [
+    ["updated_at", "\u8ba2\u5355"],
+    ["pickup_updated_at", "\u63d0\u8d27\u8fd0\u8f93\u4fe1\u606f"],
+    ["transfer_updated_at", "\u9001\u8d27\u8fd0\u8f93\u4fe1\u606f"],
+    ["customs_updated_at", "\u62a5\u5173\u4fe1\u606f"],
+  ];
+  for (const [field, label] of checks) {
+    const snapshot = row.metadata?.[field];
+    if (snapshot && formatDateTime(snapshot) !== formatDateTime(currentOrder[field])) {
+      throw new Error(`${label}\u5728\u5bfc\u51fa\u540e\u5df2\u88ab\u4fee\u6539\uff0c\u8bf7\u91cd\u65b0\u5bfc\u51fa\u6a21\u677f`);
+    }
+  }
+}
+
+async function updateBasicInfoRow(connection, row) {
+  const [orderRows] = await connection.execute(
+    `SELECT
+       o.id,
+       o.serial_number,
+       o.updated_at,
+       pt.updated_at AS pickup_updated_at,
+       t.update_time AS transfer_updated_at,
+       c.updated_at AS customs_updated_at
+     FROM orders o
+     LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = o.serial_number
+     LEFT JOIN transfer t ON t.serial_number = o.serial_number
+     LEFT JOIN customs_clearance_tracking c ON c.serial_number = o.serial_number
+     WHERE o.serial_number = ?
+     LIMIT 1 FOR UPDATE`,
+    [row.serial_number]
+  );
+  if (!orderRows.length) {
+    throw new Error("\u6d41\u6c34\u53f7\u4e0d\u5b58\u5728\uff0c\u4e0d\u5141\u8bb8\u521b\u5efa\u65b0\u8ba2\u5355");
+  }
+  assertBasicInfoSnapshot(row, orderRows[0]);
+
+  const orderAssignments = [];
+  const orderValues = [];
+  BASIC_INFO_ORDER_FIELDS.forEach((field) => {
+    if (!hasOwnValue(row.values, field)) return;
+    orderAssignments.push(`${field} = ?`);
+    orderValues.push(row.values[field]);
+  });
+  if (orderAssignments.length) {
+    await connection.execute(
+      `UPDATE orders SET ${orderAssignments.join(", ")} WHERE serial_number = ?`,
+      [...orderValues, row.serial_number]
+    );
+  }
+
+  if (hasOwnValue(row.values, "remark1") || hasOwnValue(row.values, "remark2")) {
+    await syncOrderRemarksBySerial(connection, row.serial_number, row.values);
+  }
+
+  const trackingPayload = {};
+  BASIC_INFO_SHARED_TRACKING_FIELDS.forEach((field) => {
+    if (hasOwnValue(row.values, field)) trackingPayload[field] = row.values[field];
+  });
+  if (Object.keys(trackingPayload).length) {
+    await syncTrackingFieldsBySerial(connection, row.serial_number, trackingPayload);
+  }
+
+  if (hasOwnValue(row.values, "customs_port")) {
+    const [pickupRows] = await connection.execute(
+      "SELECT serial_number FROM pickup_transport_tracking WHERE serial_number = ? LIMIT 1 FOR UPDATE",
+      [row.serial_number]
+    );
+    if (!pickupRows.length) throw new Error("\u63d0\u8d27\u8fd0\u8f93\u5173\u8054\u8bb0\u5f55\u4e0d\u5b58\u5728");
+    await connection.execute(
+      "UPDATE pickup_transport_tracking SET customs_port = ? WHERE serial_number = ?",
+      [row.values.customs_port, row.serial_number]
+    );
+  }
+
+  const customsAssignments = [];
+  const customsValues = [];
+  BASIC_INFO_CUSTOMS_FIELDS.forEach((field) => {
+    if (!hasOwnValue(row.values, field)) return;
+    customsAssignments.push(`${field} = ?`);
+    customsValues.push(row.values[field]);
+  });
+  if (customsAssignments.length) {
+    const [customsRows] = await connection.execute(
+      "SELECT serial_number FROM customs_clearance_tracking WHERE serial_number = ? LIMIT 1 FOR UPDATE",
+      [row.serial_number]
+    );
+    if (!customsRows.length) throw new Error("\u62a5\u5173\u5173\u8054\u8bb0\u5f55\u4e0d\u5b58\u5728");
+    await connection.execute(
+      `UPDATE customs_clearance_tracking SET ${customsAssignments.join(", ")} WHERE serial_number = ?`,
+      [...customsValues, row.serial_number]
+    );
+  }
+}
+
+async function writeBasicInfoImportAudit(db, userId, fileName, results) {
+  await ensureBasicInfoImportAuditSchema(db);
+  await db.execute(
+    `INSERT INTO order_basic_info_import_log
+      (operator_user_id, file_name, total_count, success_count, failed_count, serial_numbers)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      String(userId),
+      String(fileName || "unknown.xlsx").slice(0, 255),
+      results.total,
+      results.success,
+      results.failed,
+      JSON.stringify(results.serial_numbers),
+    ]
+  );
+}
+
 module.exports = (db, userDb = null) => {
+  router.get("/bulk-basic-info-template", async (req, res) => {
+    try {
+      await requireUserAccess(userDb, req, "\u8ba2\u5355\u57fa\u7840\u4fe1\u606f\u6a21\u677f\u5bfc\u51fa");
+      const serialNumbers = normalizeBasicInfoSerialQuery(req.query.serial_numbers);
+      if (!serialNumbers.length) {
+        return res.status(400).json({ error: "\u8bf7\u5148\u9009\u62e9\u81f3\u5c11\u4e00\u4e2a\u6d41\u6c34\u53f7" });
+      }
+
+      const placeholders = serialNumbers.map(() => "?").join(", ");
+      const [rows] = await db.execute(buildBasicInfoExportSql(placeholders), serialNumbers);
+      const rowsBySerial = new Map(rows.map((row) => [String(row.serial_number), row]));
+      const notFound = serialNumbers.filter((serialNumber) => !rowsBySerial.has(serialNumber));
+      if (notFound.length) {
+        return res.status(404).json({
+          error: "\u90e8\u5206\u6d41\u6c34\u53f7\u4e0d\u5b58\u5728",
+          not_found_serial_numbers: notFound,
+        });
+      }
+
+      const selectedRows = serialNumbers.map((serialNumber) => rowsBySerial.get(serialNumber));
+      const workbook = buildBasicInfoWorkbook(selectedRows);
+      const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", "attachment; filename=\"order_basic_info_template.xlsx\"");
+      return res.send(buffer);
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({ error: error.message });
+    }
+  });
+
+  router.post("/parse-bulk-basic-info", upload.single("excelFile"), async (req, res) => {
+    try {
+      await requireUserAccess(userDb, req, "\u8ba2\u5355\u57fa\u7840\u4fe1\u606f\u5bfc\u5165\u9884\u89c8");
+      if (!req.file) return res.status(400).json({ error: "\u6ca1\u6709\u4e0a\u4f20\u6587\u4ef6" });
+
+      const parsed = parseBasicInfoWorkbook(req.file.buffer);
+      if (parsed.fatalErrors?.length) {
+        return res.status(400).json({ error: "Excel \u683c\u5f0f\u9519\u8bef", details: parsed.fatalErrors });
+      }
+      await validateBasicInfoRows(db, userDb, parsed.rows);
+      const preview = buildPreviewResult(parsed.rows);
+      return res.json({ success: preview.invalid === 0, preview });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({ error: error.message });
+    }
+  });
+
+  router.post("/bulk-basic-info", upload.single("excelFile"), async (req, res) => {
+    try {
+      const operator = await requireUserAccess(userDb, req, "\u8ba2\u5355\u57fa\u7840\u4fe1\u606f\u6279\u91cf\u5bfc\u5165");
+      if (!req.file) return res.status(400).json({ error: "\u6ca1\u6709\u4e0a\u4f20\u6587\u4ef6" });
+
+      const parsed = parseBasicInfoWorkbook(req.file.buffer);
+      if (parsed.fatalErrors?.length) {
+        return res.status(400).json({ error: "Excel \u683c\u5f0f\u9519\u8bef", details: parsed.fatalErrors });
+      }
+      await validateBasicInfoRows(db, userDb, parsed.rows);
+
+      const results = {
+        total: parsed.rows.length,
+        success: 0,
+        failed: 0,
+        serial_numbers: parsed.rows.map((row) => row.serial_number).filter(Boolean),
+        errors: [],
+      };
+
+      for (const row of parsed.rows) {
+        if (row.errors.length) {
+          results.failed += 1;
+          results.errors.push({ row: row.row, serial_number: row.serial_number, errors: [...row.errors] });
+          continue;
+        }
+
+        const connection = await db.getConnection();
+        let transactionStarted = false;
+        try {
+          await connection.beginTransaction();
+          transactionStarted = true;
+          await updateBasicInfoRow(connection, row);
+          await connection.commit();
+          transactionStarted = false;
+          results.success += 1;
+        } catch (error) {
+          if (transactionStarted) await connection.rollback();
+          results.failed += 1;
+          results.errors.push({
+            row: row.row,
+            serial_number: row.serial_number,
+            errors: [formatBasicInfoError(error)],
+          });
+        } finally {
+          connection.release();
+        }
+      }
+
+      await writeBasicInfoImportAudit(db, operator.id, req.file.originalname, results);
+      return res.json({
+        success: results.failed === 0,
+        message: `\u5bfc\u5165\u5b8c\u6210\uff1a\u5171 ${results.total} \u884c\uff0c\u6210\u529f ${results.success} \u884c\uff0c\u5931\u8d25 ${results.failed} \u884c`,
+        results,
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({ error: error.message });
+    }
+  });
+
   router.get("/import-template", async (req, res) => {
     try {
       const workbook = XLSX.utils.book_new();
@@ -398,7 +751,7 @@ module.exports = (db, userDb = null) => {
 
       const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.setHeader("Content-Disposition", 'attachment; filename="order_import_template.xlsx"');
+      res.setHeader("Content-Disposition", "attachment; filename=\"order_import_template.xlsx\"");
       res.send(buffer);
     } catch (error) {
       res.status(500).json({ error: "Failed to generate import template: " + error.message });
@@ -753,7 +1106,7 @@ module.exports = (db, userDb = null) => {
           return;
         } catch (insertError) {
           // 如果是重复键错误，说明serial_number已被其他事务占用，重试
-          if (insertError.code === 'ER_DUP_ENTRY') {
+          if (insertError.code === "ER_DUP_ENTRY") {
             attempts++;
             await connection.rollback();
             await connection.beginTransaction();
@@ -894,7 +1247,7 @@ module.exports = (db, userDb = null) => {
       await connection.execute("DELETE FROM billing_info WHERE serial_number = ?", [serialNumber]);
 
       // 最后删除订单信息（orders表）
-      const [result] = await connection.execute("DELETE FROM orders WHERE id = ?", [req.params.id]);
+      await connection.execute("DELETE FROM orders WHERE id = ?", [req.params.id]);
 
       await connection.commit();
       res.json({ message: "Order and related package and transfer information deleted successfully" });
@@ -1134,7 +1487,7 @@ module.exports = (db, userDb = null) => {
 
             } catch (insertError) {
               // 如果是重复键错误，重试生成serial_number
-              if (insertError.code === 'ER_DUP_ENTRY') {
+              if (insertError.code === "ER_DUP_ENTRY") {
                 attempts++;
                 await rowConnection.rollback();
                 await rowConnection.beginTransaction();

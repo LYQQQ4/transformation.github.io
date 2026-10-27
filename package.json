@@ -17,6 +17,8 @@
     "test:billing-batch-mysql": "node scripts/billing_batch_mysql_test.js",
     "migrate:billing-import": "node scripts/migrate_billing_import_log.js",
     "test:order-summary": "node scripts/order_management_feature_test.js && node scripts/report_management_feature_test.js",
+    "test:order-basic-info-import": "node scripts/order_basic_info_import_test.js && node scripts/order_basic_info_import_route_test.js",
+    "migrate:order-basic-info-import-log": "node scripts/migrate_order_basic_info_import_log.js",
     "test:batch-receive-date": "node scripts/batch_receive_date_test.js",
     "test:batch-date-modules": "node scripts/batch_date_modules_test.js",
     "test:batch-date-unified": "node scripts/batch_date_unified_test.js",

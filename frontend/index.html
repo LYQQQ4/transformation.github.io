@@ -622,6 +622,16 @@
                             <button type="button" id="orderBatchDateClearSelectionButton" onclick="clearOrderBatchSelection(false)" disabled>取消全选</button>
                             <button type="button" id="orderBatchDateButton" onclick="batchUpdateOrderDate()" disabled>批量修改</button>
                         </div>
+                        <div id="bulkBasicInfoControls" style="display: none; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px 16px; border: 1px solid #E5E7EB; border-radius: 8px; background-color: #F9FAFB;">
+                            <strong>基础信息批量上传</strong>
+                            <span>已选择 <strong id="bulkBasicInfoSelectedCount">0</strong> 个流水号</span>
+                            <button type="button" id="bulkBasicInfoExportButton" onclick="downloadBulkBasicInfoTemplate()" disabled>导出基础信息模板</button>
+                            <input type="file" id="bulkBasicInfoFile" accept=".xlsx,.xls" onchange="updateBulkBasicInfoControls()">
+                            <button type="button" id="bulkBasicInfoImportButton" onclick="previewBulkBasicInfo()" disabled>预览并导入基础信息</button>
+                            <button type="button" id="bulkBasicInfoErrorButton" onclick="downloadBulkBasicInfoErrors()" style="display: none;">下载错误明细</button>
+                            <span id="bulkBasicInfoMessage"></span>
+                        </div>
+                        <div id="bulkBasicInfoPreview" style="display: none; margin-bottom: 16px;"></div>
                         <table id="ordersTable">
                             <thead>
                                 <tr>
