@@ -1,64 +1,50 @@
+require("dotenv").config();
+const bcrypt = require("bcryptjs");
 const mysql = require("mysql2/promise");
 
 async function addUser() {
-  let connection;
+  const username = process.env.NEW_USERNAME?.trim();
+  const password = process.env.NEW_USER_PASSWORD;
+  const role = process.env.NEW_USER_ROLE === "admin" ? "admin" : "user";
+  if (
+    !username ||
+    !password ||
+    password.length < 12 ||
+    password.length > 256 ||
+    /^(.)\1+$/.test(password) ||
+    /^(password|qwerty|letmein|123456|admin)/i.test(password)
+  ) {
+    throw new Error("Set NEW_USERNAME and a strong NEW_USER_PASSWORD (at least 12 characters)");
+  }
 
+  const dbName = process.env.USER_DB_NAME || "user_system";
+  if (process.env.NODE_ENV === "production" && dbName !== "user_system") {
+    throw new Error("Refusing unexpected production user database");
+  }
+  const connection = await mysql.createConnection({
+    host: process.env.USER_DB_HOST || process.env.DB_HOST || "127.0.0.1",
+    port: Number(process.env.USER_DB_PORT || process.env.DB_PORT || 3306),
+    user: process.env.USER_DB_USER || process.env.DB_USER || "root",
+    password: process.env.USER_DB_PASSWORD || process.env.DB_PASSWORD || "",
+    database: dbName
+  });
   try {
-    // 连接到user_system数据库
-    connection = await mysql.createConnection({
-      host: "localhost",
-      port: 3306,
-      user: "root",
-      password: "Sidel!2345",
-      database: "user_system",
-      ssl: false,
-      connectTimeout: 60000
-    });
-
-    console.log("Connected to user_system database.");
-
-    // 首先检查users表是否存在，如果不存在则创建
-    await connection.execute(`
-      CREATE TABLE IF NOT EXISTS users (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        username VARCHAR(100) NOT NULL UNIQUE,
-        email VARCHAR(255),
-        password VARCHAR(255) NOT NULL,
-        role VARCHAR(50) DEFAULT 'user',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
-
-    console.log("Users table ensured.");
-
-    // 插入用户
-    const [result] = await connection.execute(
-      "INSERT INTO users (username, password, role) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP",
-      ["林彦琦", "123456", "user"]
+    const hash = await bcrypt.hash(password, 12);
+    await connection.execute(
+      "INSERT INTO users (username, password_hash, password, role) VALUES (?, ?, NULL, ?)",
+      [username, hash, role]
     );
-
-    if (result.affectedRows > 0) {
-      console.log("User added/updated successfully:", {
-        id: result.insertId,
-        username: "林彦琦"
-      });
-    } else {
-      console.log("User already exists and was updated.");
-    }
-
-    // 验证用户
-    const [rows] = await connection.execute("SELECT id, username, role, created_at FROM users WHERE username = ?", ["林彦琦"]);
-    console.log("User verification:", rows[0]);
-
-  } catch (error) {
-    console.error("Error:", error.message);
+    console.log("User created.");
   } finally {
-    if (connection) {
-      await connection.end();
-      console.log("Connection closed.");
-    }
+    await connection.end();
   }
 }
 
-addUser();
+if (require.main === module) {
+  addUser().catch((error) => {
+    console.error("User creation failed:", error.code || error.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { addUser };

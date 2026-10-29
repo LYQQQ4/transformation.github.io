@@ -1,123 +1,302 @@
+const bcrypt = require("bcryptjs");
 const express = require("express");
+const {
+  SESSION_TTL_MS,
+  createHttpError,
+  createSessionToken,
+  hashSessionToken,
+  requireAdminSession,
+  requireSelfOrAdmin,
+  sendError,
+  setSessionCookie
+} = require("../lib/request_auth");
+
 const router = express.Router();
+const FAILED_WINDOW_MS = 15 * 60 * 1000;
+const LOCK_MS = 60 * 1000;
+const MAX_FAILURES = 5;
+const BCRYPT_COST = 12;
+const dummyHash = bcrypt.hashSync("not-a-real-user-password", BCRYPT_COST);
+
+class LoginFailureLimiter {
+  constructor({ now = Date.now, maxEntries = 10000 } = {}) {
+    this.now = now;
+    this.maxEntries = maxEntries;
+    this.entries = new Map();
+  }
+
+  prune() {
+    const now = this.now();
+    for (const [key, entry] of this.entries) {
+      if (entry.windowExpiresAt <= now && entry.lockedUntil <= now) {
+        this.entries.delete(key);
+      }
+    }
+    while (this.entries.size > this.maxEntries) {
+      this.entries.delete(this.entries.keys().next().value);
+    }
+  }
+
+  isLocked(key) {
+    this.prune();
+    const entry = this.entries.get(key);
+    return Boolean(entry && entry.lockedUntil > this.now());
+  }
+
+  fail(key) {
+    this.prune();
+    const now = this.now();
+    const entry = this.entries.get(key);
+    const next = !entry || entry.windowExpiresAt <= now
+      ? { count: 1, windowExpiresAt: now + FAILED_WINDOW_MS, lockedUntil: 0 }
+      : { ...entry, count: entry.count + 1 };
+    if (next.count >= MAX_FAILURES) {
+      next.lockedUntil = now + LOCK_MS;
+    }
+    this.entries.delete(key);
+    this.entries.set(key, next);
+    this.prune();
+    return next;
+  }
+
+  clear(key) {
+    this.entries.delete(key);
+  }
+}
+
+const failureLimiter = new LoginFailureLimiter();
+
+function normalizeUsername(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function validatePassword(password) {
+  if (typeof password !== "string" || password.length < 12 || password.length > 256) {
+    throw createHttpError(400, "Password must be between 12 and 256 characters");
+  }
+  if (/^(.)\1+$/.test(password) || /^(password|qwerty|letmein|123456|admin)/i.test(password)) {
+    throw createHttpError(400, "Choose a stronger password");
+  }
+}
+
+function requestIp(req) {
+  return String(req.ip || req.socket?.remoteAddress || "unknown").slice(0, 128);
+}
 
 module.exports = (db) => {
-  // GET all users
-  router.get("/", async (req, res) => {
+  router.post("/login", async (req, res) => {
+    const username = normalizeUsername(req.body?.username);
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    const accountKey = `account:${username.toLowerCase() || "empty"}`;
+    const ipKey = `ip:${requestIp(req)}`;
+    const keys = [accountKey, ipKey];
+
+    if (keys.some((key) => failureLimiter.isLocked(key))) {
+      res.setHeader("Retry-After", String(Math.ceil(LOCK_MS / 1000)));
+      res.status(429).json({ error: "Too many login attempts. Try again shortly." });
+      return;
+    }
+
     try {
-      const [rows] = await db.execute("SELECT * FROM users");
-      res.json({ users: rows });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
+      const [rows] = await db.execute(
+        "SELECT id, username, password, password_hash, role, email FROM users WHERE username = ? LIMIT 1",
+        [username]
+      );
+      const user = rows[0];
+      let valid = false;
+      if (user && user.password_hash) {
+        valid = await bcrypt.compare(password, user.password_hash);
+      } else if (user && typeof user.password === "string") {
+        valid = password.length > 0 && user.password === password;
+        if (valid) {
+          const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+          await db.execute(
+            "UPDATE users SET password_hash = ?, password = NULL WHERE id = ?",
+            [passwordHash, user.id]
+          );
+        }
+      } else {
+        await bcrypt.compare(password || "invalid", dummyHash);
+      }
+
+      if (!valid) {
+        failureLimiter.fail(accountKey);
+        failureLimiter.fail(ipKey);
+        console.warn("Login failed", {
+          ip: requestIp(req),
+          usernamePresent: Boolean(username)
+        });
+        res.status(401).json({ error: "Invalid username or password" });
+        return;
+      }
+
+      for (const key of keys) {
+        failureLimiter.clear(key);
+      }
+
+      const token = createSessionToken();
+      const tokenHash = hashSessionToken(token);
+      const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+      await db.execute(
+        `INSERT INTO sessions (user_id, token_hash, expires_at, ip_address, user_agent)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          user.id,
+          tokenHash,
+          expiresAt,
+          requestIp(req),
+          String(req.get("user-agent") || "").slice(0, 512)
+        ]
+      );
+      setSessionCookie(res, token);
+      res.json({
+        message: "Login successful",
+        user: { id: user.id, username: user.username, role: user.role, email: user.email }
+      });
+    } catch (error) {
+      if (error.statusCode) {
+        sendError(res, error);
+        return;
+      }
+      console.error("Login failed:", error.code || "database_error");
+      res.status(500).json({ error: "Unable to complete login" });
     }
   });
 
-  // GET single user by id
+  router.get("/", requireAdminSession, async (_req, res) => {
+    try {
+      const [rows] = await db.execute(
+        "SELECT id, username, role, email, created_at, updated_at FROM users ORDER BY id"
+      );
+      res.json({ users: rows });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
   router.get("/:id", async (req, res) => {
     try {
-      const [rows] = await db.execute("SELECT * FROM users WHERE id = ?", [req.params.id]);
+      requireSelfOrAdmin(req, req.params.id);
+      const [rows] = await db.execute(
+        "SELECT id, username, role, email, created_at, updated_at FROM users WHERE id = ?",
+        [req.params.id]
+      );
       if (rows.length === 0) {
         res.status(404).json({ error: "User not found" });
         return;
       }
       res.json({ user: rows[0] });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
+    } catch (error) {
+      sendError(res, error);
     }
   });
 
-  // POST create new user
-  router.post("/", async (req, res) => {
+  router.post("/", (req, res, next) => {
+    if (!req.user) {
+      res.status(403).json({ error: "Account creation is restricted" });
+      return;
+    }
+    next();
+  }, requireAdminSession, async (req, res) => {
     try {
-      console.log("Register request body:", req.body);
-      let { username, password, role, email } = req.body;
-
-      // Basic validation
-      if (!username || !password) {
-        return res.status(400).json({ error: "username and password are required" });
+      const username = normalizeUsername(req.body?.username);
+      const password = req.body?.password;
+      if (!username || username.length > 100) {
+        throw createHttpError(400, "A valid username is required");
       }
-
-      // Convert undefined optional fields to null for mysql2
-      if (typeof email === 'undefined') email = null;
-      if (typeof role === 'undefined' || role === null) role = 'user';
-
-      const sql = "INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)";
-      const [result] = await db.execute(sql, [username, password, role, email]);
-      res.json({ id: result.insertId, message: "User created successfully" });
-    } catch (err) {
-      console.error('Error in POST /api/users:', err);
-      res.status(500).json({ error: err.message });
+      validatePassword(password);
+      const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+      const role = req.user.role === "admin" && req.body?.role === "admin" ? "admin" : "user";
+      const email = typeof req.body?.email === "string" ? req.body.email.trim() || null : null;
+      const [result] = await db.execute(
+        "INSERT INTO users (username, password_hash, password, role, email) VALUES (?, ?, NULL, ?, ?)",
+        [username, passwordHash, role, email]
+      );
+      res.status(201).json({ id: result.insertId, message: "User created successfully" });
+    } catch (error) {
+      if (error.code === "ER_DUP_ENTRY") {
+        res.status(409).json({ error: "Username already exists" });
+        return;
+      }
+      sendError(res, error);
     }
   });
 
-  // PUT update user
   router.put("/:id", async (req, res) => {
     try {
-      const { username, password, role } = req.body;
-      const sql = "UPDATE users SET username = ?, password = ?, role = ? WHERE id = ?";
-      const [result] = await db.execute(sql, [username, password, role, req.params.id]);
+      requireSelfOrAdmin(req, req.params.id);
+      const isAdmin = req.user.role === "admin";
+      const fields = [];
+      const values = [];
+
+      if (typeof req.body?.username === "string") {
+        const username = normalizeUsername(req.body.username);
+        if (!username || username.length > 100) {
+          throw createHttpError(400, "A valid username is required");
+        }
+        fields.push("username = ?");
+        values.push(username);
+      }
+      if (typeof req.body?.email === "string" && isAdmin) {
+        fields.push("email = ?");
+        values.push(req.body.email.trim() || null);
+      }
+      if (req.body?.password !== undefined) {
+        validatePassword(req.body.password);
+        fields.push("password_hash = ?", "password = NULL");
+        values.push(await bcrypt.hash(req.body.password, BCRYPT_COST));
+      }
+      if (Object.hasOwn(req.body || {}, "role") && !isAdmin) {
+        throw createHttpError(403, "Only administrators may change roles");
+      }
+      if (isAdmin && ["admin", "user"].includes(req.body?.role)) {
+        fields.push("role = ?");
+        values.push(req.body.role);
+      }
+      if (fields.length === 0) {
+        throw createHttpError(400, "No permitted fields to update");
+      }
+      values.push(req.params.id);
+      const [result] = await db.execute(
+        `UPDATE users SET ${fields.join(", ")} WHERE id = ?`,
+        values
+      );
       if (result.affectedRows === 0) {
         res.status(404).json({ error: "User not found" });
         return;
       }
       res.json({ message: "User updated successfully" });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
+    } catch (error) {
+      if (error.code === "ER_DUP_ENTRY") {
+        res.status(409).json({ error: "Username already exists" });
+        return;
+      }
+      sendError(res, error);
     }
   });
 
-  // DELETE user
-  router.delete("/:id", async (req, res) => {
+  router.delete("/:id", requireAdminSession, async (req, res) => {
     try {
+      if (String(req.user.id) === String(req.params.id)) {
+        throw createHttpError(400, "Administrators cannot delete their own account");
+      }
+      await db.execute(
+        "UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL",
+        [req.params.id]
+      );
       const [result] = await db.execute("DELETE FROM users WHERE id = ?", [req.params.id]);
       if (result.affectedRows === 0) {
         res.status(404).json({ error: "User not found" });
         return;
       }
       res.json({ message: "User deleted successfully" });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // POST login
-  router.post("/login", async (req, res) => {
-    try {
-      console.log("Login request body:", req.body);
-      const { username, password } = req.body;
-
-      if (!username || !password) {
-        return res.status(400).json({ error: "Username and password are required" });
-      }
-
-      // 检查用户是否存在
-      const [rows] = await db.execute("SELECT id, username, password, role FROM users WHERE username = ?", [username]);
-
-      if (rows.length === 0) {
-        return res.status(401).json({ error: "用户名不存在" });
-      }
-
-      const user = rows[0];
-
-      // 简单密码验证（生产环境应该使用哈希）
-      if (user.password !== password) {
-        return res.status(401).json({ error: "密码错误" });
-      }
-
-      // 登录成功，返回用户信息（不包含密码）
-      res.json({
-        message: "Login successful",
-        user: {
-          id: user.id,
-          username: user.username,
-          role: user.role
-        }
-      });
-
-    } catch (err) {
-      res.status(500).json({ error: err.message });
+    } catch (error) {
+      sendError(res, error);
     }
   });
 
   return router;
 };
+
+module.exports.LoginFailureLimiter = LoginFailureLimiter;
+module.exports.loginFailureLimiter = failureLimiter;

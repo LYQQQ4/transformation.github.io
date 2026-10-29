@@ -11,6 +11,7 @@
     "migrate:order-remarks": "node scripts/migrate_unified_order_remarks.js",
     "rollback:user-profiles": "node scripts/rollback_user_profiles_migration.js",
     "test:smoke": "node scripts/api_module_smoke.js",
+    "test:auth-security": "node scripts/auth_security_test.js",
     "test:billing": "node scripts/billing_template_test.js",
     "test:billing-formula": "node scripts/billing_formula_test.js",
     "test:billing-batch": "node scripts/billing_batch_test.js",
@@ -29,6 +30,7 @@
     "pm2:logs": "pm2 logs"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.18.2",

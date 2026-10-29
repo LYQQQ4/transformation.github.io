@@ -1,164 +1,174 @@
-require('dotenv').config();
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const mysql = require("mysql2/promise");
 const path = require("path");
+const { migrateAuthSchema } = require("../scripts/migrate_auth_sessions");
+const { loadSession, requireSession, sendError } = require("./lib/request_auth");
 
 const app = express();
+const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0";
+const NODE_ENV = process.env.NODE_ENV || "development";
+const isProduction = NODE_ENV === "production";
 
-// 从环境变量读取配置，如果没有则使用默认值
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
-const NODE_ENV = process.env.NODE_ENV || 'development';
-
-const defaultAllowedOrigins = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000"
-];
-
-const configuredCorsOrigin = (() => {
-  if (process.env.CORS_ORIGIN) {
-    const val = process.env.CORS_ORIGIN.trim();
-    if (val === "*") return true;
-    return val.split(',').map(origin => origin.trim()).filter(Boolean);
+function requiredProductionValue(name, value) {
+  if (isProduction && (!value || !String(value).trim())) {
+    throw new Error(`${name} must be set in production`);
   }
-  return defaultAllowedOrigins;
-})();
+  return value || "";
+}
 
-const allowNullOrigin = process.env.ALLOW_NULL_ORIGIN !== 'false';
+const dbPassword = requiredProductionValue(
+  "DB_PASSWORD or MYSQL_ROOT_PASSWORD",
+  process.env.DB_PASSWORD || process.env.MYSQL_ROOT_PASSWORD
+);
+const userDbPassword = requiredProductionValue(
+  "USER_DB_PASSWORD or DB_PASSWORD",
+  process.env.USER_DB_PASSWORD || process.env.DB_PASSWORD || process.env.MYSQL_ROOT_PASSWORD
+);
+const rawCorsOrigin = requiredProductionValue("CORS_ORIGIN", process.env.CORS_ORIGIN);
+if (isProduction && rawCorsOrigin === "*") {
+  throw new Error("CORS_ORIGIN=* is forbidden in production");
+}
+
+const configuredCorsOrigins = (rawCorsOrigin || "http://localhost:3000")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowNullOrigin = process.env.ALLOW_NULL_ORIGIN === "true";
 
 const corsOptions = {
-  origin: (origin, callback) => {
+  origin(origin, callback) {
     if (!origin) {
       callback(null, true);
       return;
     }
-
-    if (origin === 'null') {
+    if (origin === "null") {
       callback(null, allowNullOrigin);
       return;
     }
-
-    if (configuredCorsOrigin === true) {
-      callback(null, true);
-      return;
-    }
-
-    if (configuredCorsOrigin.includes(origin)) {
-      callback(null, true);
-      return;
-    }
-
-    callback(null, false);
+    callback(null, configuredCorsOrigins.includes(origin));
   },
   credentials: true,
   optionsSuccessStatus: 200
 };
 
-// Middleware
-app.use(cors(corsOptions));
-app.use(express.json({ limit: '10mb' })); // 限制请求体大小
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// 安全头部
-app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  next();
-});
-
-// Database connections - 从环境变量读取
 const dbConfig = {
   host: process.env.DB_HOST || "127.0.0.1",
-  port: parseInt(process.env.DB_PORT) || 3306,
+  port: Number(process.env.DB_PORT || 3306),
   user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "",
+  password: dbPassword,
   database: process.env.DB_NAME || "order_system",
   waitForConnections: true,
-  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT) || 10,
-  queueLimit: parseInt(process.env.DB_QUEUE_LIMIT) || 0,
-  ssl: process.env.DB_SSL === 'true' ? {} : false,
-  connectTimeout: parseInt(process.env.DB_CONNECT_TIMEOUT) || 60000
+  connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
+  queueLimit: Number(process.env.DB_QUEUE_LIMIT || 0),
+  ssl: process.env.DB_SSL === "true" ? {} : false,
+  connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT || 60000)
 };
-
 const userDbConfig = {
-  host: process.env.USER_DB_HOST || process.env.DB_HOST || "127.0.0.1",
-  port: parseInt(process.env.USER_DB_PORT) || parseInt(process.env.DB_PORT) || 3306,
-  user: process.env.USER_DB_USER || process.env.DB_USER || "root",
-  password: process.env.USER_DB_PASSWORD || process.env.DB_PASSWORD || "",
-  database: process.env.USER_DB_NAME || "user_system",
-  waitForConnections: true,
-  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT) || 10,
-  queueLimit: parseInt(process.env.DB_QUEUE_LIMIT) || 0,
-  ssl: process.env.DB_SSL === 'true' ? {} : false,
-  connectTimeout: parseInt(process.env.DB_CONNECT_TIMEOUT) || 60000
+  ...dbConfig,
+  host: process.env.USER_DB_HOST || dbConfig.host,
+  port: Number(process.env.USER_DB_PORT || dbConfig.port),
+  user: process.env.USER_DB_USER || dbConfig.user,
+  password: userDbPassword,
+  database: process.env.USER_DB_NAME || "user_system"
 };
 
 const pool = mysql.createPool(dbConfig);
 const userPool = mysql.createPool(userDbConfig);
 
-// Test connections and start server
-(async () => {
+app.set("trust proxy", process.env.TRUST_PROXY === "true" ? 1 : false);
+app.use(cors(corsOptions));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  if (isProduction) {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000");
+  }
+  const json = res.json.bind(res);
+  res.json = function sanitizedJson(body) {
+    if (res.statusCode >= 500 && body && typeof body === "object" && body.error) {
+      return json({ ...body, error: "Internal server error" });
+    }
+    return json(body);
+  };
+  next();
+});
+app.use((req, res, next) => loadSession(userPool, req, res, next));
+
+app.get("/api/test", (_req, res) => {
+  res.json({ message: "API is working", timestamp: new Date().toISOString() });
+});
+app.use("/api/auth", require("./routes/auth")(userPool));
+app.use("/api/users", require("./routes/users")(userPool));
+
+const protectedRoutes = [
+  ["/api/orders", require("./routes/orders")(pool, userPool)],
+  ["/api/packages", require("./routes/packages")(pool)],
+  ["/api/pickup-trackings", require("./routes/pickup_trackings")(pool, userPool)],
+  ["/api/transfers", require("./routes/transfer")(pool, userPool)],
+  ["/api/guests", require("./routes/guests")(userPool)],
+  ["/api/senders", require("./routes/senders")(userPool, pool)],
+  ["/api/customers", require("./routes/customers")(userPool, pool)],
+  ["/api/user-profiles", require("./routes/user_profiles")(userPool, pool)],
+  ["/api/input-memory", require("./routes/input_memory")(pool, userPool)],
+  ["/api/products", require("./routes/products")(pool)],
+  ["/api/customs-clearance", require("./routes/customs_clearance")(pool, userPool)],
+  ["/api/billing", require("./routes/billing")(pool, userPool)],
+  ["/api/reports", require("./routes/reports")(pool, userPool)]
+];
+for (const [route, handler] of protectedRoutes) {
+  app.use(route, requireSession, handler);
+}
+
+app.use(express.static(path.join(__dirname, "../frontend")));
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(__dirname, "../frontend/index.html"));
+});
+app.use((req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
+app.use((error, _req, res, next) => {
+  void next;
+  sendError(res, error);
+});
+
+async function verifyDatabase(poolToCheck, name) {
+  const connection = await poolToCheck.getConnection();
+  connection.release();
+  console.log(`Connected to ${name} database.`);
+}
+
+async function start() {
+  await verifyDatabase(pool, "order_system");
+  await verifyDatabase(userPool, "user_system");
+  const migrationConnection = await mysql.createConnection(userDbConfig);
   try {
-    const connection = await pool.getConnection();
-    console.log("Connected to order_system database.");
-    connection.release();
-  } catch (err) {
-    console.error("Error connecting to order_system database:", err.message);
+    await migrateAuthSchema(migrationConnection, userDbConfig.database);
+  } finally {
+    await migrationConnection.end();
   }
 
-  try {
-    const connection = await userPool.getConnection();
-    console.log("Connected to user_system database.");
-    connection.release();
-  } catch (err) {
-    console.error("Error connecting to user_system database:", err.message);
-  }
-
-  // Routes - moved inside async function
-  app.get("/api/test", (req, res) => {
-    res.json({ message: "API is working", timestamp: new Date().toISOString() });
-  });
-
-  // API routes
-  app.use("/api/orders", require("./routes/orders")(pool, userPool));
-  app.use("/api/packages", require("./routes/packages")(pool));
-  app.use("/api/pickup-trackings", require("./routes/pickup_trackings")(pool, userPool));
-  app.use("/api/transfers", require("./routes/transfer")(pool, userPool));
-  app.use("/api/users", require("./routes/users")(userPool));
-  app.use("/api/guests", require("./routes/guests")(userPool));
-  app.use("/api/senders", require("./routes/senders")(userPool, pool));
-  app.use("/api/customers", require("./routes/customers")(userPool, pool));
-  app.use("/api/user-profiles", require("./routes/user_profiles")(userPool, pool));
-  app.use("/api/input-memory", require("./routes/input_memory")(pool, userPool));
-  app.use("/api/products", require("./routes/products")(pool));
-  app.use("/api/customs-clearance", require("./routes/customs_clearance")(pool, userPool));
-  app.use("/api/billing", require("./routes/billing")(pool, userPool));
-  app.use("/api/reports", require("./routes/reports")(pool, userPool));
-
-  // Serve static files from frontend - AFTER API routes
-  app.use(express.static(path.join(__dirname, "../frontend")));
-
-  // Default route to serve frontend
-  app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "../frontend/index.html"));
-  });
-
-  // Start server after database connections are tested
   const server = app.listen(PORT, HOST, () => {
-    console.log(`=================================`);
-    console.log(`环境: ${NODE_ENV}`);
-    console.log(`服务器运行在 http://${HOST}:${PORT}`);
-    console.log(`服务器监听地址: ${server.address().address}:${server.address().port}`);
-    console.log(`=================================`);
+    console.log(`Environment: ${NODE_ENV}`);
+    console.log(`Server listening on http://${HOST}:${PORT}`);
   });
+  server.on("error", (error) => {
+    console.error("Server error:", error.code || "server_error");
+    process.exitCode = 1;
+  });
+}
 
-  server.on('error', (err) => {
-    console.error('Server error:', err);
+if (require.main === module) {
+  start().catch((error) => {
+    console.error("Application startup failed:", error.code || error.message);
+    process.exitCode = 1;
   });
+}
 
-  server.on('listening', () => {
-    console.log('Server is now listening for connections');
-  });
-})();
+module.exports = { app, start };

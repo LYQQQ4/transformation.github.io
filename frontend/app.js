@@ -7,6 +7,10 @@ const API_BASE = (() => {
 })();
 window.API_BASE = API_BASE;
 
+function apiFetch(input, init = {}) {
+    return window.fetch(input, { ...init, credentials: "include" });
+}
+
 // User authentication state
 let currentUser = null;
 let currentOrderDetailSerial = null;
@@ -196,12 +200,21 @@ function showLoginMessage(message, type = "error") {
 }
 
 // Authentication functions
-function checkAuthState() {
-    const savedUser = localStorage.getItem("currentUser");
-    if (savedUser) {
-        currentUser = JSON.parse(savedUser);
+async function checkAuthState() {
+    try {
+        const response = await apiFetch(`${API_BASE}/auth/me`, {
+            credentials: "include"
+        });
+        if (!response.ok) {
+            currentUser = null;
+            showAuthSection();
+            return;
+        }
+        const data = await response.json();
+        currentUser = data.user;
         showMainApp();
-    } else {
+    } catch (_error) {
+        currentUser = null;
         showAuthSection();
     }
 }
@@ -212,7 +225,6 @@ function showAuthSection() {
 }
 
 function showMainApp() {
-    console.log("显示主应用界面，用户:", currentUser); // 调试信息
     document.getElementById("authSection").style.display = "none";
     document.getElementById("mainApp").style.display = "block";
     const currentUserEl = document.getElementById("currentUser");
@@ -227,17 +239,6 @@ function showMainApp() {
     showPage("viewOrders");
 }
 
-function showLoginForm() {
-    document.getElementById("loginForm").style.display = "block";
-    document.getElementById("registerForm").style.display = "none";
-    document.getElementById("loginMessage").textContent = ""; // Clear login message
-}
-
-function showRegisterForm() {
-    document.getElementById("loginForm").style.display = "none";
-    document.getElementById("registerForm").style.display = "block";
-    document.getElementById("loginMessage").textContent = ""; // Clear login message
-}
 
 async function login() {
     const username = document.getElementById("loginUsername").value;
@@ -249,9 +250,10 @@ async function login() {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/users/login`, {
+        const response = await apiFetch(`${API_BASE}/users/login`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "include",
             body: JSON.stringify({ username, password })
         });
 
@@ -259,7 +261,6 @@ async function login() {
 
         if (response.ok) {
             currentUser = data.user;
-            localStorage.setItem("currentUser", JSON.stringify(currentUser));
             showMessage("登录成功！正在跳转...");
             showMainApp();
             // 异步加载数据
@@ -273,50 +274,20 @@ async function login() {
     }
 }
 
-async function register() {
-    const username = document.getElementById("registerUsername").value;
-    const password = document.getElementById("registerPassword").value;
-    const confirmPassword = document.getElementById("registerConfirmPassword").value;
-
-    if (!username || !password) {
-        showMessage("请输入用户名和密码", "error");
-        return;
-    }
-
-    if (password !== confirmPassword) {
-        showMessage("两次输入的密码不一致", "error");
-        return;
-    }
-
+async function logout() {
+    let logoutFailed = false;
     try {
-        const response = await fetch(`${API_BASE}/users`, {
+        await apiFetch(`${API_BASE}/auth/logout`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username, password, role: "user" })
+            credentials: "include"
         });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            showMessage("注册成功，请登录");
-            showLoginForm();
-            // 清空注册表单
-            document.getElementById("registerUsername").value = "";
-            document.getElementById("registerPassword").value = "";
-            document.getElementById("registerConfirmPassword").value = "";
-        } else {
-            showMessage(data.error || "注册失败", "error");
-        }
     } catch (error) {
-        showMessage("注册失败: " + error.message, "error");
+        logoutFailed = true;
+        console.error("Logout request failed:", error.message);
     }
-}
-
-function logout() {
     currentUser = null;
-    localStorage.removeItem("currentUser");
     updateDeleteOrdersMenuVisibility();
-    showMessage("已退出登录");
+    showMessage(logoutFailed ? "退出请求失败，请关闭浏览器后重试" : "已退出登录", logoutFailed ? "error" : "success");
     showAuthSection();
 }
 
@@ -1024,7 +995,7 @@ async function downloadBulkBasicInfoTemplate() {
     try {
         const query = new URLSearchParams();
         serialNumbers.forEach((serialNumber) => query.append("serial_numbers", serialNumber));
-        const response = await fetch(`${API_BASE}/orders/bulk-basic-info-template?${query}`, {
+        const response = await apiFetch(`${API_BASE}/orders/bulk-basic-info-template?${query}`, {
             headers: getAuthHeaders(),
         });
         if (!response.ok) {
@@ -1081,7 +1052,7 @@ async function previewBulkBasicInfo() {
     formData.append("excelFile", file);
     showBulkBasicInfoMessage("正在校验文件...");
     try {
-        const response = await fetch(`${API_BASE}/orders/parse-bulk-basic-info`, {
+        const response = await apiFetch(`${API_BASE}/orders/parse-bulk-basic-info`, {
             method: "POST",
             headers: getAuthHeaders(),
             body: formData,
@@ -1113,7 +1084,7 @@ async function submitBulkBasicInfo(file) {
     formData.append("excelFile", file);
     showBulkBasicInfoMessage("正在导入...");
     try {
-        const response = await fetch(`${API_BASE}/orders/bulk-basic-info`, {
+        const response = await apiFetch(`${API_BASE}/orders/bulk-basic-info`, {
             method: "POST",
             headers: getAuthHeaders(),
             body: formData,
@@ -1291,7 +1262,7 @@ async function batchUpdateOrderDate() {
     orderBatchDateSubmitting = true;
     updateOrderBatchDateSelectionState();
     try {
-        const response = await fetch(`${API_BASE}/orders/batch-date`, {
+        const response = await apiFetch(`${API_BASE}/orders/batch-date`, {
             method: "PUT",
             headers: getAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({
@@ -1326,11 +1297,7 @@ async function batchUpdateOrderDate() {
 }
 
 function getAuthHeaders(extraHeaders = {}) {
-    const headers = { ...extraHeaders };
-    if (currentUser?.id) {
-        headers["x-user-id"] = String(currentUser.id);
-    }
-    return headers;
+    return { ...extraHeaders };
 }
 
 function updateDeleteOrdersMenuVisibility() {
@@ -1421,7 +1388,7 @@ async function legacyQueryReports() {
 
     try {
         showReportManagementMessage("正在查询报表...", "info");
-        const response = await fetch(getReportRequestUrl(reportType, serialNumber), {
+        const response = await apiFetch(getReportRequestUrl(reportType, serialNumber), {
             headers: getAuthHeaders()
         });
         const data = await response.json();
@@ -1454,7 +1421,7 @@ async function legacyExportReports() {
 
     try {
         showReportManagementMessage("正在导出报表...", "info");
-        const response = await fetch(getReportExportUrl(reportType, serialNumber), {
+        const response = await apiFetch(getReportExportUrl(reportType, serialNumber), {
             headers: getAuthHeaders()
         });
 
@@ -1500,7 +1467,7 @@ async function queryReports() {
 
     try {
         showReportManagementMessage("\u6b63\u5728\u67e5\u8be2\u62a5\u8868...", "info");
-        const response = await fetch(getReportRequestUrl(reportType, serialNumber), {
+        const response = await apiFetch(getReportRequestUrl(reportType, serialNumber), {
             headers: getAuthHeaders()
         });
         const data = await response.json();
@@ -1537,7 +1504,7 @@ async function exportReports() {
 
     try {
         showReportManagementMessage("\u6b63\u5728\u5bfc\u51fa\u62a5\u8868...", "info");
-        const response = await fetch(getReportExportUrl(reportType, serialNumber), {
+        const response = await apiFetch(getReportExportUrl(reportType, serialNumber), {
             headers: getAuthHeaders()
         });
 
@@ -1684,7 +1651,7 @@ async function loadOrders(pageName = ORDER_PAGE_VIEW) {
         activeOrderPageContext = pageName;
         ensureOrderIndexStructure(pageName);
         const query = buildOrderFilterQuery(pageName);
-        const response = await fetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
+        const response = await apiFetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
         const data = await response.json();
         displayOrders(data.orders, pageName);
     } catch (error) {
@@ -2265,7 +2232,7 @@ function legacyRenderBillingDetail(container, record, options = {}) {
 async function loadBillingRecords() {
     ensureBillingPageStructure();
     try {
-        const response = await fetch(`${API_BASE}/billing`, { headers: getAuthHeaders() });
+        const response = await apiFetch(`${API_BASE}/billing`, { headers: getAuthHeaders() });
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error || "加载账单信息失败");
@@ -2296,7 +2263,7 @@ async function loadBillingRecords() {
 }
 
 async function fetchBillingRecordBySerial(serialNumber) {
-    const response = await fetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, { headers: getAuthHeaders() });
+    const response = await apiFetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, { headers: getAuthHeaders() });
     const data = await response.json();
     if (!response.ok) {
         throw new Error(data.error || "加载账单详情失败");
@@ -2374,7 +2341,7 @@ async function legacySaveBillingRecord(detailKey) {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, {
+        const response = await apiFetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
@@ -2985,7 +2952,7 @@ async function legacyTemplateSaveBillingRecord(detailKey) {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, {
+        const response = await apiFetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
@@ -3382,7 +3349,7 @@ async function persistBillingDraftRecord(detailKey, draftRecord, options = {}) {
 
     container.dataset.submitting = "true";
     try {
-        const response = await fetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, {
+        const response = await apiFetch(`${API_BASE}/billing/serial/${encodeURIComponent(serialNumber)}`, {
             method: "PUT",
             headers: getAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(payload)
@@ -3770,7 +3737,7 @@ async function exportBillingExcel() {
     billingBatchBusy = true;
     updateBillingSelectionState();
     try {
-        const response = await fetch(`${API_BASE}/billing/export`, {
+        const response = await apiFetch(`${API_BASE}/billing/export`, {
             method: "POST",
             headers: getAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({ serial_numbers: Array.from(selectedBillingSerials) })
@@ -3829,7 +3796,7 @@ async function importBillingExcel(input) {
     try {
         const body = new FormData();
         body.append("file", file);
-        const response = await fetch(`${API_BASE}/billing/import`, {
+        const response = await apiFetch(`${API_BASE}/billing/import`, {
             method: "POST", headers: getAuthHeaders(), body
         });
         const data = await response.json();
@@ -4034,7 +4001,7 @@ async function loadOrderPackageDetails(serialNumber) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
+        const response = await apiFetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
         if (!response.ok) {
             if (response.status === 404) {
                 renderOrderPackageContent(serialNumber, null);
@@ -4117,7 +4084,7 @@ async function loadOrderPickupTrackingDetails(serialNumber) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/pickup-trackings/serial/${encodeURIComponent(serialNumber)}`);
+        const response = await apiFetch(`${API_BASE}/pickup-trackings/serial/${encodeURIComponent(serialNumber)}`);
         if (!response.ok) {
             if (response.status === 404) {
                 renderOrderPickupTrackingContent(serialNumber, null);
@@ -4219,7 +4186,7 @@ async function loadOrderDeliveryTrackingDetails(serialNumber) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/transfers/serial/${encodeURIComponent(serialNumber)}`);
+        const response = await apiFetch(`${API_BASE}/transfers/serial/${encodeURIComponent(serialNumber)}`);
         if (!response.ok) {
             if (response.status === 404) {
                 renderOrderDeliveryTrackingContent(serialNumber, null);
@@ -4298,7 +4265,7 @@ async function loadOrderCustomsClearanceDetails(serialNumber) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/customs-clearance/serial/${encodeURIComponent(serialNumber)}`);
+        const response = await apiFetch(`${API_BASE}/customs-clearance/serial/${encodeURIComponent(serialNumber)}`);
         if (!response.ok) {
             if (response.status === 404) {
                 renderOrderCustomsClearanceContent(serialNumber, null);
@@ -4333,7 +4300,7 @@ function openCustomsFormFromOrderDetail() {
 
 async function showOrderDetails(id) {
     try {
-        const response = await fetch(`${API_BASE}/orders/${id}`);
+        const response = await apiFetch(`${API_BASE}/orders/${id}`);
         const data = await response.json();
         if (!response.ok || !data.order) {
             showMessage(data.error || "加载订单详情失败", "error");
@@ -4347,7 +4314,7 @@ async function showOrderDetails(id) {
 
 async function showOrderDetailsBySerial(serialNumber) {
     try {
-        const response = await fetch(`${API_BASE}/orders/serial/${encodeURIComponent(serialNumber)}`);
+        const response = await apiFetch(`${API_BASE}/orders/serial/${encodeURIComponent(serialNumber)}`);
         if (response.status === 404) {
             renderOrderDetailView(buildEmptyOrderForSerial(serialNumber));
             return;
@@ -4491,7 +4458,7 @@ async function previewExcel() {
         formData.append("excelFile", file);
 
         // 发送到后端API
-        const response = await fetch(`${API_BASE}/orders/parse-excel`, {
+        const response = await apiFetch(`${API_BASE}/orders/parse-excel`, {
             method: "POST",
             body: formData
         });
@@ -4535,7 +4502,7 @@ async function importExcelBatch() {
         formData.append("excelFile", file);
 
         // 发送到批量导入API
-        const response = await fetch(`${API_BASE}/orders/import-excel`, {
+        const response = await apiFetch(`${API_BASE}/orders/import-excel`, {
             method: "POST",
             body: formData
         });
@@ -4636,7 +4603,7 @@ function showImportMessage(message, type = "info") {
 
 async function downloadOrderImportTemplate() {
     try {
-        const response = await fetch(`${API_BASE}/orders/import-template`);
+        const response = await apiFetch(`${API_BASE}/orders/import-template`);
         if (!response.ok) {
             const error = await response.json();
             showImportMessage(error.error || "下载模板失败", "error");
@@ -4695,13 +4662,13 @@ async function saveOrder() {
     try {
         let response;
         if (form.dataset.editId) {
-            response = await fetch(`${API_BASE}/orders/${form.dataset.editId}`, {
+            response = await apiFetch(`${API_BASE}/orders/${form.dataset.editId}`, {
                 method: "PUT",
                 headers: getAuthHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify(orderData)
             });
         } else {
-            response = await fetch(`${API_BASE}/orders`, {
+            response = await apiFetch(`${API_BASE}/orders`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(orderData)
@@ -4732,7 +4699,7 @@ async function saveOrder() {
 
 async function editOrder(id) {
     try {
-        const response = await fetch(`${API_BASE}/orders/${id}`);
+        const response = await apiFetch(`${API_BASE}/orders/${id}`);
         const data = await response.json();
         showOrderForm(data.order);
     } catch (error) {
@@ -4757,7 +4724,7 @@ async function deleteOrderFromManagement(id) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/orders/delete-management/${id}`, {
+        const response = await apiFetch(`${API_BASE}/orders/delete-management/${id}`, {
             method: "DELETE",
             headers: getAuthHeaders({
                 "x-order-delete-source": "delete-management"
@@ -4865,7 +4832,7 @@ async function loadAndFilterOrders(pageName = activeOrderPageContext) {
         activeOrderPageContext = pageName;
         ensureOrderIndexStructure(pageName);
         const query = buildOrderFilterQuery(pageName);
-        const response = await fetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
+        const response = await apiFetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
         const data = await response.json();
         const state = getOrderPageState(pageName);
 
@@ -4908,7 +4875,7 @@ async function loadDeleteOrders() {
 // User functions
 async function loadUsers() {
     try {
-        const response = await fetch(`${API_BASE}/users`);
+        const response = await apiFetch(`${API_BASE}/users`);
         const data = await response.json();
         displayUsers(data.users);
     } catch (error) {
@@ -4965,13 +4932,13 @@ async function saveUser() {
     try {
         let response;
         if (form.dataset.editId) {
-            response = await fetch(`${API_BASE}/users/${form.dataset.editId}`, {
+            response = await apiFetch(`${API_BASE}/users/${form.dataset.editId}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(userData)
             });
         } else {
-            response = await fetch(`${API_BASE}/users`, {
+            response = await apiFetch(`${API_BASE}/users`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(userData)
@@ -4993,7 +4960,7 @@ async function saveUser() {
 
 async function editUser(id) {
     try {
-        const response = await fetch(`${API_BASE}/users/${id}`);
+        const response = await apiFetch(`${API_BASE}/users/${id}`);
         const data = await response.json();
         showUserForm(data.user);
     } catch (error) {
@@ -5004,7 +4971,7 @@ async function editUser(id) {
 async function deleteUser(id) {
     if (confirm("确定删除此用户吗？")) {
         try {
-            const response = await fetch(`${API_BASE}/users/${id}`, { method: "DELETE" });
+            const response = await apiFetch(`${API_BASE}/users/${id}`, { method: "DELETE" });
             if (response.ok) {
                 showMessage("用户删除成功");
                 loadUsers();
@@ -5021,7 +4988,7 @@ async function deleteUser(id) {
 // Package functions
 async function loadPackages() {
     try {
-        const response = await fetch(`${API_BASE}/packages`);
+        const response = await apiFetch(`${API_BASE}/packages`);
         const data = await response.json();
         displayPackages(data.packages);
     } catch (error) {
@@ -5095,7 +5062,7 @@ function displayPackages(packages) {
 
 async function editPackage(serialNumber) {
     try {
-        const response = await fetch(`${API_BASE}/packages/serial/${serialNumber}`);
+        const response = await apiFetch(`${API_BASE}/packages/serial/${serialNumber}`);
         const data = await response.json();
         showPackageForm(data.package);
     } catch (error) {
@@ -5239,7 +5206,7 @@ function showPackageForm(packageData = null) {
         }
         lastPackageSerial = serial;
         try {
-            const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serial)}`);
+            const response = await apiFetch(`${API_BASE}/packages/serial/${encodeURIComponent(serial)}`);
             if (!response.ok) {
                 showMessage("未找到该流水号的包装信息", "error");
                 clearPackageFormFields();
@@ -5290,7 +5257,7 @@ async function savePackage() {
 
     // 检查流水号是否存在
     try {
-        const checkResponse = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
+        const checkResponse = await apiFetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
         if (checkResponse.status === 404) {
             showMessage("该流水号不存在，无法修改包装信息", "error");
             return;
@@ -5319,7 +5286,7 @@ async function savePackage() {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/packages/serial/${serialNumber}`, {
+        const response = await apiFetch(`${API_BASE}/packages/serial/${serialNumber}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(packageData)
@@ -5345,7 +5312,7 @@ function searchPackages() {
 
 async function loadAndFilterPackages() {
     try {
-        const response = await fetch(`${API_BASE}/packages`);
+        const response = await apiFetch(`${API_BASE}/packages`);
         const data = await response.json();
 
         let filteredPackages = data.packages;
@@ -5509,7 +5476,7 @@ function displayPackages(packages) {
 
 async function editPackage(serialNumber) {
     try {
-        const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
+        const response = await apiFetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
         const data = await response.json();
         showPackageForm({
             serial_number: serialNumber,
@@ -5606,7 +5573,7 @@ function showPackageForm(packageData = null) {
         }
         lastPackageSerial = serial;
         try {
-            const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serial)}`);
+            const response = await apiFetch(`${API_BASE}/packages/serial/${encodeURIComponent(serial)}`);
             if (!response.ok) {
                 showMessage("未找到该流水号的包装信息", "error");
                 clearPackageFormFields();
@@ -5670,7 +5637,7 @@ async function savePackage() {
     }
 
     try {
-        const checkResponse = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
+        const checkResponse = await apiFetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
         if (checkResponse.status === 404) {
             showMessage("该流水号不存在，无法修改包装信息", "error");
             return;
@@ -5698,7 +5665,7 @@ async function savePackage() {
     }));
 
     try {
-        const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`, {
+        const response = await apiFetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ package_items: packageItems })
@@ -5722,7 +5689,7 @@ async function savePackage() {
 
 async function loadAndFilterPackages() {
     try {
-        const response = await fetch(`${API_BASE}/packages`);
+        const response = await apiFetch(`${API_BASE}/packages`);
         const data = await response.json();
 
         let filteredPackages = groupPackagesBySerial(data.packages || []);
@@ -5765,7 +5732,7 @@ async function previewPackageExcel() {
         formData.append("excelFile", file);
 
         // 发送到后端API
-        const response = await fetch(`${API_BASE}/packages/parse-excel`, {
+        const response = await apiFetch(`${API_BASE}/packages/parse-excel`, {
             method: "POST",
             body: formData
         });
@@ -5806,7 +5773,7 @@ async function importPackageExcelBatch() {
         formData.append("excelFile", file);
 
         // 发送到批量导入API
-        const response = await fetch(`${API_BASE}/packages/import-excel`, {
+        const response = await apiFetch(`${API_BASE}/packages/import-excel`, {
             method: "POST",
             body: formData
         });
@@ -6032,7 +5999,7 @@ async function loadPackageBoxTypes(forceReload = false) {
         return packageBoxTypes;
     }
 
-    const response = await fetch(`${API_BASE}/packages/box-types`);
+    const response = await apiFetch(`${API_BASE}/packages/box-types`);
     const data = await response.json();
     if (!response.ok) {
         throw new Error(data.error || "加载箱型失败");
@@ -6425,7 +6392,7 @@ async function loadPackages() {
     await ensurePackageBoxTypesLoaded();
 
     try {
-        const response = await fetch(`${API_BASE}/packages`);
+        const response = await apiFetch(`${API_BASE}/packages`);
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error || "加载包装信息失败");
@@ -6465,7 +6432,7 @@ async function editPackage(serialNumber) {
     await ensurePackageBoxTypesLoaded();
 
     try {
-        const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
+        const response = await apiFetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error || "加载包装信息失败");
@@ -6588,7 +6555,7 @@ async function showPackageForm(packageData = null) {
         lastPackageSerial = serial;
 
         try {
-            const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serial)}`);
+            const response = await apiFetch(`${API_BASE}/packages/serial/${encodeURIComponent(serial)}`);
             if (!response.ok) {
                 if (response.status === 404) {
                     clearPackageFormFields();
@@ -6691,7 +6658,7 @@ async function savePackage() {
     }
 
     try {
-        const checkResponse = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
+        const checkResponse = await apiFetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`);
         if (checkResponse.status === 404) {
             showMessage("该流水号不存在，无法修改包装信息", "error");
             return;
@@ -6720,7 +6687,7 @@ async function savePackage() {
     }));
 
     try {
-        const response = await fetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`, {
+        const response = await apiFetch(`${API_BASE}/packages/serial/${encodeURIComponent(serialNumber)}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ package_items: packageItems })
@@ -6762,7 +6729,7 @@ async function previewPackageExcel() {
 
     try {
         showPackageImportMessage("正在解析 Excel 文件...", "info");
-        const response = await fetch(`${API_BASE}/packages/parse-excel`, {
+        const response = await apiFetch(`${API_BASE}/packages/parse-excel`, {
             method: "POST",
             body: formData
         });
@@ -6797,7 +6764,7 @@ async function importPackageExcelBatch() {
 
     try {
         showPackageImportMessage("正在批量导入包装 Excel 数据...", "info");
-        const response = await fetch(`${API_BASE}/packages/import-excel`, {
+        const response = await apiFetch(`${API_BASE}/packages/import-excel`, {
             method: "POST",
             body: formData
         });
@@ -6857,7 +6824,7 @@ function showPackageImportMessage(message, type = "info") {
 
 async function downloadPackageImportTemplate() {
     try {
-        const response = await fetch(`${API_BASE}/packages/import-template`);
+        const response = await apiFetch(`${API_BASE}/packages/import-template`);
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || "下载模板失败");
@@ -7007,7 +6974,7 @@ async function savePackagingBoxType() {
     const editId = form.dataset.editId;
 
     try {
-        const response = await fetch(editId ? `${API_BASE}/packages/box-types/${editId}` : `${API_BASE}/packages/box-types`, {
+        const response = await apiFetch(editId ? `${API_BASE}/packages/box-types/${editId}` : `${API_BASE}/packages/box-types`, {
             method: editId ? "PUT" : "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
@@ -7028,7 +6995,7 @@ async function savePackagingBoxType() {
 
 async function editPackagingBoxType(id) {
     try {
-        const response = await fetch(`${API_BASE}/packages/box-types/${id}`);
+        const response = await apiFetch(`${API_BASE}/packages/box-types/${id}`);
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error || "加载箱型失败");
@@ -7046,7 +7013,7 @@ async function deletePackagingBoxType(id) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/packages/box-types/${id}`, {
+        const response = await apiFetch(`${API_BASE}/packages/box-types/${id}`, {
             method: "DELETE"
         });
         const data = await response.json();
@@ -7065,7 +7032,7 @@ async function deletePackagingBoxType(id) {
 // Pickup tracking functions
 async function loadPickupTrackings() {
     try {
-        const response = await fetch(`${API_BASE}/pickup-trackings`);
+        const response = await apiFetch(`${API_BASE}/pickup-trackings`);
         const data = await response.json();
         displayPickupTrackings(data.pickupTrackings || []);
     } catch (error) {
@@ -7108,7 +7075,7 @@ function displayPickupTrackings(trackings) {
 
 async function editPickupTracking(serialNumber) {
     try {
-        const response = await fetch(`${API_BASE}/pickup-trackings/serial/${encodeURIComponent(serialNumber)}`);
+        const response = await apiFetch(`${API_BASE}/pickup-trackings/serial/${encodeURIComponent(serialNumber)}`);
         const data = await response.json();
         if (!response.ok) {
             showMessage(data.error || "加载提货运输跟踪失败", "error");
@@ -7264,7 +7231,7 @@ function showPickupTrackingForm(trackingData = null) {
         lastSerial = serial;
 
         try {
-            const response = await fetch(`${API_BASE}/pickup-trackings/serial/${encodeURIComponent(serial)}`);
+            const response = await apiFetch(`${API_BASE}/pickup-trackings/serial/${encodeURIComponent(serial)}`);
             if (!response.ok) {
                 showMessage("未找到该流水号的提货运输跟踪信息", "error");
                 clearFields();
@@ -7309,7 +7276,7 @@ async function savePickupTracking() {
     }
 
     try {
-        const checkResponse = await fetch(`${API_BASE}/pickup-trackings/serial/${encodeURIComponent(serialNumber)}`);
+        const checkResponse = await apiFetch(`${API_BASE}/pickup-trackings/serial/${encodeURIComponent(serialNumber)}`);
         if (!checkResponse.ok) {
             showMessage("该流水号不存在，无法修改提货运输跟踪信息", "error");
             return;
@@ -7342,7 +7309,7 @@ async function savePickupTracking() {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/pickup-trackings/serial/${encodeURIComponent(serialNumber)}`, {
+        const response = await apiFetch(`${API_BASE}/pickup-trackings/serial/${encodeURIComponent(serialNumber)}`, {
             method: "PUT",
             headers: getAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(payload)
@@ -7372,7 +7339,7 @@ function searchPickupTrackings() {
 
 async function loadAndFilterPickupTrackings() {
     try {
-        const response = await fetch(`${API_BASE}/pickup-trackings`);
+        const response = await apiFetch(`${API_BASE}/pickup-trackings`);
         const data = await response.json();
 
         let filtered = data.pickupTrackings || [];
@@ -7403,7 +7370,7 @@ async function loadAndFilterPickupTrackings() {
 // Transfer functions
 async function loadTransfers() {
     try {
-        const response = await fetch(`${API_BASE}/transfers`);
+        const response = await apiFetch(`${API_BASE}/transfers`);
         const data = await response.json();
         displayTransfers(data.transfers);
     } catch (error) {
@@ -7457,7 +7424,7 @@ function displayTransfers(transfers) {
 async function editTransfer(serialNumber) {
     try {
         const encoded = encodeURIComponent(serialNumber);
-        const response = await fetch(`${API_BASE}/transfers/serial/${encoded}`);
+        const response = await apiFetch(`${API_BASE}/transfers/serial/${encoded}`);
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error || "加载送货运输跟踪失败");
@@ -7606,7 +7573,7 @@ function showTransferForm(transferData = null) {
         lastTransferSerial = serial;
         try {
             const encoded = encodeURIComponent(serial);
-            const response = await fetch(`${API_BASE}/transfers/serial/${encoded}`);
+            const response = await apiFetch(`${API_BASE}/transfers/serial/${encoded}`);
             if (!response.ok) {
                 showMessage("未找到该流水号的送货运输跟踪信息", "error");
                 clearTransferFormFields();
@@ -7659,7 +7626,7 @@ async function saveTransfer() {
     // 检查流水号是否存在
     try {
         const encoded = encodeURIComponent(serialNumber);
-        const checkResponse = await fetch(`${API_BASE}/transfers/serial/${encoded}`);
+        const checkResponse = await apiFetch(`${API_BASE}/transfers/serial/${encoded}`);
         if (!checkResponse.ok) {
             let errorMessage = "该流水号不存在，无法修改送货运输跟踪信息";
             try {
@@ -7693,7 +7660,7 @@ async function saveTransfer() {
 
     try {
         const encoded = encodeURIComponent(serialNumber);
-        const response = await fetch(`${API_BASE}/transfers/serial/${encoded}`, {
+        const response = await apiFetch(`${API_BASE}/transfers/serial/${encoded}`, {
             method: "PUT",
             headers: getAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(transferData)
@@ -7719,7 +7686,7 @@ function searchTransfers() {
 
 async function loadAndFilterTransfers() {
     try {
-        const response = await fetch(`${API_BASE}/transfers`);
+        const response = await apiFetch(`${API_BASE}/transfers`);
         const data = await response.json();
 
         let filteredTransfers = data.transfers;
@@ -7771,7 +7738,7 @@ async function previewTransferExcel() {
         formData.append("excelFile", file);
 
         // 发送到后端API
-        const response = await fetch(`${API_BASE}/transfers/parse-excel`, {
+        const response = await apiFetch(`${API_BASE}/transfers/parse-excel`, {
             method: "POST",
             body: formData
         });
@@ -7812,7 +7779,7 @@ async function importTransferExcelBatch() {
         formData.append("excelFile", file);
 
         // 发送到批量导入API
-        const response = await fetch(`${API_BASE}/transfers/import-excel`, {
+        const response = await apiFetch(`${API_BASE}/transfers/import-excel`, {
             method: "POST",
             body: formData
         });
@@ -7878,7 +7845,7 @@ function showTransferImportMessage(message, type = "info") {
 // Guest functions
 async function loadGuests() {
     try {
-        const response = await fetch(`${API_BASE}/guests`);
+        const response = await apiFetch(`${API_BASE}/guests`);
         const data = await response.json();
         displayGuests(data.guests);
     } catch (error) {
@@ -7942,7 +7909,7 @@ function hideGuestForm() {
 // Product functions
 async function loadProducts() {
     try {
-        const response = await fetch(`${API_BASE}/products`);
+        const response = await apiFetch(`${API_BASE}/products`);
         const data = await response.json();
         displayProducts(data.products || []);
     } catch (error) {
@@ -8012,13 +7979,13 @@ async function saveProduct() {
     try {
         let response;
         if (editId) {
-            response = await fetch(`${API_BASE}/products/${editId}`, {
+            response = await apiFetch(`${API_BASE}/products/${editId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
         } else {
-            response = await fetch(`${API_BASE}/products`, {
+            response = await apiFetch(`${API_BASE}/products`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
@@ -8040,7 +8007,7 @@ async function saveProduct() {
 
 async function editProduct(id) {
     try {
-        const response = await fetch(`${API_BASE}/products/${id}`);
+        const response = await apiFetch(`${API_BASE}/products/${id}`);
         const data = await response.json();
         if (response.ok) {
             showProductForm(data.product);
@@ -8055,7 +8022,7 @@ async function editProduct(id) {
 async function deleteProduct(id) {
     if (!confirm('确认删除此产品？')) return;
     try {
-        const response = await fetch(`${API_BASE}/products/${id}`, { method: 'DELETE' });
+        const response = await apiFetch(`${API_BASE}/products/${id}`, { method: 'DELETE' });
         const data = await response.json();
         if (response.ok) {
             loadProducts();
@@ -8094,14 +8061,14 @@ async function saveGuest() {
     try {
         let response;
         if (form.dataset.editId) {
-            response = await fetch(`${API_BASE}/guests/${form.dataset.editId}`, {
+            response = await apiFetch(`${API_BASE}/guests/${form.dataset.editId}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(guestData)
             });
         } else {
             // For create, do not send guest_id (DB will generate it)
-            response = await fetch(`${API_BASE}/guests`, {
+            response = await apiFetch(`${API_BASE}/guests`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(guestData)
@@ -8123,7 +8090,7 @@ async function saveGuest() {
 
 async function editGuest(id) {
     try {
-        const response = await fetch(`${API_BASE}/guests/${id}`);
+        const response = await apiFetch(`${API_BASE}/guests/${id}`);
         const data = await response.json();
         showGuestForm(data.guest);
     } catch (error) {
@@ -8134,7 +8101,7 @@ async function editGuest(id) {
 async function deleteGuest(id) {
     if (confirm("确定删除此客户吗？")) {
         try {
-            const response = await fetch(`${API_BASE}/guests/${id}`, { method: "DELETE" });
+            const response = await apiFetch(`${API_BASE}/guests/${id}`, { method: "DELETE" });
             if (response.ok) {
                 showMessage("客户删除成功");
                 loadGuests();
@@ -8155,7 +8122,7 @@ function searchGuests() {
 
 async function loadAndFilterGuests() {
     try {
-        const response = await fetch(`${API_BASE}/guests`);
+        const response = await apiFetch(`${API_BASE}/guests`);
         const data = await response.json();
 
         let filteredGuests = data.guests;
@@ -8201,7 +8168,7 @@ async function previewGuestExcel() {
         formData.append("excelFile", file);
 
         // 发送到后端API
-        const response = await fetch(`${API_BASE}/guests/parse-excel`, {
+        const response = await apiFetch(`${API_BASE}/guests/parse-excel`, {
             method: "POST",
             body: formData
         });
@@ -8263,7 +8230,7 @@ async function importGuestExcelBatch() {
         formData.append("excelFile", file);
 
         // 发送到批量导入API
-        const response = await fetch(`${API_BASE}/guests/import-excel`, {
+        const response = await apiFetch(`${API_BASE}/guests/import-excel`, {
             method: "POST",
             body: formData
         });
@@ -8432,7 +8399,7 @@ function showCustomerImportMessage(message, type = "info") {
 
 async function loadSenders() {
     try {
-        const response = await fetch(`${API_BASE}/senders`);
+        const response = await apiFetch(`${API_BASE}/senders`);
         const data = await response.json();
         displaySenders(data.senders || []);
     } catch (error) {
@@ -8518,13 +8485,13 @@ async function saveSender() {
     try {
         let response;
         if (form.dataset.editId) {
-            response = await fetch(`${API_BASE}/senders/${encodeURIComponent(form.dataset.editId)}`, {
+            response = await apiFetch(`${API_BASE}/senders/${encodeURIComponent(form.dataset.editId)}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(senderData)
             });
         } else {
-            response = await fetch(`${API_BASE}/senders`, {
+            response = await apiFetch(`${API_BASE}/senders`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(senderData)
@@ -8546,7 +8513,7 @@ async function saveSender() {
 
 async function editSender(id) {
     try {
-        const response = await fetch(`${API_BASE}/senders/${encodeURIComponent(id)}`);
+        const response = await apiFetch(`${API_BASE}/senders/${encodeURIComponent(id)}`);
         const data = await response.json();
         if (!response.ok) {
             showMessage(data.error || "加载发件人信息失败", "error");
@@ -8563,7 +8530,7 @@ async function deleteSender(id) {
         return;
     }
     try {
-        const response = await fetch(`${API_BASE}/senders/${encodeURIComponent(id)}`, { method: "DELETE" });
+        const response = await apiFetch(`${API_BASE}/senders/${encodeURIComponent(id)}`, { method: "DELETE" });
         if (response.ok) {
             showMessage("发件人删除成功");
             loadSenders();
@@ -8583,7 +8550,7 @@ function searchSenders() {
 
 async function loadAndFilterSenders() {
     try {
-        const response = await fetch(`${API_BASE}/senders`);
+        const response = await apiFetch(`${API_BASE}/senders`);
         const data = await response.json();
         let filtered = data.senders || [];
 
@@ -8614,7 +8581,7 @@ async function previewSenderExcel() {
         showSenderImportMessage("正在解析Excel文件...", "info");
         const formData = new FormData();
         formData.append("excelFile", fileInput.files[0]);
-        const response = await fetch(`${API_BASE}/senders/parse-excel`, { method: "POST", body: formData });
+        const response = await apiFetch(`${API_BASE}/senders/parse-excel`, { method: "POST", body: formData });
         const result = await response.json();
 
         if (response.ok && result.success) {
@@ -8639,7 +8606,7 @@ async function importSenderExcelBatch() {
         showSenderImportMessage("正在批量导入发件人信息Excel数据...", "info");
         const formData = new FormData();
         formData.append("excelFile", fileInput.files[0]);
-        const response = await fetch(`${API_BASE}/senders/import-excel`, { method: "POST", body: formData });
+        const response = await apiFetch(`${API_BASE}/senders/import-excel`, { method: "POST", body: formData });
         const result = await response.json();
 
         if (response.ok) {
@@ -8658,7 +8625,7 @@ async function importSenderExcelBatch() {
 
 async function loadCustomers() {
     try {
-        const response = await fetch(`${API_BASE}/customers`);
+        const response = await apiFetch(`${API_BASE}/customers`);
         const data = await response.json();
         displayCustomers(data.customers || []);
     } catch (error) {
@@ -8740,13 +8707,13 @@ async function saveCustomer() {
     try {
         let response;
         if (form.dataset.editId) {
-            response = await fetch(`${API_BASE}/customers/${encodeURIComponent(form.dataset.editId)}`, {
+            response = await apiFetch(`${API_BASE}/customers/${encodeURIComponent(form.dataset.editId)}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(customerData)
             });
         } else {
-            response = await fetch(`${API_BASE}/customers`, {
+            response = await apiFetch(`${API_BASE}/customers`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(customerData)
@@ -8768,7 +8735,7 @@ async function saveCustomer() {
 
 async function editCustomer(id) {
     try {
-        const response = await fetch(`${API_BASE}/customers/${encodeURIComponent(id)}`);
+        const response = await apiFetch(`${API_BASE}/customers/${encodeURIComponent(id)}`);
         const data = await response.json();
         if (!response.ok) {
             showMessage(data.error || "加载客户信息失败", "error");
@@ -8785,7 +8752,7 @@ async function deleteCustomer(id) {
         return;
     }
     try {
-        const response = await fetch(`${API_BASE}/customers/${encodeURIComponent(id)}`, { method: "DELETE" });
+        const response = await apiFetch(`${API_BASE}/customers/${encodeURIComponent(id)}`, { method: "DELETE" });
         if (response.ok) {
             showMessage("客户删除成功");
             loadCustomers();
@@ -8805,7 +8772,7 @@ function searchCustomers() {
 
 async function loadAndFilterCustomers() {
     try {
-        const response = await fetch(`${API_BASE}/customers`);
+        const response = await apiFetch(`${API_BASE}/customers`);
         const data = await response.json();
         let filtered = data.customers || [];
 
@@ -8836,7 +8803,7 @@ async function previewCustomerExcel() {
         showCustomerImportMessage("正在解析Excel文件...", "info");
         const formData = new FormData();
         formData.append("excelFile", fileInput.files[0]);
-        const response = await fetch(`${API_BASE}/customers/parse-excel`, { method: "POST", body: formData });
+        const response = await apiFetch(`${API_BASE}/customers/parse-excel`, { method: "POST", body: formData });
         const result = await response.json();
 
         if (response.ok && result.success) {
@@ -8861,7 +8828,7 @@ async function importCustomerExcelBatch() {
         showCustomerImportMessage("正在批量导入客户信息Excel数据...", "info");
         const formData = new FormData();
         formData.append("excelFile", fileInput.files[0]);
-        const response = await fetch(`${API_BASE}/customers/import-excel`, { method: "POST", body: formData });
+        const response = await apiFetch(`${API_BASE}/customers/import-excel`, { method: "POST", body: formData });
         const result = await response.json();
 
         if (response.ok) {
@@ -9078,7 +9045,7 @@ let currentCustomsSearchTerm = "";
 
 async function loadCustomsClearance() {
     try {
-        const response = await fetch(`${API_BASE}/customs-clearance`);
+        const response = await apiFetch(`${API_BASE}/customs-clearance`);
         const data = await response.json();
         displayCustomsClearance(data.records);
     } catch (error) {
@@ -9121,7 +9088,7 @@ function displayCustomsClearance(records) {
 
 async function editCustomsClearance(id) {
     try {
-        const response = await fetch(`${API_BASE}/customs-clearance/${id}`);
+        const response = await apiFetch(`${API_BASE}/customs-clearance/${id}`);
         const data = await response.json();
         showCustomsForm(data.record);
     } catch (error) {
@@ -9266,7 +9233,7 @@ function showCustomsForm(recordData = null) {
         }
         lastCustomsSerial = serial;
         try {
-            const response = await fetch(`${API_BASE}/customs-clearance/serial/${encodeURIComponent(serial)}`);
+            const response = await apiFetch(`${API_BASE}/customs-clearance/serial/${encodeURIComponent(serial)}`);
             if (!response.ok) {
                 if (response.status === 404) {
                     // 流水号不存在，清空表单，允许用户创建新记录
@@ -9338,25 +9305,25 @@ async function saveCustomsClearance() {
         let response;
         if (id) {
             // 更新现有记录
-            response = await fetch(`${API_BASE}/customs-clearance/${id}`, {
+            response = await apiFetch(`${API_BASE}/customs-clearance/${id}`, {
                 method: "PUT",
                 headers: getAuthHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify(recordData)
             });
         } else {
             // 检查流水号是否已存在
-            const checkResponse = await fetch(`${API_BASE}/customs-clearance/serial/${encodeURIComponent(serialNumber)}`);
+            const checkResponse = await apiFetch(`${API_BASE}/customs-clearance/serial/${encodeURIComponent(serialNumber)}`);
             if (checkResponse.ok) {
                 // 记录已存在，使用PUT更新
                 const existingData = await checkResponse.json();
-                response = await fetch(`${API_BASE}/customs-clearance/${existingData.record.id}`, {
+                response = await apiFetch(`${API_BASE}/customs-clearance/${existingData.record.id}`, {
                     method: "PUT",
                     headers: getAuthHeaders({ "Content-Type": "application/json" }),
                     body: JSON.stringify(recordData)
                 });
             } else if (checkResponse.status === 404) {
                 // 记录不存在，创建新记录
-                response = await fetch(`${API_BASE}/customs-clearance`, {
+                response = await apiFetch(`${API_BASE}/customs-clearance`, {
                     method: "POST",
                     headers: getAuthHeaders({ "Content-Type": "application/json" }),
                     body: JSON.stringify(recordData)
@@ -9389,7 +9356,7 @@ async function deleteCustomsClearance(id) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/customs-clearance/${id}`, {
+        const response = await apiFetch(`${API_BASE}/customs-clearance/${id}`, {
             method: "DELETE"
         });
 
@@ -9412,7 +9379,7 @@ function searchCustomsClearance() {
 
 async function loadAndFilterCustomsClearance() {
     try {
-        const response = await fetch(`${API_BASE}/customs-clearance`);
+        const response = await apiFetch(`${API_BASE}/customs-clearance`);
         const data = await response.json();
 
         let filteredRecords = data.records;

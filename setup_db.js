@@ -1,11 +1,15 @@
 const mysql = require("mysql2/promise");
 
 async function setupDatabase() {
+  const databasePassword = process.env.DB_PASSWORD || process.env.MYSQL_ROOT_PASSWORD || "";
+  if (process.env.NODE_ENV === "production" && !databasePassword) {
+    throw new Error("DB_PASSWORD or MYSQL_ROOT_PASSWORD is required in production");
+  }
   const connection = await mysql.createConnection({
     host: "localhost",
     port: 3306,
     user: "root",
-    password: "Sidel!2345",
+    password: databasePassword,
     ssl: false,
     connectTimeout: 60000
   });
@@ -86,15 +90,14 @@ async function setupDatabase() {
 
     // 删除现有的package表（如果存在），然后重新创建
     try {
-      await connection.execute("DROP TABLE IF EXISTS package");
-      console.log("Dropped existing package table.");
+      console.log("Ensuring package table exists without deleting existing data.");
     } catch (error) {
       console.log("No existing package table to drop.");
     }
 
     // 创建package表（包装信息表）
     await connection.execute(`
-      CREATE TABLE package (
+      CREATE TABLE IF NOT EXISTS package (
         id INT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
         serial_number VARCHAR(100) NOT NULL COMMENT '订单序列号',
         package_label VARCHAR(50) DEFAULT NULL COMMENT '包装标签',
@@ -266,7 +269,7 @@ async function setupDatabase() {
       CREATE TABLE IF NOT EXISTS users (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
         username VARCHAR(100) NOT NULL UNIQUE COMMENT '用户名',
-        password VARCHAR(255) NOT NULL COMMENT '密码',
+        password VARCHAR(255) NULL COMMENT 'Legacy password, cleared after migration',
         password_hash VARCHAR(255) COMMENT '密码哈希',
         role VARCHAR(20) DEFAULT 'user' COMMENT '角色',
         email VARCHAR(100) COMMENT '邮箱',
@@ -281,14 +284,13 @@ async function setupDatabase() {
     // 创建guests表（客户信息表）
     // 先删除现有的表（如果存在）以重新创建
     try {
-      await connection.execute("DROP TABLE IF EXISTS guests");
-      console.log("Dropped existing guests table.");
+      console.log("Ensuring guests table exists without deleting existing data.");
     } catch (error) {
       console.log("No existing guests table to drop.");
     }
 
     await connection.execute(`
-      CREATE TABLE guests (
+      CREATE TABLE IF NOT EXISTS guests (
         guest_id VARCHAR(50) PRIMARY KEY COMMENT '客户ID（手动输入）',
         region VARCHAR(100) COMMENT '地区',
         company_cn VARCHAR(200) COMMENT '中文公司名称',

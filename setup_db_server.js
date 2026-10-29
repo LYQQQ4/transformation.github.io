@@ -12,10 +12,13 @@ const dbConfig = {
   host: process.env.DB_HOST || '127.0.0.1',
   port: parseInt(process.env.DB_PORT) || 3306,
   user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
+  password: process.env.DB_PASSWORD || process.env.MYSQL_ROOT_PASSWORD || '',
   ssl: process.env.DB_SSL === 'true' ? {} : false,
   connectTimeout: parseInt(process.env.DB_CONNECT_TIMEOUT) || 60000
 };
+if (process.env.NODE_ENV === 'production' && !dbConfig.password) {
+  throw new Error('DB_PASSWORD or MYSQL_ROOT_PASSWORD is required in production');
+}
 
 const userDbConfig = {
   host: process.env.USER_DB_HOST || dbConfig.host,
@@ -262,7 +265,7 @@ async function setupDatabase() {
       CREATE TABLE IF NOT EXISTS users (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
         username VARCHAR(100) NOT NULL UNIQUE COMMENT '用户名',
-        password VARCHAR(255) NOT NULL COMMENT '密码',
+        password VARCHAR(255) NULL COMMENT 'Legacy password, cleared after hash migration',
         password_hash VARCHAR(255) COMMENT '密码哈希',
         role VARCHAR(20) DEFAULT 'user' COMMENT '角色',
         email VARCHAR(100) COMMENT '邮箱',

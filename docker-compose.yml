@@ -4,7 +4,7 @@ services:
     image: mysql:8.0
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword123}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
       MYSQL_DATABASE: order_system
       TZ: Asia/Shanghai
     # DB 不默认映射到宿主端口，避免与宿主 MySQL 冲突.
@@ -27,7 +27,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -35,14 +35,17 @@ services:
       DB_HOST: db
       DB_PORT: 3306
       DB_USER: root
-      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword123}
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
       DB_NAME: order_system
       USER_DB_HOST: db
       USER_DB_PORT: 3306
       USER_DB_USER: root
-      USER_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword123}
+      USER_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
       USER_DB_NAME: user_system
-      CORS_ORIGIN: "*"
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN must be set}
+      ALLOW_NULL_ORIGIN: ${ALLOW_NULL_ORIGIN:?ALLOW_NULL_ORIGIN must be set}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-transport_session}
+      SESSION_TTL_MS: ${SESSION_TTL_MS:-28800000}
       DB_CONNECTION_LIMIT: 10
       DB_QUEUE_LIMIT: 0
       DB_CONNECT_TIMEOUT: 60000
@@ -51,7 +54,7 @@ services:
       - ./logs:/app/logs
       - ./uploads:/app/uploads
       - ./backend/uploads:/app/backend/uploads
-    command: sh -c "chmod +x docker-start.sh 2>/dev/null || true && node wait-for-db.js && node setup_db_docker.js && node backend/server.js"
+    command: sh -c "chmod +x docker-start.sh 2>/dev/null || true && node wait-for-db.js && node setup_db_docker.js && node scripts/migrate_auth_sessions.js && node backend/server.js"
 
 volumes:
   mysql_data:

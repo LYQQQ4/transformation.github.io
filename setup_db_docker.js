@@ -2,12 +2,16 @@ require('dotenv').config();
 const mysql = require("mysql2/promise");
 
 async function setupDatabase() {
+  const databasePassword = process.env.DB_PASSWORD || process.env.MYSQL_ROOT_PASSWORD || "";
+  if (process.env.NODE_ENV === "production" && !databasePassword) {
+    throw new Error("DB_PASSWORD or MYSQL_ROOT_PASSWORD is required in production");
+  }
   const connection = await mysql.createConnection({
     // Prefer local MySQL by default; Docker can still pass DB_HOST=db explicitly.
     host: process.env.DB_HOST || "127.0.0.1",
     port: parseInt(process.env.DB_PORT) || 3306,
     user: process.env.DB_USER || "root",
-    password: process.env.DB_PASSWORD || "",
+    password: databasePassword,
     ssl: false,
     connectTimeout: 60000
   });
@@ -301,7 +305,7 @@ async function setupDatabase() {
       CREATE TABLE IF NOT EXISTS users (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
         username VARCHAR(100) NOT NULL UNIQUE COMMENT '用户名',
-        password VARCHAR(255) NOT NULL COMMENT '密码',
+        password VARCHAR(255) NULL COMMENT 'Legacy password, cleared after hash migration',
         password_hash VARCHAR(255) COMMENT '密码哈希',
         role VARCHAR(20) DEFAULT 'user' COMMENT '角色',
         email VARCHAR(100) COMMENT '邮箱',

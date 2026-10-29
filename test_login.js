@@ -1,103 +1,57 @@
-const http = require('http');
+const http = require("http");
 
-// 测试登录功能
 function testLogin(username, password, description) {
   return new Promise((resolve, reject) => {
-    const postData = JSON.stringify({
-      username: username,
-      password: password
-    });
-
-    const options = {
-      hostname: '127.0.0.1',
-      port: 3000,
-      path: '/api/users/login',
-      method: 'POST',
+    const postData = JSON.stringify({ username, password });
+    const request = http.request({
+      hostname: "127.0.0.1",
+      port: Number(process.env.TEST_PORT || 3000),
+      path: "/api/users/login",
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(postData)
       }
-    };
-
-    const req = http.request(options, (res) => {
-      let data = '';
-
-      res.on('data', (chunk) => {
+    }, (response) => {
+      let data = "";
+      response.on("data", (chunk) => {
         data += chunk;
       });
-
-      res.on('end', () => {
+      response.on("end", () => {
         try {
-          const jsonData = JSON.parse(data);
-          console.log(`🔐 ${description}:`);
-          console.log(`   状态码: ${res.statusCode}`);
-
-          if (res.statusCode === 200) {
-            console.log(`   ✅ 登录成功`);
-            console.log(`   👤 用户: ${jsonData.user.username} (${jsonData.user.role})`);
-          } else {
-            console.log(`   ❌ 登录失败: ${jsonData.error}`);
-          }
-
-          console.log('');
-          resolve({ status: res.statusCode, data: jsonData });
-        } catch (e) {
-          console.log(`   ❌ 响应解析错误: ${data}`);
-          resolve({ status: res.statusCode, data });
+          const parsed = JSON.parse(data);
+          console.log(`${description}: HTTP ${response.statusCode}; response body omitted`);
+          resolve({ status: response.statusCode, data: parsed });
+        } catch (error) {
+          reject(error);
         }
       });
     });
-
-    req.on('error', (err) => {
-      console.log(`❌ ${description}: 连接失败 - ${err.message}\n`);
-      reject(err);
+    request.on("error", reject);
+    request.setTimeout(5000, () => {
+      request.destroy(new Error("Timeout"));
     });
-
-    req.setTimeout(5000, () => {
-      console.log(`❌ ${description}: 超时\n`);
-      req.destroy();
-      reject(new Error('Timeout'));
-    });
-
-    req.write(postData);
-    req.end();
+    request.write(postData);
+    request.end();
   });
 }
 
 async function testLoginFunctionality() {
-  console.log("🔐 测试登录功能...\n");
-
-  try {
-    // 测试有效的用户登录
-    console.log("📋 测试用例:");
-    console.log("=".repeat(50));
-
-    // 测试用户登录
-    await testLogin('test_user', '123456', '普通用户登录 (test_user/123456)');
-
-    // 测试管理员登录
-    await testLogin('林彦琦', '123456', '管理员登录 (林彦琦/123456)');
-
-    // 测试另一个管理员登录
-    await testLogin('lyq', '123456', '管理员登录 (lyq/123456)');
-
-    // 测试无效用户名
-    await testLogin('nonexistent', '123456', '无效用户名登录');
-
-    // 测试错误密码
-    await testLogin('test_user', 'wrongpass', '错误密码登录');
-
-    // 测试空用户名
-    await testLogin('', '123456', '空用户名登录');
-
-    // 测试空密码
-    await testLogin('test_user', '', '空密码登录');
-
-    console.log("✅ 登录功能测试完成");
-
-  } catch (error) {
-    console.log('❌ 测试过程中出现错误:', error.message);
+  if (!process.env.TEST_USERNAME || !process.env.TEST_PASSWORD) {
+    throw new Error("Set TEST_USERNAME and TEST_PASSWORD to run this smoke test");
   }
+  await testLogin(
+    process.env.TEST_USERNAME,
+    process.env.TEST_PASSWORD,
+    "Configured login"
+  );
 }
 
-testLoginFunctionality();
+if (require.main === module) {
+  testLoginFunctionality().catch((error) => {
+    console.error("Login smoke test failed:", error.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { testLogin };
