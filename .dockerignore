@@ -24,6 +24,9 @@ build
 *.db
 *.sqlite
 *.sqlite3
+*.tar
+*.tar.gz
+*.tgz
 tmp
 temp
 *.tmp

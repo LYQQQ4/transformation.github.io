@@ -233,6 +233,24 @@ async function setupDatabase() {
       }
     }
 
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS products (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+        product_id VARCHAR(50) DEFAULT NULL COMMENT '产品ID(自动生成)',
+        name_cn VARCHAR(200) DEFAULT NULL COMMENT '品名',
+        description_en TEXT DEFAULT NULL COMMENT '英文描述',
+        hs_code VARCHAR(50) DEFAULT NULL COMMENT 'HS CODE',
+        declaration_elements TEXT DEFAULT NULL COMMENT '申报要素',
+        origin VARCHAR(100) DEFAULT NULL COMMENT '产地',
+        remark VARCHAR(1000) DEFAULT NULL COMMENT '备注',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+        UNIQUE KEY uk_product_id (product_id),
+        INDEX idx_name_cn (name_cn)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='产品信息表'
+    `);
+    console.log("Ensured products table exists.");
+
     // 创建transfer表（运输流转信息表）
     await connection.execute(`
       CREATE TABLE IF NOT EXISTS transfer (

@@ -30,6 +30,7 @@ services:
       - "127.0.0.1:3000:3000"
     environment:
       NODE_ENV: production
+      TZ: Asia/Shanghai
       PORT: 3000
       HOST: 0.0.0.0
       DB_HOST: db
@@ -44,6 +45,7 @@ services:
       USER_DB_NAME: user_system
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN must be set}
       ALLOW_NULL_ORIGIN: ${ALLOW_NULL_ORIGIN:?ALLOW_NULL_ORIGIN must be set}
+      TRUST_PROXY: "true"
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-transport_session}
       SESSION_TTL_MS: ${SESSION_TTL_MS:-28800000}
       DB_CONNECTION_LIMIT: 10
