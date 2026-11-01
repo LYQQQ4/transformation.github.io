@@ -114,6 +114,12 @@ function createStatefulDb(moduleName, options = {}) {
 async function request(router, payload, path = "/batch-date", role = "admin") {
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    if (role !== "anonymous" && role !== "missing") {
+      req.user = { id: 1, role: role === "user" ? "user" : "admin" };
+    }
+    next();
+  });
   app.use("/api", router);
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
@@ -165,10 +171,10 @@ async function run() {
   assert.strictEqual(response.status, 400);
   response = await request(
     customsRouter,
-    { field: "tax_payment_time", serial_numbers: ["A001"], value: "2026-09-15T10:30" }
+    { field: "tax_payment_time", serial_numbers: ["A001"], value: "2026-09-15" }
   );
   assert.strictEqual(response.status, 200);
-  assert.strictEqual(customsDb.state.values.get("A001"), "2026-09-15 10:30:00");
+  assert.strictEqual(customsDb.state.values.get("A001"), "2026-09-15");
   response = await request(
     customsRouter,
     { field: "tax_payment_time", serial_numbers: ["A001"], value: "2026-09-15T25:30" }
@@ -186,7 +192,7 @@ async function run() {
     { field: "tax_payment_time", serial_numbers: ["A001"], value: "2026-09-15" }
   );
   assert.strictEqual(response.status, 200);
-  assert.strictEqual(customsDb.state.values.get("A001"), "2026-09-15 00:00:00");
+  assert.strictEqual(customsDb.state.values.get("A001"), "2026-09-15");
 
   const transferDb = createStatefulDb("transfer", { failSync: true });
   const transferRouter = createTransferRouter(transferDb, createUserDb());
@@ -205,8 +211,8 @@ async function run() {
     { field: "arrival_port_time", serial_numbers: ["A001"], value: "2026-09-15" }
   );
   assert.strictEqual(response.status, 200);
-  assert.strictEqual(transferDb.state.values.get("A001"), "2026-09-15 00:00:00");
-  assert.strictEqual(transferDb.state.syncValues.get("A001"), "2026-09-15 00:00:00");
+  assert.strictEqual(transferDb.state.values.get("A001"), "2026-09-15");
+  assert.strictEqual(transferDb.state.syncValues.get("A001"), "2026-09-15");
 
   const billingDb = createStatefulDb("billing", { values: [["A001", "2026-08-20"]] });
   response = await request(
@@ -237,12 +243,12 @@ async function run() {
         response = await request(router, {
           field,
           serial_numbers: ["A001", "A001", "MISSING"],
-          value: definition.includeTime ? "2026-09-16T10:30" : "2026-09-16",
+          value: "2026-09-16",
         });
         assert.strictEqual(response.status, 200, `${moduleName}/${role}/${field}`);
         assert.strictEqual(response.body.updated_count, 1);
         assert.deepStrictEqual(response.body.not_found_serial_numbers, ["MISSING"]);
-        const expectedValue = definition.includeTime ? "2026-09-16 10:30:00" : "2026-09-16";
+        const expectedValue = "2026-09-16";
         assert.strictEqual(db.state.values.get("A001"), expectedValue, `${moduleName}/${role}/${field}`);
         if (moduleName === "pickup" ||
             moduleName === "transfer" && ["pickup_date", "arrival_port_time"].includes(field)) {

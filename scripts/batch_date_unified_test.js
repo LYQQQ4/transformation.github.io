@@ -44,6 +44,20 @@ function createDb(options = {}) {
         sql.includes("ALTER TABLE billing_info")) {
       return [[]];
     }
+    if (sql.includes("information_schema.COLUMNS")) {
+      return [[{ count: 1 }]];
+    }
+    if (sql.startsWith("SELECT serial_number FROM billing_info")) {
+      return state.values.has(params[0]) ? [[{ serial_number: params[0] }]] : [[]];
+    }
+    if (sql.startsWith("UPDATE billing_info")) {
+      state.values.set(params[1], params[0]);
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.startsWith("INSERT INTO billing_info")) {
+      state.values.set(params[0], params[1]);
+      return [{ affectedRows: 1 }];
+    }
     if (/^SELECT serial_number FROM (orders|pickup_transport_tracking|customs_clearance_tracking|transfer)/.test(sql)) {
       return [[...state.orders]
         .filter((serialNumber) => params.includes(serialNumber))
@@ -107,20 +121,27 @@ async function request(app, payload, headers = {}) {
 }
 
 async function run() {
-  assert.ok(!Object.hasOwn(BATCH_DATE_FIELD_MAP, "billing_completed_time"));
+  assert.ok(Object.hasOwn(BATCH_DATE_FIELD_MAP, "billing_completed_time"));
   for (const [moduleName, fields] of Object.entries(BATCH_DATE_FIELD_DEFINITIONS)) {
     assert.ok(!Object.hasOwn(fields, "billing_completed_time"));
     assert.ok(validateBatchDateRequest(moduleName, { field: "billing_completed_time" }).error);
   }
-  assert.ok(validateBatchDateRequest("billing", { field: "billing_completed_time" }).error);
-  assert.strictEqual(
-    validateUnifiedBatchDateRequest({ field: "billing_completed_time" }).error,
-    "field is not allowed"
-  );
+  assert.strictEqual(validateUnifiedBatchDateRequest({
+    field: "billing_completed_time",
+    serial_numbers: ["A001"],
+    value: "2026-09-21",
+  }).value, "2026-09-21");
 
   const db = createDb();
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    const userId = req.headers["x-user-id"];
+    if (userId === "1" || userId === "2") {
+      req.user = { id: Number(userId), role: userId === "1" ? "admin" : "user" };
+    }
+    next();
+  });
   app.use("/api/orders", createOrdersRouter(db, createUserDb()));
 
   let response = await request(app, {
@@ -145,9 +166,8 @@ async function run() {
     serial_numbers: ["A002"],
     value: "2026-09-21",
   }, { "x-user-id": "1" });
-  assert.strictEqual(response.status, 400);
-  assert.strictEqual(response.body.error, "field is not allowed");
-  assert.strictEqual(db.state.values.has("A002"), false);
+  assert.strictEqual(response.status, 200);
+  assert.strictEqual(db.state.values.get("A002"), "2026-09-21");
 
   response = await request(app, {
     field: "receive_date",
@@ -180,13 +200,12 @@ async function run() {
 
     const beginBeforeInvalid = db.state.beginCount;
     for (const payload of [
-      { field: "billing_completed_time", serial_numbers: ["A001"], value: "2026-09-21" },
       { field: "receive_date", serial_numbers: [], value: "2026-09-21" },
       { field: "receive_date", serial_numbers: [123], value: "2026-09-21" },
       { field: "receive_date", serial_numbers: [" "], value: "2026-09-21" },
       { field: "receive_date", serial_numbers: ["A".repeat(65)], value: "2026-09-21" },
       { field: "receive_date", serial_numbers: ["A001"], value: "2026-02-30" },
-      { field: "pickup_arrival_time", serial_numbers: ["A001"], value: "2026-09-21T25:00" },
+      { field: "arrival_time", serial_numbers: ["A001"], value: "2026-02-30" },
     ]) {
       response = await request(app, payload, { "x-user-id": userId });
       assert.strictEqual(response.status, 400);
@@ -227,7 +246,7 @@ async function run() {
 
   const frontend = require("fs").readFileSync("frontend/app.js", "utf8");
   const frontendHtml = require("fs").readFileSync("frontend/index.html", "utf8");
-  assert.ok(frontend.includes('fetch(`${API_BASE}/orders/batch-date`'));
+  assert.ok(frontend.includes('apiFetch(`${API_BASE}/orders/batch-date`'));
   assert.ok(frontend.includes("orderBatchDateFieldMap"));
   assert.ok(!frontendHtml.includes("orderBatchDateModule"));
   assert.ok(!frontendHtml.includes("pickupBatchDateControls"));

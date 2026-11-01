@@ -867,13 +867,17 @@ module.exports = (db, userDb = null) => {
       }
 
       const { field, definition, serialNumbers, value } = validated;
+      if (definition.moduleName === "billing") {
+        await ensureBillingInfoSchema(db);
+      }
       connection = await db.getConnection();
       await connection.beginTransaction();
       transactionStarted = true;
 
       const placeholders = serialNumbers.map(() => "?").join(", ");
+      const lookupTable = definition.moduleName === "billing" ? "orders" : definition.tableName;
       const [existingRows] = await connection.execute(
-        `SELECT serial_number FROM ${definition.tableName} WHERE serial_number IN (${placeholders})`,
+        `SELECT serial_number FROM ${lookupTable} WHERE serial_number IN (${placeholders})`,
         serialNumbers
       );
       const existingSerialNumbers = new Set(
@@ -883,18 +887,38 @@ module.exports = (db, userDb = null) => {
       const notFoundSerialNumbers = serialNumbers.filter((serialNumber) => !existingSerialNumbers.has(serialNumber));
 
       if (foundSerialNumbers.length > 0) {
-        const updatePlaceholders = foundSerialNumbers.map(() => "?").join(", ");
-        await connection.execute(
-          `UPDATE ${definition.tableName}
-           SET ${definition.columnName} = ?
-           WHERE serial_number IN (${updatePlaceholders})`,
-          [value, ...foundSerialNumbers]
-        );
+        if (definition.moduleName === "billing") {
+          for (const serialNumber of foundSerialNumbers) {
+            const [existingBillingRows] = await connection.execute(
+              "SELECT serial_number FROM billing_info WHERE serial_number = ? LIMIT 1",
+              [serialNumber]
+            );
+            if (existingBillingRows.length > 0) {
+              await connection.execute(
+                "UPDATE billing_info SET billing_completed_time = ? WHERE serial_number = ?",
+                [value, serialNumber]
+              );
+            } else {
+              await connection.execute(
+                "INSERT INTO billing_info (serial_number, billing_completed_time) VALUES (?, ?)",
+                [serialNumber, value]
+              );
+            }
+          }
+        } else {
+          const updatePlaceholders = foundSerialNumbers.map(() => "?").join(", ");
+          await connection.execute(
+            `UPDATE ${definition.tableName}
+             SET ${definition.columnName} = ?
+             WHERE serial_number IN (${updatePlaceholders})`,
+            [value, ...foundSerialNumbers]
+          );
+        }
 
         if (definition.moduleName === "pickup" || definition.moduleName === "transfer") {
           const syncField = field === "transfer_pickup_date"
             ? "pickup_date"
-            : (field === "pickup_arrival_time" ? "arrival_time" : field);
+            : ((field === "pickup_arrival_time" || field === "arrival_time") ? "arrival_time" : field);
           const shouldSync = definition.moduleName === "pickup" ||
             syncField === "pickup_date" ||
             syncField === "arrival_port_time";
@@ -914,6 +938,7 @@ module.exports = (db, userDb = null) => {
       return res.json({
         message: "批量填写日期成功",
         field,
+        value,
         updated_count: foundSerialNumbers.length,
         not_found_serial_numbers: notFoundSerialNumbers,
       });

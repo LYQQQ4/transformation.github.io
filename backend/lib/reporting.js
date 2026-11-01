@@ -34,6 +34,19 @@ async function ensureBillingInfoSchema(db) {
           UNIQUE KEY uk_billing_serial_number (serial_number)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
       `);
+
+      const [completedTimeColumns] = await db.execute(
+        `SELECT COUNT(*) AS count
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'billing_info'
+           AND COLUMN_NAME = 'billing_completed_time'`
+      );
+      if (!completedTimeColumns[0] || Number(completedTimeColumns[0].count) === 0) {
+        await db.execute(
+          "ALTER TABLE billing_info ADD COLUMN billing_completed_time DATE DEFAULT NULL"
+        );
+      }
     })().catch((error) => {
       billingInfoSchemaReadyPromise = null;
       throw error;

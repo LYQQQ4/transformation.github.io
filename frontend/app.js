@@ -716,17 +716,14 @@ let orderBatchDateSubmitting = false;
     }
 */
 const orderBatchDateFieldMap = {
-    receive_date: { label: "\u63a5\u6536\u6307\u4ee4\u65e5\u671f", includeTime: false },
+    receive_date: { label: "\u63a5\u53d7\u6307\u4ee4\u65e5\u671f", includeTime: false },
     pickup_date: { label: "\u63d0\u8d27\u65e5\u671f", includeTime: false },
-    pickup_arrival_time: { label: "\u63d0\u8d27\u8ddf\u8e2a\u5230\u8d27\u65f6\u95f4", includeTime: true },
-    customs_start_time: { label: "\u62a5\u5173\u5f00\u59cb\u65f6\u95f4", includeTime: true },
-    tax_payment_time: { label: "\u7f34\u7a0e\u65f6\u95f4", includeTime: true },
-    release_time: { label: "\u62a5\u5173\u653e\u884c\u65f6\u95f4", includeTime: true },
-    transfer_pickup_date: { label: "\u8fd0\u8f93\u63d0\u8d27\u65e5\u671f", includeTime: false },
-    arrival_port_time: { label: "\u8fd0\u8f93\u5230\u6e2f\u65f6\u95f4", includeTime: true },
-    clearance_time: { label: "\u8fd0\u8f93\u653e\u884c\u65f6\u95f4", includeTime: true },
-    delivery_time: { label: "\u8fd0\u8f93\u9001\u8fbe\u65f6\u95f4", includeTime: true },
-    complete_docs_send_time: { label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65f6\u95f4", includeTime: true }
+    arrival_time: { label: "\u5230\u8d27\u65e5\u671f", includeTime: false },
+    customs_start_time: { label: "\u62a5\u5173\u5f00\u59cb\u65e5\u671f", includeTime: false },
+    tax_payment_time: { label: "\u7f34\u7a0e\u65e5\u671f", includeTime: false },
+    release_time: { label: "\u62a5\u5173\u653e\u884c\u65e5\u671f", includeTime: false },
+    complete_docs_send_time: { label: "\u5b8c\u6574\u5355\u636e\u56de\u590d\u65e5\u671f", includeTime: false },
+    billing_completed_time: { label: "\u65b0\u589e\u8d26\u5355\u5b8c\u6210\u65e5\u671f", includeTime: false }
 };
 
 const orderPageState = {
