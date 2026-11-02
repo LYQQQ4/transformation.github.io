@@ -703,6 +703,29 @@
                                     <option value="total">总报表</option>
                                 </select>
                             </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <label style="width: auto; margin-right: 0;">日期字段:</label>
+                                <select id="reportDateFieldSelect" style="width: 180px;">
+                                    <option value="">请选择日期字段</option>
+                                    <option value="receive_date">接受指令日期</option>
+                                    <option value="pickup_date">提货日期</option>
+                                    <option value="customs_start_time">报关开始时间</option>
+                                    <option value="tax_payment_time">缴税时间</option>
+                                    <option value="release_time">报关放行时间</option>
+                                    <option value="complete_docs_send_time">完整单据回复时间</option>
+                                    <option value="arrival_time">到货时间</option>
+                                    <option value="arrival_port_time">到港时间</option>
+                                </select>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <label style="width: auto; margin-right: 0;">开始日期:</label>
+                                <input type="date" id="reportDateFrom">
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <label style="width: auto; margin-right: 0;">结束日期:</label>
+                                <input type="date" id="reportDateTo">
+                            </div>
+                            <button type="button" onclick="clearReportDateFilter()">清除日期条件</button>
                             <button type="button" onclick="queryReports()">查询报表</button>
                             <button type="button" onclick="exportReports()">导出 Excel</button>
                         </div>

@@ -1318,12 +1318,41 @@ function showReportManagementMessage(message = "", type = "info") {
     messageEl.className = type;
 }
 
+let reportSubmitting = false;
+
+function getReportDateFilter() {
+    const dateField = document.getElementById("reportDateFieldSelect")?.value.trim() || "";
+    const dateFrom = document.getElementById("reportDateFrom")?.value.trim() || "";
+    const dateTo = document.getElementById("reportDateTo")?.value.trim() || "";
+    if (!dateField) {
+        return { dateField: "", dateFrom: "", dateTo: "" };
+    }
+    if ((dateFrom && !/^\d{4}-\d{2}-\d{2}$/.test(dateFrom))
+        || (dateTo && !/^\d{4}-\d{2}-\d{2}$/.test(dateTo))) {
+        throw new Error("日期格式必须为 YYYY-MM-DD");
+    }
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+        throw new Error("开始日期不能晚于结束日期");
+    }
+    return { dateField, dateFrom, dateTo };
+}
+
+function appendReportDateFilter(params) {
+    const filter = getReportDateFilter();
+    if (filter.dateField) {
+        params.set("date_field", filter.dateField);
+        if (filter.dateFrom) params.set("date_from", filter.dateFrom);
+        if (filter.dateTo) params.set("date_to", filter.dateTo);
+    }
+}
+
 function getReportRequestUrl(reportType, serialNumber) {
     const params = new URLSearchParams();
     params.set("report_type", reportType || REPORT_TYPE_TOTAL);
     if (serialNumber) {
         params.set("serial_number", serialNumber);
     }
+    appendReportDateFilter(params);
     return `${API_BASE}/reports/summary?${params.toString()}`;
 }
 
@@ -1333,7 +1362,17 @@ function getReportExportUrl(reportType, serialNumber) {
     if (serialNumber) {
         params.set("serial_number", serialNumber);
     }
+    appendReportDateFilter(params);
     return `${API_BASE}/reports/export?${params.toString()}`;
+}
+
+function clearReportDateFilter() {
+    const field = document.getElementById("reportDateFieldSelect");
+    const from = document.getElementById("reportDateFrom");
+    const to = document.getElementById("reportDateTo");
+    if (field) field.value = "";
+    if (from) from.value = "";
+    if (to) to.value = "";
 }
 
 function formatReportCellValue(columnKey, value, emptyValueText = REPORT_EMPTY_VALUE_TEXT) {
@@ -1462,6 +1501,10 @@ async function queryReports() {
     const reportType = document.getElementById("reportTypeSelect")?.value || REPORT_TYPE_TOTAL;
     const serialNumber = document.getElementById("reportSerialInput")?.value.trim() || "";
 
+    if (reportSubmitting) {
+        return;
+    }
+    reportSubmitting = true;
     try {
         showReportManagementMessage("\u6b63\u5728\u67e5\u8be2\u62a5\u8868...", "info");
         const response = await apiFetch(getReportRequestUrl(reportType, serialNumber), {
@@ -1486,6 +1529,8 @@ async function queryReports() {
     } catch (error) {
         renderReportTable([], []);
         showReportManagementMessage("\u67e5\u8be2\u62a5\u8868\u5931\u8d25: " + error.message, "error");
+    } finally {
+        reportSubmitting = false;
     }
 }
 
@@ -1499,6 +1544,10 @@ async function exportReports() {
     const reportType = document.getElementById("reportTypeSelect")?.value || REPORT_TYPE_TOTAL;
     const serialNumber = document.getElementById("reportSerialInput")?.value.trim() || "";
 
+    if (reportSubmitting) {
+        return;
+    }
+    reportSubmitting = true;
     try {
         showReportManagementMessage("\u6b63\u5728\u5bfc\u51fa\u62a5\u8868...", "info");
         const response = await apiFetch(getReportExportUrl(reportType, serialNumber), {
@@ -1532,6 +1581,8 @@ async function exportReports() {
         showReportManagementMessage("\u62a5\u8868\u5bfc\u51fa\u6210\u529f", "success");
     } catch (error) {
         showReportManagementMessage("\u5bfc\u51fa\u62a5\u8868\u5931\u8d25: " + error.message, "error");
+    } finally {
+        reportSubmitting = false;
     }
 }
 

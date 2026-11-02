@@ -8,12 +8,79 @@ const {
   ensureReportSchema,
 } = require("../lib/reporting");
 
+const REPORT_DATE_FIELD_DEFINITIONS = {
+  receive_date: { label: "接受指令日期", sqlExpression: "o.receive_date" },
+  pickup_date: { label: "提货日期", sqlExpression: "pt.pickup_date" },
+  customs_start_time: { label: "报关开始时间", sqlExpression: "c.customs_start_time" },
+  tax_payment_time: { label: "缴税时间", sqlExpression: "c.tax_payment_time" },
+  release_time: { label: "报关放行时间", sqlExpression: "c.release_time" },
+  complete_docs_send_time: { label: "完整单据回复时间", sqlExpression: "t.complete_docs_send_time" },
+  arrival_time: { label: "到货时间", sqlExpression: "COALESCE(t.arrival_port_time, pt.arrival_time)" },
+  arrival_port_time: { label: "到港时间", sqlExpression: "t.arrival_port_time" },
+};
+
 function normalizeReportType(value) {
   return String(value || "total").trim().toLowerCase();
 }
 
 function normalizeSerialNumberKeyword(value) {
   return String(value || "").trim();
+}
+
+function normalizeOptionalQueryValue(value) {
+  return String(value || "").trim();
+}
+
+function isValidReportDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
+function buildReportDateFilter(req) {
+  const dateField = normalizeOptionalQueryValue(req.query.date_field);
+  const dateFrom = normalizeOptionalQueryValue(req.query.date_from);
+  const dateTo = normalizeOptionalQueryValue(req.query.date_to);
+
+  if (!dateField) {
+    return { dateField: "", dateFrom: "", dateTo: "", conditions: [], params: [] };
+  }
+
+  const definition = REPORT_DATE_FIELD_DEFINITIONS[dateField];
+  if (!definition) {
+    const error = new Error("不支持的日期筛选字段");
+    error.statusCode = 400;
+    throw error;
+  }
+  for (const [name, value] of [["date_from", dateFrom], ["date_to", dateTo]]) {
+    if (value && !isValidReportDate(value)) {
+      const error = new Error(`${name} 必须是有效的 YYYY-MM-DD 日期`);
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    const error = new Error("date_from 不能晚于 date_to");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const conditions = [];
+  const params = [];
+  if (dateFrom) {
+    conditions.push(`${definition.sqlExpression} >= CONCAT(?, ' 00:00:00')`);
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    conditions.push(`${definition.sqlExpression} < DATE_ADD(?, INTERVAL 1 DAY)`);
+    params.push(dateTo);
+  }
+  return { dateField, dateFrom, dateTo, conditions, params };
 }
 
 function buildReportBaseSql(whereClause = "") {
@@ -110,16 +177,21 @@ function buildReportBaseSql(whereClause = "") {
 
 function buildReportFilter(req) {
   const serialNumber = normalizeSerialNumberKeyword(req.query.serial_number);
+  const dateFilter = buildReportDateFilter(req);
   const conditions = [];
-  const params = [];
+  const params = [...dateFilter.params];
 
   if (serialNumber) {
     conditions.push("o.serial_number LIKE ?");
     params.push(`%${serialNumber}%`);
   }
+  conditions.unshift(...dateFilter.conditions);
 
   return {
     serialNumber,
+    dateField: dateFilter.dateField,
+    dateFrom: dateFilter.dateFrom,
+    dateTo: dateFilter.dateTo,
     whereClause: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
     params,
   };
@@ -147,7 +219,7 @@ async function loadReportSummary(db, reportType, filter) {
   }
 }
 
-module.exports = (db, userDb) => {
+function createReportsRouter(db, userDb) {
   const router = express.Router();
 
   router.get("/summary", async (req, res) => {
@@ -162,6 +234,9 @@ module.exports = (db, userDb) => {
       return res.json({
         report_type: "total",
         serial_number: filter.serialNumber,
+        date_field: filter.dateField,
+        date_from: filter.dateFrom,
+        date_to: filter.dateTo,
         selected_fields: summary.columns.map((column) => column.key),
         columns: summary.columns,
         rows: summary.rows,
@@ -202,4 +277,9 @@ module.exports = (db, userDb) => {
   });
 
   return router;
-};
+}
+
+module.exports = createReportsRouter;
+module.exports.REPORT_DATE_FIELD_DEFINITIONS = REPORT_DATE_FIELD_DEFINITIONS;
+module.exports.buildReportDateFilter = buildReportDateFilter;
+module.exports.buildReportFilter = buildReportFilter;
