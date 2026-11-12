@@ -1603,7 +1603,7 @@ function buildOrderActionButtons(order, pageName = activeOrderPageContext) {
 function ensureOrderIndexStructure(pageName = activeOrderPageContext) {
     const state = getOrderPageState(pageName);
     const tableHead = document.querySelector(`#${state.tableId} thead`);
-    if (tableHead && !tableHead.textContent.includes("新增账单完成时间")) {
+    if (tableHead && !tableHead.textContent.includes("账期")) {
         tableHead.innerHTML = `
             <tr>
                 <th>流水号</th>
@@ -1781,8 +1781,7 @@ function displayOrders(orders, pageName = activeOrderPageContext) {
             <td>${formatDateOnly(order.release_time)}</td>
             <td>${formatDateOnly(order.arrival_time)}</td>
             <td>${formatDateOnly(order.complete_docs_send_time)}</td>
-            <td>${formatDateOnly(order.billing_completed_time)}</td>
-            <td>${order.billing_period || ""}</td>
+            ${pageName === ORDER_PAGE_DELETE ? `<td>${order.billing_period || ""}</td>` : ""}
             <td>
                 ${buildOrderActionButtons(order, pageName)}
             </td>

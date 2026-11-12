@@ -129,7 +129,7 @@ function testOrderListPresentation(realOrders = []) {
     const order = { id: 1, serial_number: "202610001", trade_term: "FOB", tracking_number: trackingNumber };
     context.displayOrders([order], "viewOrders");
     const cells = [...tables.ordersTable[0].innerHTML.matchAll(/<td>([\s\S]*?)<\/td>/g)].map((match) => match[1]);
-    assert.strictEqual(cells.length, 21);
+    assert.strictEqual(cells.length, 19);
     assert.strictEqual(cells[10], trackingNumber || "");
     assert.strictEqual(lastPaginationTable, "ordersTable");
 
@@ -165,14 +165,19 @@ function testOrderListPresentation(realOrders = []) {
     heads[tableId] = { textContent: "", innerHTML: "", querySelector: () => ({}) };
     context.ensureOrderIndexStructure(pageName);
     assert.ok(heads[tableId].innerHTML.includes(`<th>${expectedTitle}</th>`));
+    if (pageName === "viewOrders") {
+      assert.ok(!heads[tableId].innerHTML.includes("<th>账期</th>"));
+    }
   }
 
   const html = read("frontend/index.html");
   const orderHead = html.match(/<table id="ordersTable">([\s\S]*?)<\/thead>/)[1];
   assert.ok(orderHead.includes("<th>运单号</th>"));
+  assert.ok(!orderHead.includes("<th>账期</th>"));
   assert.ok(!orderHead.includes("<th>贸易术语</th>"));
   const deleteHead = html.match(/<table id="deleteOrdersTable">([\s\S]*?)<\/thead>/)[1];
   assert.ok(deleteHead.includes("<th>贸易术语</th>"));
+  assert.ok(deleteHead.includes("<th>账期</th>"));
 }
 
 async function testLiveOrderList(baseUrl) {
