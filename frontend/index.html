@@ -617,7 +617,8 @@
                                 <tr>
                                     <th><input type="checkbox" data-order-select-all onchange="toggleAllOrderSelection(this)" aria-label="全选订单流水号"></th>
                                     <th>流水号</th>
-                                    <th>公司名称</th>
+                                    <th>发件人公司</th>
+                                    <th>收件人公司</th>
                                     <th>指令人</th>
                                     <th>业务类型</th>
                                     <th>发件人ID</th>
@@ -660,7 +661,8 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
-                                    <th>公司名称</th>
+                                    <th>发件人公司</th>
+                                    <th>收件人公司</th>
                                     <th>指令人</th>
                                     <th>业务类型</th>
                                     <th>发件人ID</th>
@@ -814,7 +816,8 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
-                                    <th>公司名称</th>
+                                    <th>发件人公司</th>
+                                    <th>收件人公司</th>
                                     <th>指令人</th>
                                     <th>业务类型</th>
                                     <th>发件人ID</th>
@@ -856,7 +859,8 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
-                                    <th>公司名称</th>
+                                    <th>发件人公司</th>
+                                    <th>收件人公司</th>
                                     <th>指令人</th>
                                     <th>业务类型</th>
                                     <th>发件人ID</th>
@@ -910,7 +914,8 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
-                                    <th>公司名称</th>
+                                    <th>发件人公司</th>
+                                    <th>收件人公司</th>
                                     <th>指令人</th>
                                     <th>业务类型</th>
                                     <th>发件人ID</th>
@@ -950,7 +955,8 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
-                                    <th>公司名称</th>
+                                    <th>发件人公司</th>
+                                    <th>收件人公司</th>
                                     <th>指令人</th>
                                     <th>业务类型</th>
                                     <th>发件人ID</th>
@@ -1415,9 +1421,14 @@
                 <button class="modal-close" onclick="hideOrderForm()">&times;</button>
             </div>
             <form id="orderFormData">
+                <input type="hidden" id="companyName">
                 <div class="form-group">
-                    <label>公司抬头:</label>
-                    <input type="text" id="companyName" required>
+                    <label>发件人公司:</label>
+                    <input type="text" id="senderCompany" readonly>
+                </div>
+                <div class="form-group">
+                    <label>收件人公司:</label>
+                    <input type="text" id="receiverCompany" readonly required>
                 </div>
                 <div class="form-group">
                     <label>指令人:</label>
@@ -1445,7 +1456,7 @@
                 </div>
                 <div id="senderIdHint" class="info" style="margin: -8px 0 12px 132px; font-size: 12px;"></div>
                 <div class="form-group">
-                    <label>客户ID:</label>
+                    <label>收件人ID:</label>
                     <input type="text" id="customerId" required>
                 </div>
                 <div id="customerIdHint" class="info" style="margin: -8px 0 12px 132px; font-size: 12px;"></div>

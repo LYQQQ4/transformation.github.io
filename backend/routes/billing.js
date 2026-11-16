@@ -184,6 +184,8 @@ function buildBillingSummarySelect(whereClause = "") {
     SELECT
       o.serial_number,
       o.company_name,
+      o.sender_company,
+      o.receiver_company,
       o.orderer,
       o.business_type,
       o.sender_id,

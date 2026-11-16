@@ -1614,7 +1614,8 @@ function ensureOrderIndexStructure(pageName = activeOrderPageContext) {
         tableHead.innerHTML = `
             <tr>
                 <th>流水号</th>
-                <th>公司名称</th>
+                <th>发件人公司</th>
+                <th>收件人公司</th>
                 <th>指令人</th>
                 <th>业务类型</th>
                 <th>发件人ID</th>
@@ -1646,8 +1647,12 @@ function ensureOrderIndexStructure(pageName = activeOrderPageContext) {
     if (filterForm && !document.getElementById("filterCompleteDocsSendTimeFilledStatus")) {
         filterForm.innerHTML = `
             <div class="form-group">
-                <label>公司名称:</label>
-                <input type="text" id="filterCompanyName">
+                <label>发件人公司:</label>
+                <input type="text" id="filterSenderCompany">
+            </div>
+            <div class="form-group">
+                <label>收件人公司:</label>
+                <input type="text" id="filterReceiverCompany">
             </div>
             <div class="form-group">
                 <label>指令人:</label>
@@ -1772,7 +1777,8 @@ function displayOrders(orders, pageName = activeOrderPageContext) {
         row.innerHTML = `
             ${selectionCell}
             <td><button class="link-button" onclick="showOrderDetails(${order.id})">${order.serial_number || order.id}</button></td>
-            <td>${order.company_name}</td>
+            <td>${order.sender_company || order.company_name || ""}</td>
+            <td>${order.receiver_company || ""}</td>
             <td>${order.orderer}</td>
             <td>${order.business_type}</td>
             <td>${order.sender_id || ""}</td>
@@ -2180,7 +2186,8 @@ function ensureBillingPageStructure() {
                 <thead>
                     <tr>
                         <th>流水号</th>
-                        <th>公司名称</th>
+                        <th>发件人公司</th>
+                        <th>收件人公司</th>
                         <th>指令人</th>
                         <th>业务类型</th>
                         <th>发件人ID</th>
@@ -3710,7 +3717,8 @@ function getOrderRemarkValue(record, fieldName) {
 function buildCommonOrderFieldItems(record, serialNumber = "") {
     return [
         ["流水号", serialNumber || record?.serial_number || record?.id || ""],
-        ["公司名称", record?.company_name || ""],
+        ["发件人公司", record?.sender_company || record?.company_name || ""],
+        ["收件人公司", record?.receiver_company || ""],
         ["指令人", record?.orderer || ""],
         ["业务类型", record?.business_type || ""],
         ["发件人ID", record?.sender_id || ""],
@@ -4471,7 +4479,9 @@ function showOrderForm(order = null) {
     if (order) {
         modalTitle.textContent = "编辑订单";
         if (form) {
-            form.querySelector("#companyName").value = order.company_name || "";
+            form.querySelector("#companyName").value = order.company_name || order.sender_company || order.receiver_company || "";
+            form.querySelector("#senderCompany").value = order.sender_company || "";
+            form.querySelector("#receiverCompany").value = order.receiver_company || "";
             form.querySelector("#orderer").value = order.orderer || "";
             setReceiveDateValue(order.receive_date ? order.receive_date.split("T")[0] : "", form);
             form.querySelector("#businessType").value = order.business_type || "";
@@ -4530,6 +4540,10 @@ function showOrderForm(order = null) {
 function handleCustomerIdChange(event) {
     const customerId = event.target.value.trim();
     if (!customerId) {
+        const form = event.target.closest("#orderFormData");
+        if (form) {
+            form.querySelector("#receiverCompany").value = "";
+        }
         return;
     }
     
@@ -4541,6 +4555,8 @@ function handleCustomerIdChange(event) {
             form.querySelector("#deliveryAddress").value = customer.address || "";
             form.querySelector("#receiverName").value = customer.contact_name || "";
             form.querySelector("#receiverPhone").value = customer.phone || "";
+            form.querySelector("#receiverCompany").value = customer.company_name || "";
+            form.querySelector("#companyName").value = form.querySelector("#senderCompany").value || customer.company_name || "";
         }
     }
 }
@@ -4548,6 +4564,11 @@ function handleCustomerIdChange(event) {
 function handleSenderIdChange(event) {
     const senderId = event.target.value.trim();
     if (!senderId) {
+        const form = event.target.closest("#orderFormData");
+        if (form) {
+            form.querySelector("#senderCompany").value = "";
+            form.querySelector("#companyName").value = form.querySelector("#receiverCompany").value || "";
+        }
         return;
     }
     
@@ -4559,6 +4580,8 @@ function handleSenderIdChange(event) {
             form.querySelector("#shippingAddress").value = sender.address || "";
             form.querySelector("#senderName").value = sender.contact_name || "";
             form.querySelector("#senderPhone").value = sender.phone || "";
+            form.querySelector("#senderCompany").value = sender.company_name || "";
+            form.querySelector("#companyName").value = sender.company_name || form.querySelector("#receiverCompany").value || "";
         }
     }
 }
@@ -4694,7 +4717,8 @@ function displayImportResults(result) {
 
 function fillFormWithData(data) {
     const fieldMapping = {
-        company_name: "companyName",
+        sender_company: "senderCompany",
+        receiver_company: "receiverCompany",
         orderer: "orderer",
         receive_date: "receiveDate",
         business_type: "businessType",
@@ -4764,15 +4788,17 @@ async function saveOrder() {
         showMessage("未找到订单表单", "error");
         return;
     }
-    const companyNameElement = getOrderFormElement("companyName", form);
-    const companyName = companyNameElement?.value.trim() || "";
-    if (!companyName) {
-        showMessage("公司抬头不能为空，请手动填写", "error");
-        companyNameElement?.focus();
+    const senderCompany = form.querySelector("#senderCompany")?.value.trim() || "";
+    const receiverCompany = form.querySelector("#receiverCompany")?.value.trim() || "";
+    if (!receiverCompany) {
+        showMessage("请先选择有效的收件人ID，自动带出收件人公司", "error");
+        getOrderFormElement("customerId", form)?.focus();
         return;
     }
     const orderData = {
-        company_name: companyName,
+        company_name: senderCompany || receiverCompany,
+        sender_company: senderCompany,
+        receiver_company: receiverCompany,
         orderer: getOrderFormElement("orderer", form).value,
         receive_date: getReceiveDateValue(form),
         business_type: getOrderFormElement("businessType", form).value,
@@ -4889,7 +4915,8 @@ function showFilterForm(pageName = activeOrderPageContext) {
 function applyFilters(pageName = activeOrderPageContext) {
     const state = getOrderPageState(pageName);
     state.filters = {
-        company_name: getFilterInputValue("filterCompanyName"),
+        sender_company: getFilterInputValue("filterSenderCompany"),
+        receiver_company: getFilterInputValue("filterReceiverCompany"),
         orderer: getFilterInputValue("filterOrderer"),
         business_type: getFilterInputValue("filterBusinessType"),
         sender_id: getFilterInputValue("filterSenderId"),
@@ -6029,7 +6056,8 @@ function ensurePackagingPageStructure() {
             <thead>
                 <tr>
                     <th>流水号</th>
-                    <th>公司名称</th>
+                    <th>发件人公司</th>
+                    <th>收件人公司</th>
                     <th>指令人</th>
                     <th>业务类型</th>
                     <th>发件人ID</th>
@@ -6496,7 +6524,8 @@ function displayPackages(packages) {
         const row = tbody.insertRow();
         row.innerHTML = `
             <td>${escapeHtml(group.serial_number || "")}</td>
-            <td>${escapeHtml(group.company_name || "")}</td>
+            <td>${escapeHtml(group.sender_company || group.company_name || "")}</td>
+            <td>${escapeHtml(group.receiver_company || "")}</td>
             <td>${escapeHtml(group.orderer || "")}</td>
             <td>${escapeHtml(group.business_type || "")}</td>
             <td>${escapeHtml(group.sender_id || "")}</td>
@@ -6534,7 +6563,8 @@ async function loadPackages() {
             const searchLower = currentPackageSearchTerm.toLowerCase();
             groupedPackages = groupedPackages.filter(group =>
                 (group.serial_number && group.serial_number.toLowerCase().includes(searchLower)) ||
-                (group.company_name && group.company_name.toLowerCase().includes(searchLower)) ||
+                ((group.sender_company || group.company_name) && (group.sender_company || group.company_name).toLowerCase().includes(searchLower)) ||
+                (group.receiver_company && group.receiver_company.toLowerCase().includes(searchLower)) ||
                 (group.orderer && group.orderer.toLowerCase().includes(searchLower)) ||
                 (group.business_type && group.business_type.toLowerCase().includes(searchLower)) ||
                 (group.sender_id && group.sender_id.toLowerCase().includes(searchLower)) ||
@@ -7183,7 +7213,8 @@ function displayPickupTrackings(trackings) {
         const serialNumber = String(item.serial_number || "").trim();
         row.innerHTML = `
             <td>${escapeHtml(serialNumber)}</td>
-            <td>${item.company_name || ""}</td>
+            <td>${item.sender_company || item.company_name || ""}</td>
+            <td>${item.receiver_company || ""}</td>
             <td>${item.orderer || ""}</td>
             <td>${item.business_type || ""}</td>
             <td>${item.sender_id || ""}</td>
@@ -7479,7 +7510,8 @@ async function loadAndFilterPickupTrackings() {
             const searchLower = currentPickupTrackingSearchTerm.toLowerCase();
             filtered = filtered.filter(item => (
                 (item.serial_number && item.serial_number.toLowerCase().includes(searchLower)) ||
-                (item.company_name && item.company_name.toLowerCase().includes(searchLower)) ||
+                ((item.sender_company || item.company_name) && (item.sender_company || item.company_name).toLowerCase().includes(searchLower)) ||
+                (item.receiver_company && item.receiver_company.toLowerCase().includes(searchLower)) ||
                 (item.orderer && item.orderer.toLowerCase().includes(searchLower)) ||
                 (item.business_type && item.business_type.toLowerCase().includes(searchLower)) ||
                 (item.sender_id && item.sender_id.toLowerCase().includes(searchLower)) ||
@@ -7529,7 +7561,8 @@ function displayTransfers(transfers) {
 
         row.innerHTML = `
             <td>${escapeHtml(serialNumber)}</td>
-            <td>${transfer.company_name || ""}</td>
+            <td>${transfer.sender_company || transfer.company_name || ""}</td>
+            <td>${transfer.receiver_company || ""}</td>
             <td>${transfer.orderer || ""}</td>
             <td>${transfer.business_type || ""}</td>
             <td>${transfer.sender_id || ""}</td>
@@ -7828,7 +7861,8 @@ async function loadAndFilterTransfers() {
                 const searchLower = currentTransferSearchTerm.toLowerCase();
                 return (
                     transfer.serial_number.toLowerCase().includes(searchLower) ||
-                    (transfer.company_name && transfer.company_name.toLowerCase().includes(searchLower)) ||
+                    ((transfer.sender_company || transfer.company_name) && (transfer.sender_company || transfer.company_name).toLowerCase().includes(searchLower)) ||
+                    (transfer.receiver_company && transfer.receiver_company.toLowerCase().includes(searchLower)) ||
                     (transfer.orderer && transfer.orderer.toLowerCase().includes(searchLower)) ||
                     (transfer.business_type && transfer.business_type.toLowerCase().includes(searchLower)) ||
                     (transfer.sender_id && transfer.sender_id.toLowerCase().includes(searchLower)) ||
@@ -9201,7 +9235,8 @@ function displayCustomsClearance(records) {
 
         row.innerHTML = `
             <td>${escapeHtml(serialNumber)}</td>
-            <td>${record.company_name || ""}</td>
+            <td>${record.sender_company || record.company_name || ""}</td>
+            <td>${record.receiver_company || ""}</td>
             <td>${record.orderer || ""}</td>
             <td>${record.business_type || ""}</td>
             <td>${record.sender_id || ""}</td>
@@ -9528,7 +9563,8 @@ async function loadAndFilterCustomsClearance() {
             const searchLower = currentCustomsSearchTerm.toLowerCase();
             filteredRecords = filteredRecords.filter(record => {
                 return (record.serial_number && record.serial_number.toLowerCase().includes(searchLower)) ||
-                       (record.company_name && record.company_name.toLowerCase().includes(searchLower)) ||
+                       ((record.sender_company || record.company_name) && (record.sender_company || record.company_name).toLowerCase().includes(searchLower)) ||
+                       (record.receiver_company && record.receiver_company.toLowerCase().includes(searchLower)) ||
                        (record.orderer && record.orderer.toLowerCase().includes(searchLower)) ||
                        (record.business_type && record.business_type.toLowerCase().includes(searchLower)) ||
                        (record.sender_id && record.sender_id.toLowerCase().includes(searchLower)) ||

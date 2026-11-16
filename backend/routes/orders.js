@@ -55,6 +55,7 @@ function normalizeOrderImportValue(value) {
 
 const ORDER_PHONE_MAX_LENGTH = 255;
 let orderPhoneSchemaReadyPromise = null;
+let orderCompanySchemaReadyPromise = null;
 
 function normalizeOrderPhoneValue(value) {
   if (value === undefined || value === null) {
@@ -111,6 +112,36 @@ async function ensureOrderPhoneSchema(db) {
   }
 
   return orderPhoneSchemaReadyPromise;
+}
+
+async function ensureOrderCompanySchema(db) {
+  if (!orderCompanySchemaReadyPromise) {
+    orderCompanySchemaReadyPromise = (async () => {
+      const definitions = [
+        { name: "sender_company", sql: "ALTER TABLE orders ADD COLUMN sender_company VARCHAR(200) DEFAULT NULL COMMENT '发件人公司'" },
+        { name: "receiver_company", sql: "ALTER TABLE orders ADD COLUMN receiver_company VARCHAR(200) DEFAULT NULL COMMENT '收件人公司'" },
+      ];
+
+      for (const definition of definitions) {
+        const [columns] = await db.execute(
+          `SELECT COLUMN_NAME
+           FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE()
+             AND TABLE_NAME = 'orders'
+             AND COLUMN_NAME = ?`,
+          [definition.name]
+        );
+        if (!columns.length) {
+          await db.execute(definition.sql);
+        }
+      }
+    })().catch((error) => {
+      orderCompanySchemaReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return orderCompanySchemaReadyPromise;
 }
 
 function buildOrderSelectSql(whereClause = "", { includeTrackingNumber = false } = {}) {
@@ -274,6 +305,23 @@ async function enrichOrderPayloadFromProfiles(userDb, payload) {
   const profiles = await fetchOrderUserProfiles(userDb, normalizedPayload.customer_id, normalizedPayload.sender_id);
   const customerProfile = profiles[normalizeOrderImportValue(normalizedPayload.customer_id)];
   const senderProfile = profiles[normalizeOrderImportValue(normalizedPayload.sender_id)];
+
+  normalizedPayload.sender_company = senderProfile?.company_name?.trim() || "";
+  normalizedPayload.receiver_company = customerProfile?.company_name?.trim() || "";
+  if (!normalizedPayload.receiver_company) {
+    const error = new Error("收件人用户资料中缺少公司名称");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (normalizedPayload.sender_id && !normalizedPayload.sender_company) {
+    const error = new Error("发件人用户资料中缺少公司名称");
+    error.statusCode = 400;
+    throw error;
+  }
+  normalizedPayload.company_name =
+    normalizedPayload.sender_company ||
+    normalizedPayload.receiver_company ||
+    normalizeOrderImportValue(normalizedPayload.company_name);
 
   if (customerProfile) {
     normalizedPayload.delivery_address = normalizedPayload.delivery_address || customerProfile.address || "";
@@ -762,6 +810,7 @@ module.exports = (db, userDb = null) => {
   router.get("/", async (req, res) => {
     try {
       await ensureOrderPhoneSchema(db);
+      await ensureOrderCompanySchema(db);
       await ensureBillingInfoSchema(db);
       const conditions = [];
       const params = [];
@@ -785,6 +834,8 @@ module.exports = (db, userDb = null) => {
       };
 
       appendLikeCondition("company_name", "o.company_name");
+      appendLikeCondition("sender_company", "o.sender_company");
+      appendLikeCondition("receiver_company", "o.receiver_company");
       appendLikeCondition("orderer", "o.orderer");
       appendLikeCondition("business_type", "o.business_type");
       appendLikeCondition("customer_id", "o.customer_id");
@@ -1029,11 +1080,8 @@ module.exports = (db, userDb = null) => {
     const connection = await db.getConnection();
     try {
       await ensureOrderPhoneSchema(db);
+      await ensureOrderCompanySchema(db);
       const company_name = String(req.body?.company_name ?? "").trim();
-      if (!company_name) {
-        res.status(400).json({ error: "公司抬头不能为空，请手动填写" });
-        return;
-      }
       await connection.beginTransaction();
 
       const orderer = req.body.orderer;
@@ -1106,8 +1154,8 @@ module.exports = (db, userDb = null) => {
 
         // 尝试插入orders表，如果serial_number已存在会失败
         try {
-          const sql = "INSERT INTO orders (company_name, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2, serial_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-          const [result] = await connection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, remarkPatch.remark1 ?? null, remarkPatch.remark2 ?? null, serialNumber]);
+          const sql = "INSERT INTO orders (company_name, sender_company, receiver_company, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2, serial_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+          const [result] = await connection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.sender_company || null, enrichedOrderData.receiver_company, enrichedOrderData.orderer, normalizedReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, remarkPatch.remark1 ?? null, remarkPatch.remark2 ?? null, serialNumber]);
 
           // 同时在package表中插入记录，使用相同的serial_number，只填入serial_number，其他字段为空
           const packageSql = "INSERT INTO \`package\` (serial_number, package_label, package_order) VALUES (?, ?, ?)";
@@ -1163,11 +1211,8 @@ module.exports = (db, userDb = null) => {
         await requireUserAccess(userDb, req, "order remark update");
       }
       await ensureOrderPhoneSchema(db);
+      await ensureOrderCompanySchema(db);
       const company_name = String(req.body?.company_name ?? "").trim();
-      if (!company_name) {
-        res.status(400).json({ error: "公司抬头不能为空，请手动填写" });
-        return;
-      }
       const orderer = req.body.orderer;
       const receive_date = req.body.receive_date;
       const business_type = req.body.business_type;
@@ -1220,8 +1265,8 @@ module.exports = (db, userDb = null) => {
         res.status(404).json({ error: "Order not found" });
         return;
       }
-      const sql = "UPDATE orders SET company_name = ?, orderer = ?, receive_date = ?, business_type = ?, customer_id = ?, sender_id = ?, shipping_address = ?, sender_name = ?, sender_phone = ?, delivery_address = ?, receiver_name = ?, receiver_phone = ?, origin = ?, destination = ?, trade_term = ?, product_name = ? WHERE id = ?";
-      await connection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, req.params.id]);
+      const sql = "UPDATE orders SET company_name = ?, sender_company = ?, receiver_company = ?, orderer = ?, receive_date = ?, business_type = ?, customer_id = ?, sender_id = ?, shipping_address = ?, sender_name = ?, sender_phone = ?, delivery_address = ?, receiver_name = ?, receiver_phone = ?, origin = ?, destination = ?, trade_term = ?, product_name = ? WHERE id = ?";
+      await connection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.sender_company || null, enrichedOrderData.receiver_company, enrichedOrderData.orderer, normalizedReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, req.params.id]);
       await syncOrderRemarksBySerial(connection, orderRows[0].serial_number, remarkPatch);
       await connection.commit();
       transactionStarted = false;
@@ -1292,6 +1337,7 @@ module.exports = (db, userDb = null) => {
   router.post("/parse-excel", upload.single("excelFile"), async (req, res) => {
     try {
       await ensureOrderPhoneSchema(db);
+      await ensureOrderCompanySchema(db);
       if (!req.file) {
         return res.status(400).json({ error: "没有上传文件" });
       }
@@ -1364,6 +1410,7 @@ module.exports = (db, userDb = null) => {
     const connection = await db.getConnection();
     try {
       await ensureOrderPhoneSchema(db);
+      await ensureOrderCompanySchema(db);
       if (!req.file) {
         return res.status(400).json({ error: "没有上传文件" });
       }
@@ -1478,10 +1525,10 @@ module.exports = (db, userDb = null) => {
 
             // 尝试插入所有表
             try {
-              const sql = "INSERT INTO orders (company_name, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2, serial_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+              const sql = "INSERT INTO orders (company_name, sender_company, receiver_company, orderer, receive_date, business_type, customer_id, sender_id, shipping_address, sender_name, sender_phone, delivery_address, receiver_name, receiver_phone, origin, destination, trade_term, product_name, remark1, remark2, serial_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
               const normalizedImportReceiveDate = normalizeOptionalDateValue(enrichedOrderData.receive_date) || null;
               const importRemarkPatch = normalizeOrderRemarkPatch(enrichedOrderData);
-              const [insertResult] = await rowConnection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.orderer, normalizedImportReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, importRemarkPatch.remark1 ?? null, importRemarkPatch.remark2 ?? null, serialNumber]);
+              const [insertResult] = await rowConnection.execute(sql, [enrichedOrderData.company_name, enrichedOrderData.sender_company || null, enrichedOrderData.receiver_company, enrichedOrderData.orderer, normalizedImportReceiveDate, enrichedOrderData.business_type, enrichedOrderData.customer_id, enrichedOrderData.sender_id || null, enrichedOrderData.shipping_address, enrichedOrderData.sender_name, enrichedOrderData.sender_phone, enrichedOrderData.delivery_address, enrichedOrderData.receiver_name, enrichedOrderData.receiver_phone, enrichedOrderData.origin, enrichedOrderData.destination, enrichedOrderData.trade_term || null, enrichedOrderData.product_name || null, importRemarkPatch.remark1 ?? null, importRemarkPatch.remark2 ?? null, serialNumber]);
 
               // 同时在package表中插入记录，使用相同的serial_number
               const packageSql = "INSERT INTO \`package\` (serial_number, package_label, package_order) VALUES (?, ?, ?)";

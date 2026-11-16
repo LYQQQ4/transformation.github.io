@@ -762,6 +762,8 @@ const createPackagesRouter = (db) => {
         SELECT
           p.*,
           o.company_name,
+          o.sender_company,
+          o.receiver_company,
           o.orderer,
           o.business_type,
           o.sender_id,
@@ -793,6 +795,8 @@ const createPackagesRouter = (db) => {
         SELECT
           p.*,
           o.company_name,
+          o.sender_company,
+          o.receiver_company,
           o.orderer,
           o.business_type,
           o.sender_id,
@@ -828,6 +832,8 @@ const createPackagesRouter = (db) => {
         SELECT
           p.*,
           o.company_name,
+          o.sender_company,
+          o.receiver_company,
           o.orderer,
           o.business_type,
           o.sender_id,

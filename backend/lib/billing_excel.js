@@ -8,12 +8,12 @@ const { createHttpError } = require("./request_auth");
 const MAX_ROWS = 500;
 const MAX_BYTES = 5 * 1024 * 1024;
 const HEADERS = [
-  "流水号", "公司名称", "指令人", "业务类型", "发件人ID", "客户ID",
+  "流水号", "发件人公司", "收件人公司", "指令人", "业务类型", "发件人ID", "收件人ID",
   "接收指令日期", "起始地", "目的地", "贸易术语", "货物品名",
   "运输方式", "运单号", "成本", "销售", "账期",
 ];
 const KEYS = [
-  "serial_number", "company_name", "orderer", "business_type", "sender_id",
+  "serial_number", "sender_company", "receiver_company", "orderer", "business_type", "sender_id",
   "customer_id", "receive_date", "origin", "destination", "trade_term",
   "product_name", "transport_mode", "tracking_number", "cost_total",
   "sales_total", "billing_period",

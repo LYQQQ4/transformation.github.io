@@ -88,6 +88,8 @@
     const values = {
       serial_number: row.serial_number || row.id,
       company_name: row.company_name,
+      sender_company: row.sender_company || row.company_name,
+      receiver_company: row.receiver_company,
       orderer: row.orderer,
       business_type: row.business_type,
       sender_id: row.sender_id,
@@ -129,7 +131,8 @@
 
   const ORDER_SUMMARY_FIELD_DEFINITIONS = [
     { key: "serial_number", label: "\u6d41\u6c34\u53f7" },
-    { key: "company_name", label: "\u516c\u53f8\u540d\u79f0" },
+    { key: "sender_company", label: "\u53d1\u4ef6\u4eba\u516c\u53f8" },
+    { key: "receiver_company", label: "\u6536\u4ef6\u4eba\u516c\u53f8" },
     { key: "orderer", label: "\u6307\u4ee4\u4eba" },
     { key: "business_type", label: "\u4e1a\u52a1\u7c7b\u578b" },
     { key: "sender_id", label: "\u53d1\u4ef6\u4ebaID" },
@@ -154,7 +157,8 @@
 
   const TOTAL_REPORT_FIELD_DEFINITIONS = [
     { key: "serial_number", label: "\u6d41\u6c34\u53f7" },
-    { key: "company_name", label: "\u516c\u53f8\u540d\u79f0" },
+    { key: "sender_company", label: "\u53d1\u4ef6\u4eba\u516c\u53f8" },
+    { key: "receiver_company", label: "\u6536\u4ef6\u4eba\u516c\u53f8" },
     { key: "orderer", label: "\u6307\u4ee4\u4eba" },
     { key: "business_type", label: "\u4e1a\u52a1\u7c7b\u578b" },
     { key: "sender_id", label: "\u53d1\u4ef6\u4ebaID" },

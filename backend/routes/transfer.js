@@ -229,6 +229,8 @@ const TRANSFER_SELECT_COLUMNS = `
           t.create_time,
           t.update_time,
           o.company_name,
+          o.sender_company,
+          o.receiver_company,
           o.orderer,
           o.business_type,
           o.sender_id,

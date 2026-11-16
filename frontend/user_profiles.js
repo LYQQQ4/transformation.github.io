@@ -372,6 +372,15 @@
     if (phone) {
       phone.value = profile.phone || "";
     }
+    const company = form.querySelector("#receiverCompany");
+    if (company) {
+      company.value = profile.company_name || "";
+    }
+    const legacyCompany = form.querySelector("#companyName");
+    const senderCompany = form.querySelector("#senderCompany")?.value || "";
+    if (legacyCompany) {
+      legacyCompany.value = senderCompany || profile.company_name || "";
+    }
   }
 
   function applySenderProfileToOrder(form, profile) {
@@ -387,6 +396,15 @@
     }
     if (phone) {
       phone.value = profile.phone || "";
+    }
+    const company = form.querySelector("#senderCompany");
+    if (company) {
+      company.value = profile.company_name || "";
+    }
+    const legacyCompany = form.querySelector("#companyName");
+    const receiverCompany = form.querySelector("#receiverCompany")?.value || "";
+    if (legacyCompany) {
+      legacyCompany.value = profile.company_name || receiverCompany;
     }
   }
 

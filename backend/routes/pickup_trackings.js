@@ -111,6 +111,8 @@ const PICKUP_SELECT_COLUMNS = `
           t.created_at,
           t.updated_at,
           o.company_name,
+          o.sender_company,
+          o.receiver_company,
           o.orderer,
           o.business_type,
           o.sender_id,

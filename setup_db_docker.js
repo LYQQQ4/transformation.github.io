@@ -31,6 +31,8 @@ async function setupDatabase() {
       CREATE TABLE IF NOT EXISTS orders (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
         company_name VARCHAR(200) NOT NULL COMMENT '公司抬头',
+        sender_company VARCHAR(200) DEFAULT NULL COMMENT '发件人公司',
+        receiver_company VARCHAR(200) DEFAULT NULL COMMENT '收件人公司',
         orderer VARCHAR(100) NOT NULL COMMENT '指令人',
         receive_date DATE DEFAULT NULL COMMENT '接收指令日期',
         business_type VARCHAR(50) NOT NULL COMMENT '业务类型',
@@ -90,6 +92,8 @@ async function setupDatabase() {
 
     // 检查并补充orders表新字段
     const orderColumnDefinitions = [
+      { name: "sender_company", sql: "ALTER TABLE orders ADD COLUMN sender_company VARCHAR(200) DEFAULT NULL COMMENT '发件人公司'" },
+      { name: "receiver_company", sql: "ALTER TABLE orders ADD COLUMN receiver_company VARCHAR(200) DEFAULT NULL COMMENT '收件人公司'" },
       { name: "sender_id", sql: "ALTER TABLE orders ADD COLUMN sender_id VARCHAR(50) DEFAULT NULL COMMENT '发件人ID'" },
       { name: "product_name", sql: "ALTER TABLE orders ADD COLUMN product_name VARCHAR(200) DEFAULT NULL COMMENT '货物品名'" },
       { name: "remark1", sql: "ALTER TABLE orders ADD COLUMN remark1 VARCHAR(1000) DEFAULT NULL COMMENT '备注1'" },

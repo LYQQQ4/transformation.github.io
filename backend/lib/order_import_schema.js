@@ -1,11 +1,19 @@
 const ORDER_IMPORT_FIELDS = [
   {
-    key: "company_name",
-    label: "公司名称",
-    aliases: ["公司名称", "公司抬头"],
-    formId: "companyName",
-    required: true,
-    allowAutoFillFromProfile: false,
+    key: "sender_company",
+    label: "发件人公司",
+    aliases: ["发件人公司", "sender_company", "公司名称", "公司抬头", "company_name"],
+    formId: "senderCompany",
+    required: false,
+    allowAutoFillFromProfile: true,
+  },
+  {
+    key: "receiver_company",
+    label: "收件人公司",
+    aliases: ["收件人公司", "receiver_company"],
+    formId: "receiverCompany",
+    required: false,
+    allowAutoFillFromProfile: true,
   },
   {
     key: "orderer",

@@ -10,7 +10,8 @@ const {
 
 const EXPECTED_FIELD_KEYS = [
   "serial_number",
-  "company_name",
+  "sender_company",
+  "receiver_company",
   "orderer",
   "business_type",
   "sender_id",
@@ -60,7 +61,7 @@ function testOrderSummaryFieldDefinitions() {
     orderSummaryFields.ORDER_SUMMARY_FIELD_DEFINITIONS.map((field) => field.key),
     EXPECTED_FIELD_KEYS
   );
-  assert.strictEqual(orderSummaryFields.ORDER_SUMMARY_FIELD_DEFINITIONS[5].label, "收件人ID");
+  assert.strictEqual(orderSummaryFields.ORDER_SUMMARY_FIELD_DEFINITIONS[6].label, "收件人ID");
 }
 
 function testOrderSummaryTotalsAndFormatting() {

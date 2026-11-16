@@ -15,7 +15,8 @@ const createReportsRouter = require("../backend/routes/reports");
 
 const EXPECTED_FIELD_KEYS = [
   "serial_number",
-  "company_name",
+  "sender_company",
+  "receiver_company",
   "orderer",
   "business_type",
   "sender_id",
@@ -51,7 +52,7 @@ const EXPECTED_FIELD_KEYS = [
 ];
 
 const EXPECTED_FIELD_LABELS = [
-  "流水号", "公司名称", "指令人", "业务类型", "发件人ID", "客户ID",
+  "流水号", "发件人公司", "收件人公司", "指令人", "业务类型", "发件人ID", "客户ID",
   "接收指令日期", "起始地", "目的地", "贸易术语", "货物品名", "运输方式",
   "运单号", "提货时间", "货物流转信息", "运输供应商", "增值服务备注",
   "备注1", "备注2", "到货时间", "报关口岸", "开始报关时间", "付税时间",
@@ -212,7 +213,7 @@ function testFrontendUsesSharedDefinition() {
       Array.from(thead.innerHTML.matchAll(/<th>(.*?)<\/th>/g), (match) => match[1]),
       EXPECTED_FIELD_LABELS
     );
-    assert.strictEqual((tbody.innerHTML.match(/<td>/g) || []).length, rows.length * 34);
+    assert.strictEqual((tbody.innerHTML.match(/<td>/g) || []).length, rows.length * 35);
     assert.ok(!tbody.innerHTML.includes("<script>"));
   }
   assert.deepStrictEqual(paginated, Array(3).fill("reportManagementTable"));

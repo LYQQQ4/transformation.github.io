@@ -9,6 +9,7 @@
     "check": "eslint . --ext .js",
     "migrate:user-profiles": "node scripts/migrate_user_profiles.js",
     "migrate:order-remarks": "node scripts/migrate_unified_order_remarks.js",
+    "migrate:order-company-fields": "node scripts/migrate_order_company_fields.js",
     "rollback:user-profiles": "node scripts/rollback_user_profiles_migration.js",
     "test:smoke": "node scripts/api_module_smoke.js",
     "test:auth-security": "node scripts/auth_security_test.js",

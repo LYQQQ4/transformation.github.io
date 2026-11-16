@@ -76,6 +76,8 @@ async function setupDatabase() {
       CREATE TABLE IF NOT EXISTS orders (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
         company_name VARCHAR(200) NOT NULL COMMENT '公司抬头',
+        sender_company VARCHAR(200) DEFAULT NULL COMMENT '发件人公司',
+        receiver_company VARCHAR(200) DEFAULT NULL COMMENT '收件人公司',
         orderer VARCHAR(100) NOT NULL COMMENT '指令人',
         receive_date DATE DEFAULT NULL COMMENT '接收指令日期',
         business_type VARCHAR(50) NOT NULL COMMENT '业务类型',
