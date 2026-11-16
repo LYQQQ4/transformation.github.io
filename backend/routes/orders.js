@@ -424,6 +424,8 @@ const BASIC_INFO_ORDER_FIELDS = [
   "company_name",
   "orderer",
   "business_type",
+  "sender_company",
+  "receiver_company",
   "sender_id",
   "customer_id",
   "receive_date",
@@ -472,6 +474,8 @@ function buildBasicInfoExportSql(placeholders) {
       o.company_name,
       o.orderer,
       o.business_type,
+      o.sender_company,
+      o.receiver_company,
       o.sender_id,
       o.customer_id,
       DATE_FORMAT(o.receive_date, '%Y-%m-%d') AS receive_date,
@@ -481,6 +485,9 @@ function buildBasicInfoExportSql(placeholders) {
       o.product_name,
       COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
       COALESCE(pt.tracking_number, t.tracking_number) AS tracking_number,
+      pkg.pieces,
+      pkg.single_weight,
+      pkg.actual_weight,
       COALESCE(pt.transport_supplier, t.supplier) AS transport_supplier,
       COALESCE(pt.value_added_services, t.value_added_services) AS value_added_services,
       o.remark1,
@@ -496,6 +503,24 @@ function buildBasicInfoExportSql(placeholders) {
     LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = o.serial_number
     LEFT JOIN transfer t ON t.serial_number = o.serial_number
     LEFT JOIN customs_clearance_tracking c ON c.serial_number = o.serial_number
+    LEFT JOIN (
+      SELECT
+        serial_number,
+        SUM(COALESCE(pieces, 0)) AS pieces,
+        CASE
+          WHEN COUNT(DISTINCT single_weight) = 1 THEN MAX(single_weight)
+          ELSE NULL
+        END AS single_weight,
+        ROUND(SUM(
+          CASE
+            WHEN single_weight IS NULL THEN 0
+            WHEN pieces IS NULL OR pieces <= 0 THEN single_weight
+            ELSE pieces * single_weight
+          END
+        ), 2) AS actual_weight
+      FROM \`package\`
+      GROUP BY serial_number
+    ) pkg ON pkg.serial_number = o.serial_number
     WHERE o.serial_number IN (${placeholders})
   `;
 }

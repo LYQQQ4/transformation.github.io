@@ -20,12 +20,17 @@ function run() {
     company_name: "Acme",
     orderer: "Alice",
     business_type: "Air",
+    sender_company: "Sender Co",
+    receiver_company: "Receiver Co",
     sender_id: "ch001",
     customer_id: "ch002",
     receive_date: "2026-10-27",
     origin: "Shanghai",
     destination: "New York",
     tracking_number: "000123",
+    pieces: 3,
+    single_weight: 2.5,
+    actual_weight: 7.5,
     updated_at: "2026-10-27 10:20:30",
   }]);
   assert.deepEqual(workbook.SheetNames, [BASIC_INFO_SHEET_NAME, INSTRUCTION_SHEET_NAME, METADATA_SHEET_NAME]);
@@ -39,9 +44,10 @@ function run() {
   const headers = BASIC_INFO_FIELDS.map((field) => field.label);
   const manual = XLSX.utils.book_new();
   const values = [
-    "202610001", "Acme", "Alice", "Air", "ch001", "ch002", 46000,
-    "Shanghai", "New York", "FOB", "#CLEAR#", "Sea", "000123", "Carrier",
-    "", "", "#CLEAR#", "Shanghai Port", "000045", "Customs Co",
+    "202610001", "Acme", "Alice", "Air", "Sender Co", "Receiver Co",
+    "ch001", "ch002", 46000, "Shanghai", "New York", "FOB", "#CLEAR#",
+    "Sea", "000123", 3, 2.5, 7.5, "Carrier", "", "", "#CLEAR#",
+    "Shanghai Port", "000045", "Customs Co",
   ];
   XLSX.utils.book_append_sheet(manual, XLSX.utils.aoa_to_sheet([headers, values]), BASIC_INFO_SHEET_NAME);
   XLSX.utils.book_append_sheet(manual, XLSX.utils.aoa_to_sheet([["item", "note"]]), INSTRUCTION_SHEET_NAME);

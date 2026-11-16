@@ -15,6 +15,8 @@ const ORDER = {
   company_name: "Acme",
   orderer: "Alice",
   business_type: "Air",
+  sender_company: "Sender Co",
+  receiver_company: "Receiver Co",
   sender_id: "ch001",
   customer_id: "ch002",
   receive_date: "2026-10-27",
@@ -24,6 +26,9 @@ const ORDER = {
   product_name: "Parts",
   transport_mode: "Air",
   tracking_number: "000123",
+  pieces: 3,
+  single_weight: 2.5,
+  actual_weight: 7.5,
   transport_supplier: "Carrier",
   value_added_services: "Keep dry",
   remark1: "R1",
@@ -76,6 +81,15 @@ function createUserDb(role = "admin") {
 async function startServer(router) {
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    if (req.headers["x-user-id"]) {
+      req.user = {
+        id: req.headers["x-user-id"],
+        role: req.headers["x-user-role"] || "admin",
+      };
+    }
+    next();
+  });
   app.use("/api/orders", router);
   return new Promise((resolve) => {
     const server = app.listen(0, "127.0.0.1", () => resolve(server));
@@ -94,6 +108,10 @@ async function run() {
     const buffer = Buffer.from(await exportResponse.arrayBuffer());
     const workbook = XLSX.read(buffer, { type: "buffer" });
     assert.deepEqual(workbook.SheetNames, [BASIC_INFO_SHEET_NAME, INSTRUCTION_SHEET_NAME, METADATA_SHEET_NAME]);
+    const worksheetHeaders = XLSX.utils.sheet_to_json(workbook.Sheets[BASIC_INFO_SHEET_NAME], { header: 1 })[0];
+    assert.deepEqual(worksheetHeaders.slice(3, 6), ["业务类型", "发件人公司", "收件人公司"]);
+    assert.deepEqual(worksheetHeaders.slice(14, 17), ["运单号", "件数", "单件重量"]);
+    assert.equal(workbook.Sheets[BASIC_INFO_SHEET_NAME].R2.f, 'IF(OR(P2="",Q2=""),"",ROUND(P2*Q2,2))');
 
     const form = new FormData();
     form.append(

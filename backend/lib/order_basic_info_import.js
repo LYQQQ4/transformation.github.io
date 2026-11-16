@@ -10,6 +10,8 @@ const BASIC_INFO_FIELDS = [
   { key: "company_name", label: "\u516c\u53f8\u540d\u79f0", aliases: ["company_name", "\u516c\u53f8\u540d\u79f0"], maxLength: 200, required: true },
   { key: "orderer", label: "\u6307\u4ee4\u4eba", aliases: ["orderer", "\u6307\u4ee4\u4eba"], maxLength: 100, required: true },
   { key: "business_type", label: "\u4e1a\u52a1\u7c7b\u578b", aliases: ["business_type", "\u4e1a\u52a1\u7c7b\u578b"], maxLength: 50, required: true },
+  { key: "sender_company", label: "\u53d1\u4ef6\u4eba\u516c\u53f8", aliases: ["sender_company", "\u53d1\u4ef6\u4eba\u516c\u53f8"], maxLength: 200, clearable: true },
+  { key: "receiver_company", label: "\u6536\u4ef6\u4eba\u516c\u53f8", aliases: ["receiver_company", "\u6536\u4ef6\u4eba\u516c\u53f8"], maxLength: 200, clearable: true },
   { key: "sender_id", label: "\u53d1\u4ef6\u4ebaID", aliases: ["sender_id", "\u53d1\u4ef6\u4ebaid", "\u53d1\u4ef6\u4ebaID"], maxLength: 50 },
   { key: "customer_id", label: "\u5ba2\u6237ID", aliases: ["customer_id", "\u5ba2\u6237id", "\u5ba2\u6237ID"], maxLength: 50, required: true },
   { key: "receive_date", label: "\u63a5\u6536\u6307\u4ee4\u65e5\u671f", aliases: ["receive_date", "\u63a5\u6536\u6307\u4ee4\u65e5\u671f", "\u63a5\u6536\u65e5\u671f", "\u6307\u4ee4\u65e5\u671f", "\u65e5\u671f"], date: true, clearable: true },
@@ -19,6 +21,9 @@ const BASIC_INFO_FIELDS = [
   { key: "product_name", label: "\u8d27\u7269\u54c1\u540d", aliases: ["product_name", "goods_name", "\u8d27\u7269\u54c1\u540d", "\u54c1\u540d"], maxLength: 200, clearable: true },
   { key: "transport_mode", label: "\u8fd0\u8f93\u65b9\u5f0f", aliases: ["transport_mode", "\u8fd0\u8f93\u65b9\u5f0f"], maxLength: 50, clearable: true },
   { key: "tracking_number", label: "\u8fd0\u5355\u53f7", aliases: ["tracking_number", "\u8fd0\u5355\u53f7"], maxLength: 100, clearable: true },
+  { key: "pieces", label: "\u4ef6\u6570", aliases: ["pieces", "\u4ef6\u6570"], readOnly: true },
+  { key: "single_weight", label: "\u5355\u4ef6\u91cd\u91cf", aliases: ["single_weight", "\u5355\u4ef6\u91cd\u91cf"], readOnly: true },
+  { key: "actual_weight", label: "\u5b9e\u9645\u91cd\u91cf", aliases: ["actual_weight", "\u5b9e\u9645\u91cd\u91cf"], readOnly: true },
   { key: "transport_supplier", label: "\u8fd0\u8f93\u4f9b\u5e94\u5546", aliases: ["transport_supplier", "supplier", "\u8fd0\u8f93\u4f9b\u5e94\u5546"], maxLength: 200, clearable: true },
   { key: "value_added_services", label: "\u589e\u503c\u670d\u52a1\u5907\u6ce8", aliases: ["value_added_service_remark", "value_added_services", "\u589e\u503c\u670d\u52a1\u5907\u6ce8"], clearable: true },
   { key: "remark1", label: "\u5907\u6ce81", aliases: ["remark1", "\u5907\u6ce81"], maxLength: 1000, clearable: true },
@@ -137,6 +142,23 @@ function buildTemplateRows(orders) {
   }));
 }
 
+function setActualWeightFormulas(worksheet, rowCount) {
+  const piecesColumn = BASIC_INFO_FIELDS.findIndex((field) => field.key === "pieces");
+  const singleWeightColumn = BASIC_INFO_FIELDS.findIndex((field) => field.key === "single_weight");
+  const actualWeightColumn = BASIC_INFO_FIELDS.findIndex((field) => field.key === "actual_weight");
+  for (let rowIndex = 1; rowIndex <= rowCount; rowIndex += 1) {
+    const piecesAddress = XLSX.utils.encode_cell({ r: rowIndex, c: piecesColumn });
+    const singleWeightAddress = XLSX.utils.encode_cell({ r: rowIndex, c: singleWeightColumn });
+    const actualWeightAddress = XLSX.utils.encode_cell({ r: rowIndex, c: actualWeightColumn });
+    const actualWeight = worksheet[actualWeightAddress]?.v;
+    worksheet[actualWeightAddress] = {
+      t: "n",
+      v: Number.isFinite(Number(actualWeight)) ? Number(actualWeight) : 0,
+      f: `IF(OR(${piecesAddress}="",${singleWeightAddress}=""),"",ROUND(${piecesAddress}*${singleWeightAddress},2))`,
+    };
+  }
+}
+
 function setTextColumns(worksheet, rowCount) {
   const textKeys = new Set(["serial_number", "sender_id", "customer_id", "tracking_number", "customs_declaration_number"]);
   BASIC_INFO_FIELDS.forEach((field, columnIndex) => {
@@ -157,6 +179,7 @@ function buildBasicInfoWorkbook(orders) {
   const headers = BASIC_INFO_FIELDS.map((field) => field.label);
   const worksheet = XLSX.utils.aoa_to_sheet([headers, ...buildTemplateRows(orders)]);
   setTextColumns(worksheet, orders.length);
+  setActualWeightFormulas(worksheet, orders.length);
   worksheet["!cols"] = BASIC_INFO_FIELDS.map((field) => ({ wch: Math.max(14, Math.min(28, field.label.length + 8)) }));
   XLSX.utils.book_append_sheet(workbook, worksheet, BASIC_INFO_SHEET_NAME);
 
@@ -166,6 +189,7 @@ function buildBasicInfoWorkbook(orders) {
     ["\u65e5\u671f", "\u652f\u6301 YYYY-MM-DD\u3001YYYY/MM/DD \u548c Excel \u65e5\u671f\u5e8f\u5217\u53f7\uff0c\u975e\u6cd5\u65e5\u671f\u4f1a\u6309\u884c\u5931\u8d25\u3002"],
     ["\u5fc5\u586b\u5b57\u6bb5", "\u516c\u53f8\u540d\u79f0\u3001\u6307\u4ee4\u4eba\u3001\u4e1a\u52a1\u7c7b\u578b\u3001\u5ba2\u6237ID\u3001\u8d77\u59cb\u5730\u3001\u76ee\u7684\u5730\u4e0d\u80fd\u88ab #CLEAR# \u6e05\u7a7a\u3002"],
     ["\u7528\u6237ID", "\u53d1\u4ef6\u4ebaID\u548c\u5ba2\u6237ID\u5fc5\u987b\u5b58\u5728\u4e8e\u7edf\u4e00\u7528\u6237\u6863\u6848\u3002"],
+    ["\u91cd\u91cf", "\u4ef6\u6570\u3001\u5355\u4ef6\u91cd\u91cf\u4e3a\u5305\u88c5\u6570\u636e\uff0c\u5b9e\u9645\u91cd\u91cf\u7531 Excel \u81ea\u52a8\u6309\u4ef6\u6570\u00d7\u5355\u4ef6\u91cd\u91cf\u8ba1\u7b97\u3002"],
     ["\u7a7a\u503c", "\u7a7a\u5355\u5143\u683c\u9ed8\u8ba4\u4e3a\u4e0d\u4fee\u6539\u539f\u503c\uff1b\u9700\u6e05\u7a7a\u65f6\u586b\u5199 #CLEAR#\u3002"],
     ["\u5bfc\u5165\u5931\u8d25", "\u6bcf\u884c\u72ec\u7acb\u6821\u9a8c\u548c\u4e8b\u52a1\uff0c\u5355\u884c\u5931\u8d25\u4e0d\u5f71\u54cd\u5176\u4ed6\u5408\u6cd5\u884c\u3002"],
   ];
@@ -278,7 +302,7 @@ function parseBasicInfoWorkbook(buffer) {
     }
 
     BASIC_INFO_FIELDS.forEach((field) => {
-      if (field.key === "serial_number" || !presentFields.has(field.key)) return;
+      if (field.key === "serial_number" || field.readOnly || !presentFields.has(field.key)) return;
       const rawValue = values[field.key];
       const textValue = normalizeCellText(rawValue);
       if (!textValue) return;
