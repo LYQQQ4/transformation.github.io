@@ -27,6 +27,10 @@ function normalizeSerialNumberKeyword(value) {
   return String(value || "").trim();
 }
 
+function normalizeCompanyKeyword(value) {
+  return String(value || "").trim();
+}
+
 function normalizeOptionalQueryValue(value) {
   return String(value || "").trim();
 }
@@ -88,6 +92,8 @@ function buildReportBaseSql(whereClause = "") {
     SELECT
       o.serial_number,
       o.company_name,
+      o.sender_company,
+      o.receiver_company,
       o.orderer,
       o.business_type,
       o.sender_id,
@@ -177,6 +183,8 @@ function buildReportBaseSql(whereClause = "") {
 
 function buildReportFilter(req) {
   const serialNumber = normalizeSerialNumberKeyword(req.query.serial_number);
+  const senderCompany = normalizeCompanyKeyword(req.query.sender_company);
+  const receiverCompany = normalizeCompanyKeyword(req.query.receiver_company);
   const dateFilter = buildReportDateFilter(req);
   const conditions = [];
   const params = [...dateFilter.params];
@@ -185,10 +193,20 @@ function buildReportFilter(req) {
     conditions.push("o.serial_number LIKE ?");
     params.push(`%${serialNumber}%`);
   }
+  if (senderCompany) {
+    conditions.push("o.sender_company LIKE ?");
+    params.push(`%${senderCompany}%`);
+  }
+  if (receiverCompany) {
+    conditions.push("o.receiver_company LIKE ?");
+    params.push(`%${receiverCompany}%`);
+  }
   conditions.unshift(...dateFilter.conditions);
 
   return {
     serialNumber,
+    senderCompany,
+    receiverCompany,
     dateField: dateFilter.dateField,
     dateFrom: dateFilter.dateFrom,
     dateTo: dateFilter.dateTo,

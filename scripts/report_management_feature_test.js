@@ -12,6 +12,7 @@ const {
   buildTotalReportSummaryRows,
 } = require("../backend/lib/reporting");
 const createReportsRouter = require("../backend/routes/reports");
+const { buildReportFilter } = require("../backend/routes/reports");
 
 const EXPECTED_FIELD_KEYS = [
   "serial_number",
@@ -88,6 +89,8 @@ function testUnifiedReportFieldDefinitions() {
     [{
       serial_number: "202609001",
       company_name: "A公司",
+      sender_company: "发件公司",
+      receiver_company: "收件公司",
       cost_items_raw: JSON.stringify([{ amount: "100" }]),
       billing_items_raw: JSON.stringify([{ amount: "200", billing_period: "2026-09" }]),
     }],
@@ -118,6 +121,8 @@ function testFieldMappingsAndFormatting() {
   const input = {
     serial_number: "202609007",
     company_name: "A公司",
+    sender_company: "发件公司",
+    receiver_company: "收件公司",
     orderer: "Operator",
     business_type: "Import",
     sender_id: "S001",
@@ -158,7 +163,7 @@ function testFieldMappingsAndFormatting() {
     ]),
   };
   const expected = [
-    "202609007", "A公司", "Operator", "Import", "S001", "C001", "2026/09/01",
+    "202609007", "发件公司", "收件公司", "Operator", "Import", "S001", "C001", "2026/09/01",
     "Origin", "Destination", "DDP", "Product", "Air", "TN001", "2026/09/02",
     "In transit", "Carrier", "Insurance", "Unified remark",
     "提货备注：Pickup remark\n送货备注：Transfer remark", "2026/09/03",
@@ -181,7 +186,11 @@ function testFrontendUsesSharedDefinition() {
   const appJs = read("frontend/app.js");
 
   assert.ok(html.includes('src="order_summary_fields.js"'));
+  assert.ok(html.includes('id="reportSenderCompanyInput"'));
+  assert.ok(html.includes('id="reportReceiverCompanyInput"'));
   assert.ok(appJs.includes("ORDER_SUMMARY_FIELD_API"));
+  assert.ok(appJs.includes('params.set("sender_company", senderCompany)'));
+  assert.ok(appJs.includes('params.set("receiver_company", receiverCompany)'));
   assert.ok(appJs.includes("getOrderSummaryFieldDefinitions"));
   assert.ok(appJs.includes("buildOrderSummaryDetailItems"));
   assert.ok(appJs.includes("syncBillingTableColumns"));
@@ -242,6 +251,8 @@ function createReportDb(rows, keyword = "202609") {
           }
           if (sql.includes("SELECT")) {
             assert.ok(sql.includes("b.billing_completed_time"));
+            assert.ok(sql.includes("o.sender_company"));
+            assert.ok(sql.includes("o.receiver_company"));
             assert.ok(sql.includes("pt.customs_port"));
             assert.ok(sql.includes("c.customs_declaration_number"));
             assert.ok(sql.includes("NULLIF(TRIM(pt.transport_supplier), '')"));
@@ -257,12 +268,28 @@ function createReportDb(rows, keyword = "202609") {
             assert.deepStrictEqual(params, keyword ? [`%${keyword}%`] : []);
             return [keyword ? rows.filter((row) => String(row.serial_number || "").includes(keyword)) : rows];
           }
+
           return [[]];
         },
         release() { state.releaseCount += 1; },
       };
     },
   };
+}
+
+function testCompanyFilters() {
+  const filter = buildReportFilter({
+    query: {
+      serial_number: "202609",
+      sender_company: "发件",
+      receiver_company: "收件",
+    },
+  });
+  assert.strictEqual(
+    filter.whereClause,
+    "WHERE o.serial_number LIKE ? AND o.sender_company LIKE ? AND o.receiver_company LIKE ?"
+  );
+  assert.deepStrictEqual(filter.params, ["%202609%", "%发件%", "%收件%"]);
 }
 
 function createUserDb(role) {
@@ -276,6 +303,15 @@ function createUserDb(role) {
 
 async function requestReport(router, requestPath, headers = {}) {
   const app = express();
+  app.use((req, _res, next) => {
+    if (req.headers["x-user-id"] === "1") {
+      req.user = {
+        id: req.headers["x-user-id"],
+        role: "user",
+      };
+    }
+    next();
+  });
   app.use("/api/reports", router);
   const server = http.createServer(app);
 
@@ -321,7 +357,17 @@ async function testReportEndpointsAndExcelExport() {
     const summary = await summaryResponse.json();
     assert.deepStrictEqual(
       Object.keys(summary).sort(),
-      ["columns", "empty_value_text", "report_type", "rows", "selected_fields", "serial_number"]
+      [
+        "columns",
+        "date_field",
+        "date_from",
+        "date_to",
+        "empty_value_text",
+        "report_type",
+        "rows",
+        "selected_fields",
+        "serial_number",
+      ]
     );
     assert.strictEqual(summary.report_type, "total");
     assert.strictEqual(summary.serial_number, "202609");
@@ -492,6 +538,7 @@ async function testReportQueryErrorsReleaseConnection() {
 
 async function run() {
   testUnifiedReportFieldDefinitions();
+  testCompanyFilters();
   testFrontendUsesSharedDefinition();
   await testReportEndpointsAndExcelExport();
   await testEmptyReportsAndIgnoredLegacyParameters();
