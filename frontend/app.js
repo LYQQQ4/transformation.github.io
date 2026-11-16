@@ -21,6 +21,13 @@ let currentOrderDeliveryTrackingData = null;
 let currentOrderCustomsClearanceData = null;
 let currentOrderBillingData = null;
 let currentBillingSerialNumber = "";
+const billingFilterState = {
+    company_name: "",
+    billing_completed_time_filled_status: "all",
+    cost_filled_status: "all",
+    sales_filled_status: "all",
+    billing_period_filled_status: "all"
+};
 const ORDER_SUMMARY_FIELD_API = window.OrderSummaryFields || null;
 
 const BILLING_FEE_CATEGORIES = [
@@ -2152,6 +2159,20 @@ function ensureBillingPageStructure() {
     if (!document.getElementById("billingTable")) {
         section.innerHTML = `
             <h2>账单信息维护</h2>
+            <div id="billingFilterFormData" style="display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 16px;">
+                <div class="form-group">
+                    <label for="billingFilterCompanyName">客户名:</label>
+                    <input type="text" id="billingFilterCompanyName">
+                </div>
+                ${buildOrderFilledStatusFilterHtml("账单完成时间", "billingFilterCompletedStatus")}
+                ${buildOrderFilledStatusFilterHtml("成本", "billingFilterCostStatus")}
+                ${buildOrderFilledStatusFilterHtml("销售", "billingFilterSalesStatus")}
+                ${buildOrderFilledStatusFilterHtml("账期", "billingFilterPeriodStatus")}
+                <div class="button-group">
+                    <button type="button" onclick="applyBillingFilters()">应用筛选</button>
+                    <button type="button" onclick="clearBillingFilters()">清除筛选</button>
+                </div>
+            </div>
             <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
                 <button type="button" onclick="loadBillingRecords()">加载账单信息</button>
             </div>
@@ -2180,11 +2201,65 @@ function ensureBillingPageStructure() {
                 </thead>
                 <tbody></tbody>
             </table>
+            <div id="billingEmptyState" style="display: none; padding: 16px; text-align: center;">暂无符合条件的账单数据</div>
             <div id="billingDetailContainer" style="margin-top: 24px;"></div>
         `;
     }
     syncBillingTableColumns();
     ensureBillingBatchControls();
+    syncBillingFilterControls();
+}
+
+function syncBillingFilterControls() {
+    const controls = {
+        billingFilterCompanyName: billingFilterState.company_name,
+        billingFilterCompletedStatus: billingFilterState.billing_completed_time_filled_status,
+        billingFilterCostStatus: billingFilterState.cost_filled_status,
+        billingFilterSalesStatus: billingFilterState.sales_filled_status,
+        billingFilterPeriodStatus: billingFilterState.billing_period_filled_status
+    };
+    Object.entries(controls).forEach(([id, value]) => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.value = value;
+        }
+    });
+}
+
+function buildBillingFilterQuery() {
+    const params = new URLSearchParams();
+    Object.entries(billingFilterState).forEach(([key, value]) => {
+        const normalizedValue = typeof value === "string" ? value.trim() : value;
+        if (normalizedValue && normalizedValue !== "all") {
+            params.set(key, normalizedValue);
+        }
+    });
+    return params.toString();
+}
+
+function applyBillingFilters() {
+    billingFilterState.company_name = document.getElementById("billingFilterCompanyName")?.value.trim() || "";
+    billingFilterState.billing_completed_time_filled_status = document.getElementById("billingFilterCompletedStatus")?.value || "all";
+    billingFilterState.cost_filled_status = document.getElementById("billingFilterCostStatus")?.value || "all";
+    billingFilterState.sales_filled_status = document.getElementById("billingFilterSalesStatus")?.value || "all";
+    billingFilterState.billing_period_filled_status = document.getElementById("billingFilterPeriodStatus")?.value || "all";
+    const paginationState = tablePaginationStates.get("billingTable");
+    if (paginationState) {
+        paginationState.page = 1;
+    }
+    loadBillingRecords();
+}
+
+function clearBillingFilters() {
+    Object.keys(billingFilterState).forEach((key) => {
+        billingFilterState[key] = key.endsWith("_status") ? "all" : "";
+    });
+    syncBillingFilterControls();
+    const paginationState = tablePaginationStates.get("billingTable");
+    if (paginationState) {
+        paginationState.page = 1;
+    }
+    loadBillingRecords();
 }
 
 function ensureOrderBillingSection() {
@@ -2279,7 +2354,8 @@ function legacyRenderBillingDetail(container, record, options = {}) {
 async function loadBillingRecords() {
     ensureBillingPageStructure();
     try {
-        const response = await apiFetch(`${API_BASE}/billing`, { headers: getAuthHeaders() });
+        const query = buildBillingFilterQuery();
+        const response = await apiFetch(`${API_BASE}/billing${query ? `?${query}` : ""}`, { headers: getAuthHeaders() });
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error || "加载账单信息失败");
@@ -2287,12 +2363,22 @@ async function loadBillingRecords() {
 
         const tbody = document.querySelector("#billingTable tbody");
         if (tbody) {
-            const validSerials = new Set((data.records || []).map((record) => record.serial_number));
+            const records = data.records || [];
+            const validSerials = new Set(records.map((record) => record.serial_number));
             selectedBillingSerials.forEach((serial) => {
                 if (!validSerials.has(serial)) selectedBillingSerials.delete(serial);
             });
-            tbody.innerHTML = (data.records || []).map(buildBillingRecordRow).join("");
-            applyRenderedTablePagination("billingTable", false);
+            tbody.innerHTML = records.map(buildBillingRecordRow).join("");
+            const emptyState = document.getElementById("billingEmptyState");
+            if (emptyState) {
+                emptyState.style.display = records.length ? "none" : "block";
+            }
+            if (records.length) {
+                applyRenderedTablePagination("billingTable", false);
+            } else {
+                const pagination = document.getElementById("billingTablePagination");
+                if (pagination) pagination.innerHTML = "";
+            }
             updateBillingSelectionState();
         }
 

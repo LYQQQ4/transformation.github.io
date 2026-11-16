@@ -3,6 +3,7 @@ const billingTemplates = require("../../frontend/billing_templates");
 const billingFormula = require("../../frontend/billing_formula");
 const orderSummaryFields = require("../../frontend/order_summary_fields");
 const { requireUserAccess } = require("../lib/request_auth");
+const { buildFilledStatusSql } = require("../lib/reporting");
 const multer = require("multer");
 const path = require("path");
 const { createHash } = require("crypto");
@@ -424,8 +425,33 @@ module.exports = (db, userDb = null) => {
     try {
       if (userDb) await requireBillingAccess(req);
       await ensureBillingSchema(db);
+      const conditions = ["o.serial_number IS NOT NULL"];
+      const params = [];
+      const companyName = String(req.query.company_name || "").trim();
+      if (companyName) {
+        conditions.push("o.company_name LIKE ?");
+        params.push(`%${companyName}%`);
+      }
+
+      const appendFilledStatusCondition = (queryKey, expression) => {
+        const status = String(req.query[queryKey] || "all").trim();
+        const condition = buildFilledStatusSql(expression, status);
+        if (condition) {
+          conditions.push(condition);
+        }
+      };
+
+      appendFilledStatusCondition("billing_completed_time_filled_status", "b.billing_completed_time");
+      appendFilledStatusCondition("cost_filled_status", "b.cost_items");
+      appendFilledStatusCondition("sales_filled_status", "b.billing_items");
+      appendFilledStatusCondition(
+        "billing_period_filled_status",
+        "COALESCE(NULLIF(TRIM(CAST(b.billing_items AS CHAR)), ''), NULLIF(TRIM(CAST(t.billing_period AS CHAR)), ''))"
+      );
+
       const [rows] = await db.execute(
-        `${buildBillingSummarySelect("WHERE o.serial_number IS NOT NULL")} ORDER BY o.id DESC`
+        `${buildBillingSummarySelect(`WHERE ${conditions.join(" AND ")}`)} ORDER BY o.id DESC`,
+        params
       );
       res.json({
         records: rows.map((row) => {
