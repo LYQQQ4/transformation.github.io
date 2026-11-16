@@ -71,8 +71,8 @@ function normalizeUsername(value) {
 }
 
 function validatePassword(password) {
-  if (typeof password !== "string" || password.length < 12 || password.length > 256) {
-    throw createHttpError(400, "Password must be between 12 and 256 characters");
+  if (typeof password !== "string" || password.length < 6 || password.length > 256) {
+    throw createHttpError(400, "Password must be between 6 and 256 characters");
   }
   if (/^(.)\1+$/.test(password) || /^(password|qwerty|letmein|123456|admin)/i.test(password)) {
     throw createHttpError(400, "Choose a stronger password");
@@ -191,35 +191,8 @@ module.exports = (db) => {
     }
   });
 
-  router.post("/", (req, res, next) => {
-    if (!req.user) {
-      res.status(403).json({ error: "Account creation is restricted" });
-      return;
-    }
-    next();
-  }, requireAdminSession, async (req, res) => {
-    try {
-      const username = normalizeUsername(req.body?.username);
-      const password = req.body?.password;
-      if (!username || username.length > 100) {
-        throw createHttpError(400, "A valid username is required");
-      }
-      validatePassword(password);
-      const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
-      const role = req.user.role === "admin" && req.body?.role === "admin" ? "admin" : "user";
-      const email = typeof req.body?.email === "string" ? req.body.email.trim() || null : null;
-      const [result] = await db.execute(
-        "INSERT INTO users (username, password_hash, password, role, email) VALUES (?, ?, NULL, ?, ?)",
-        [username, passwordHash, role, email]
-      );
-      res.status(201).json({ id: result.insertId, message: "User created successfully" });
-    } catch (error) {
-      if (error.code === "ER_DUP_ENTRY") {
-        res.status(409).json({ error: "Username already exists" });
-        return;
-      }
-      sendError(res, error);
-    }
+  router.post("/", requireAdminSession, (_req, res) => {
+    res.status(405).json({ error: "User creation is disabled" });
   });
 
   router.put("/:id", async (req, res) => {
@@ -249,7 +222,24 @@ module.exports = (db) => {
       if (Object.hasOwn(req.body || {}, "role") && !isAdmin) {
         throw createHttpError(403, "Only administrators may change roles");
       }
-      if (isAdmin && ["admin", "user"].includes(req.body?.role)) {
+      if (Object.hasOwn(req.body || {}, "role")) {
+        if (!["admin", "user"].includes(req.body.role)) {
+          throw createHttpError(400, "Invalid role");
+        }
+        if (req.body.role === "user") {
+          const [targetRows] = await db.execute(
+            "SELECT role FROM users WHERE id = ? LIMIT 1",
+            [req.params.id]
+          );
+          if (targetRows.length > 0 && targetRows[0].role === "admin") {
+            const [adminRows] = await db.execute(
+              "SELECT COUNT(*) AS count FROM users WHERE role = 'admin'"
+            );
+            if (Number(adminRows[0]?.count) <= 1) {
+              throw createHttpError(400, "At least one administrator is required");
+            }
+          }
+        }
         fields.push("role = ?");
         values.push(req.body.role);
       }

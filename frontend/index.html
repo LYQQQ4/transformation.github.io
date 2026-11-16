@@ -1254,17 +1254,16 @@
                     <div class="section">
                         <h2>用户管理</h2>
                         <button onclick="loadUsers()">加载用户</button>
-                        <button onclick="showUserForm()">新增用户</button>
                         <div id="userForm" style="display:none; margin-top: 16px; padding: 16px; background-color: #F9FAFB; border-radius: 6px; border: 1px solid #E5E7EB;">
-                            <h3 style="margin: 0 0 16px 0; color: #111827; font-size: 16px; font-weight: 600;">用户表单</h3>
+                            <h3 style="margin: 0 0 16px 0; color: #111827; font-size: 16px; font-weight: 600;">编辑用户</h3>
                             <form id="userFormData">
                                 <div class="form-group">
                                     <label>用户名:</label>
                                     <input type="text" id="username" required>
                                 </div>
                                 <div class="form-group">
-                                    <label>密码:</label>
-                                    <input type="password" id="password" required>
+                                    <label>新密码（留空表示不修改）:</label>
+                                    <input type="password" id="password" autocomplete="new-password">
                                 </div>
                                 <div class="form-group">
                                     <label>角色:</label>

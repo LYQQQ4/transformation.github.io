@@ -147,7 +147,7 @@ async function run() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: "injected", password: generatedPassword, role: "admin" })
     });
-    assert.equal(registration.response.status, 403, "anonymous registration must be denied");
+    assert.equal(registration.response.status, 401, "anonymous registration must be denied");
 
     const anonymousBusiness = await request(baseUrl, "/api/orders", {
       headers: { "x-user-id": "2" }

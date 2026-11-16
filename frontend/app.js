@@ -5037,46 +5037,44 @@ function displayUsers(users) {
 
 function showUserForm(user = null) {
     const form = document.getElementById("userForm");
-    if (user) {
-        document.getElementById("username").value = user.username;
-        document.getElementById("password").value = ""; // Don't show password
-        document.getElementById("userRole").value = user.role;
-        setReceiveDateValue(order.receive_date ? order.receive_date.split("T")[0] : "");
-    } else {
-        clearForms();
-        delete form.dataset.editId;
+    if (!user || !user.id) {
+        return;
     }
+    document.getElementById("username").value = user.username;
+    document.getElementById("password").value = "";
+    document.getElementById("userRole").value = user.role;
+    document.getElementById("userRole").disabled = !isAdminUser();
+    form.dataset.editId = user.id;
     form.style.display = "block";
 }
 
 function hideUserForm() {
     document.getElementById("userForm").style.display = "none";
+    document.getElementById("userRole").disabled = false;
     clearForms();
 }
 
 async function saveUser() {
     const form = document.getElementById("userForm");
-    const userData = {
-        username: document.getElementById("username").value,
-        password: document.getElementById("password").value,
-        role: document.getElementById("userRole").value
-    };
+    if (!form.dataset.editId) {
+        showMessage("只能编辑已有用户", "error");
+        return;
+    }
+    const userData = { username: document.getElementById("username").value };
+    const password = document.getElementById("password").value;
+    if (password) {
+        userData.password = password;
+    }
+    if (isAdminUser()) {
+        userData.role = document.getElementById("userRole").value;
+    }
 
     try {
-        let response;
-        if (form.dataset.editId) {
-            response = await apiFetch(`${API_BASE}/users/${form.dataset.editId}`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(userData)
-            });
-        } else {
-            response = await apiFetch(`${API_BASE}/users`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(userData)
-            });
-        }
+        const response = await apiFetch(`${API_BASE}/users/${form.dataset.editId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(userData)
+        });
 
         if (response.ok) {
             showMessage("用户保存成功");
@@ -9069,6 +9067,14 @@ function showPage(pageName) {
         document.getElementById("packagingDBLink").classList.add("active");
         loadPackagingDb();
     } else if (pageName === "userManagement") {
+        if (!isAdminUser()) {
+            showMessage("仅管理员可进入用户管理", "error");
+            document.getElementById("viewOrdersPage").style.display = "block";
+            document.getElementById("viewOrdersLink").classList.add("active");
+            activeOrderPageContext = ORDER_PAGE_VIEW;
+            loadOrders(ORDER_PAGE_VIEW);
+            return;
+        }
         document.getElementById("userManagementPage").style.display = "block";
         document.getElementById("userManagementLink").classList.add("active");
         loadUsers();
