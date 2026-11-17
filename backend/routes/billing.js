@@ -368,11 +368,11 @@ module.exports = (db, userDb = null) => {
           // Only persist changed sides; all business fields remain database-owned.
           const fields = [];
           const params = [];
-          if (prepared.changes[13] !== undefined) {
+          if (prepared.changes[14] !== undefined) {
             fields.push("cost_items = ?");
             params.push(JSON.stringify(prepared.cost));
           }
-          if (prepared.changes[14] !== undefined || prepared.changes[15] !== undefined) {
+          if (prepared.changes[15] !== undefined || prepared.changes[16] !== undefined) {
             fields.push("billing_items = ?");
             params.push(JSON.stringify(prepared.sales));
           }
@@ -381,8 +381,8 @@ module.exports = (db, userDb = null) => {
             await connection.execute(
               "INSERT INTO billing_info (serial_number, billing_template_key, cost_items, billing_items) VALUES (?, ?, ?, ?)",
               [row.serial, templateKey === billingTemplates.LEGACY_BILLING_TEMPLATE_KEY ? null : templateKey,
-                prepared.changes[13] !== undefined ? JSON.stringify(prepared.cost) : null,
-                prepared.changes[14] !== undefined || prepared.changes[15] !== undefined ? JSON.stringify(prepared.sales) : null]
+                prepared.changes[14] !== undefined ? JSON.stringify(prepared.cost) : null,
+                prepared.changes[15] !== undefined || prepared.changes[16] !== undefined ? JSON.stringify(prepared.sales) : null]
             );
           } else {
             await connection.execute(`UPDATE billing_info SET ${fields.join(", ")} WHERE serial_number = ?`, [...params, row.serial]);

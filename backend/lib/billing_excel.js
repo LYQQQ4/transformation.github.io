@@ -59,16 +59,16 @@ function makeWorkbook(rows, headers = HEADERS) {
 function exportWorkbook(records) {
   const originals = records.map(valuesForRecord);
   const rows = originals.map((values) => values.map((value, index) =>
-    (index === 13 || index === 14) && value !== "" ? Number(value) : value
+    (index === 14 || index === 15) && value !== "" ? Number(value) : value
   ));
   const workbook = makeWorkbook(rows);
   for (let row = 2; row <= rows.length + 1; row += 1) {
-    for (const column of ["N", "O"]) {
+    for (const column of ["O", "P"]) {
       if (workbook.Sheets["账单"][`${column}${row}`]) workbook.Sheets["账单"][`${column}${row}`].z = "0.00";
     }
   }
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(
-    originals.map((values) => [values[0], JSON.stringify(values.slice(13))])
+    originals.map((values) => [values[0], JSON.stringify(values.slice(14))])
   ), SNAPSHOT_SHEET);
   workbook.Workbook = { Sheets: [{ name: "账单", Hidden: 0 }, { name: SNAPSHOT_SHEET, Hidden: 2 }] };
   return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
@@ -142,8 +142,8 @@ function parseWorkbook(buffer) {
   }
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const range = XLSX.utils.decode_range(sheet["!fullref"] || sheet["!ref"] || "A1");
-  if (range.s.r !== 0 || range.s.c !== 0 || range.e.r > MAX_ROWS || range.e.c !== 15) {
-    throw new Error(`表格必须包含 16 列，最多 ${MAX_ROWS} 行数据`);
+  if (range.s.r !== 0 || range.s.c !== 0 || range.e.r > MAX_ROWS || range.e.c !== 16) {
+    throw new Error(`表格必须包含 17 列，最多 ${MAX_ROWS} 行数据`);
   }
   const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true, blankrows: true });
   if (HEADERS.some((header, index) => grid[0]?.[index] !== header)) throw new Error("表头缺失或顺序错误，请使用账单导出模板");
@@ -152,8 +152,17 @@ function parseWorkbook(buffer) {
   if (snapshot) {
     const snapshotRange = XLSX.utils.decode_range(snapshot["!fullref"] || snapshot["!ref"] || "A1");
     if (snapshotRange.e.r >= MAX_ROWS || snapshotRange.e.c > 1) throw new Error("原值快照超限");
-    for (const [serial, json] of XLSX.utils.sheet_to_json(snapshot, { header: 1, raw: true })) {
-      const values = JSON.parse(json);
+    for (const row of XLSX.utils.sheet_to_json(snapshot, { header: 1, raw: true })) {
+      const [serial, json] = row;
+      let values;
+      try {
+        const parsed = JSON.parse(json);
+        // Versions that exported the 17-column sheet before the snapshot
+        // indexes were corrected stored tracking_number as the first value.
+        values = Array.isArray(parsed) && parsed.length === 4 ? parsed.slice(1) : parsed;
+      } catch (_error) {
+        throw new Error("原值快照无效");
+      }
       if (!Array.isArray(values) || values.length !== 3 || values.some((value) => typeof value !== "string" || value.length > 4096)) throw new Error("原值快照无效");
       if (Object.hasOwn(snapshots, serial)) throw new Error("原值快照流水号重复");
       Object.defineProperty(snapshots, serial, { value: values, enumerable: true });
@@ -161,10 +170,10 @@ function parseWorkbook(buffer) {
   }
   const rows = [];
   for (let index = 1; index < grid.length; index += 1) {
-    const values = grid[index].slice(0, 16);
-    while (values.length < 16) values.push("");
+    const values = grid[index].slice(0, 17);
+    while (values.length < 17) values.push("");
     const formulas = [];
-    for (let col = 0; col < 16; col += 1) {
+    for (let col = 0; col < 17; col += 1) {
       const cell = sheet[XLSX.utils.encode_cell({ r: index, c: col })];
       if (cell?.t === "n" && XLSX.SSF.is_date(cell.z || "")) {
         // Decode Excel calendar values directly; JS Date parsing can cross a day
@@ -213,7 +222,7 @@ function parseUpload(buffer) {
 
 function normalizeEditable(value, index) {
   if (text(value) === "") return "";
-  if (index === 15) {
+  if (index === 16) {
     const period = value instanceof Date ? calendarDate(value) : text(value);
     // Billing periods are existing free text, not a new days/date definition.
     if (period.length > 255 || /[\x00-\x1f\x7f]/.test(period) || /^[=+@]/.test(period)) throw new Error("账期必须为不超过 255 字符的普通文本");
@@ -231,7 +240,7 @@ function normalizeEditable(value, index) {
 }
 
 function sameValue(a, b, index) {
-  if (index === 15) return text(a) === text(b);
+  if (index === 16) return text(a) === text(b);
   if (text(a) === "" || text(b) === "") return text(a) === text(b);
   return Number(a) === Number(b);
 }
@@ -241,11 +250,11 @@ function prepareUpdate(entry, record, original) {
   const changes = {};
   const errors = [];
   for (const index of entry.formulas) errors.push({ field: HEADERS[index], message: "不允许公式或超链接，请填写普通值" });
-  for (let index = 13; index < 16; index += 1) {
+  for (let index = 14; index < 17; index += 1) {
     try {
       const value = normalizeEditable(entry.values[index], index);
       if (value === "") continue;
-      const baseline = original?.[index - 13];
+      const baseline = original?.[index - 14];
       if (baseline !== undefined && sameValue(value, baseline, index)) continue;
       if (sameValue(value, current[index], index)) continue;
       if (baseline !== undefined && !sameValue(current[index], baseline, index)) throw new Error(`${HEADERS[index]}已被其他操作修改，请重新导出`);
@@ -256,7 +265,7 @@ function prepareUpdate(entry, record, original) {
   }
   const warnings = [];
   for (let index = 1; index < 13; index += 1) {
-    const value = index === 6 ? calendarDate(entry.values[index]) : text(entry.values[index]);
+    const value = index === 7 ? calendarDate(entry.values[index]) : text(entry.values[index]);
     if (value !== current[index]) warnings.push({ field: HEADERS[index], message: "与当前业务数据不一致，已忽略 Excel 中的修改" });
   }
   const cost = summary.parseFeeItems(record.cost_items).map((item) => ({ ...item }));
@@ -273,11 +282,11 @@ function prepareUpdate(entry, record, original) {
     const other = Number(summary.sumFeeItemAmounts(items.filter((item) => item !== target)) || 0);
     target.amount = String(Math.round((Number(total) - other) * 100) / 100);
   }
-  if (changes[13] !== undefined) setTotal(cost, changes[13]);
-  if (changes[14] !== undefined) setTotal(sales, changes[14]);
-  if (changes[15] !== undefined) {
+  if (changes[14] !== undefined) setTotal(cost, changes[14]);
+  if (changes[15] !== undefined) setTotal(sales, changes[15]);
+  if (changes[16] !== undefined) {
     if (!sales.length) sales.push({ category });
-    sales.forEach((item) => { item.billing_period = changes[15]; });
+    sales.forEach((item) => { item.billing_period = changes[16]; });
   }
   return { errors, warnings, changes, cost, sales };
 }
