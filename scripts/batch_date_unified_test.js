@@ -12,6 +12,7 @@ const {
 function createUserDb(role = "admin") {
   return {
     async execute(sql, params) {
+      if (sql.includes("FROM user_order_companies")) return [[{ company_name: "FixtureCo" }]];
       assert.strictEqual(sql, "SELECT id, role FROM users WHERE id = ? LIMIT 1");
       if (params[0] === "1") {
         return [[{ id: 1, role }]];
@@ -58,7 +59,7 @@ function createDb(options = {}) {
       state.values.set(params[0], params[1]);
       return [{ affectedRows: 1 }];
     }
-    if (/^SELECT serial_number FROM (orders|pickup_transport_tracking|customs_clearance_tracking|transfer)/.test(sql)) {
+    if (/^SELECT (?:child\.)?serial_number FROM/.test(sql)) {
       return [[...state.orders]
         .filter((serialNumber) => params.includes(serialNumber))
         .map((serial_number) => ({ serial_number }))];

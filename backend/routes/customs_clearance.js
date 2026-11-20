@@ -2,9 +2,11 @@ const express = require("express");
 const router = express.Router();
 const { sanitizeNullableString } = require("../lib/tracking_fields");
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
-const { hasOrderRemarkFields, lockOrderBySerial, syncOrderRemarksBySerial } = require("../lib/order_remarks");
+const { hasOrderRemarkFields, syncOrderRemarksBySerial } = require("../lib/order_remarks");
 const { requireUserAccess } = require("../lib/request_auth");
+const { loadOrderAccess, guardRelatedOrderWrites, assertOrderSerialAccess, assertOrderChildAccess } = require("../lib/order_access");
 const { validateBatchDateRequest } = require("../lib/batch_date");
+const { hydrateOrderCompanyFields } = require("../lib/order_company_fields");
 
 function normalizeCustomsSerialNumber(value) {
   return String(value || "").trim();
@@ -16,6 +18,7 @@ function logCustomsRouteError(routeName, context, error) {
 }
 
 module.exports = (db, userDb = null) => {
+  router.use(loadOrderAccess(userDb), guardRelatedOrderWrites(db, "customs_clearance_tracking"));
   router.get("/", async (req, res) => {
     try {
       const [rows] = await db.execute(`
@@ -41,9 +44,10 @@ module.exports = (db, userDb = null) => {
         LEFT JOIN orders o ON c.serial_number = o.serial_number
         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = c.serial_number
         LEFT JOIN transfer t ON t.serial_number = c.serial_number
+        WHERE (${req.orderAccess.sql()})
         ORDER BY c.serial_number DESC
-      `);
-      res.json({ records: rows });
+      `, req.orderAccess.params);
+      res.json({ records: await hydrateOrderCompanyFields(rows, userDb) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -74,13 +78,14 @@ module.exports = (db, userDb = null) => {
          LEFT JOIN orders o ON c.serial_number = o.serial_number
          LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = c.serial_number
          LEFT JOIN transfer t ON t.serial_number = c.serial_number
-         WHERE c.id = ?`,
-        [req.params.id]
+         WHERE c.id = ? AND (${req.orderAccess.sql()})`,
+        [req.params.id, ...req.orderAccess.params]
       );
       if (rows.length === 0) {
         return res.status(404).json({ error: "记录未找到" });
       }
-      res.json({ record: rows[0] });
+      const [record] = await hydrateOrderCompanyFields(rows, userDb);
+      res.json({ record });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -116,13 +121,14 @@ module.exports = (db, userDb = null) => {
          LEFT JOIN orders o ON c.serial_number = o.serial_number
          LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = c.serial_number
          LEFT JOIN transfer t ON t.serial_number = c.serial_number
-         WHERE c.serial_number = ?`,
-        [serialNumber]
+         WHERE c.serial_number = ? AND (${req.orderAccess.sql()})`,
+        [serialNumber, ...req.orderAccess.params]
       );
       if (rows.length === 0) {
         return res.status(404).json({ error: "记录未找到" });
       }
-      res.json({ record: rows[0] });
+      const [record] = await hydrateOrderCompanyFields(rows, userDb);
+      res.json({ record });
     } catch (err) {
       logCustomsRouteError("getBySerial", { serial_number: req.params.serial_number }, err);
       res.status(500).json({ error: err.message });
@@ -147,8 +153,10 @@ module.exports = (db, userDb = null) => {
 
       const placeholders = serialNumbers.map(() => "?").join(", ");
       const [rows] = await connection.execute(
-        `SELECT serial_number FROM ${definition.tableName} WHERE serial_number IN (${placeholders})`,
-        serialNumbers
+        `SELECT child.serial_number FROM ${definition.tableName} child
+         INNER JOIN orders o ON o.serial_number = child.serial_number
+         WHERE child.serial_number IN (${placeholders}) AND (${req.orderAccess.sql()}) FOR UPDATE`,
+        [...serialNumbers, ...req.orderAccess.params]
       );
       const existing = new Set(rows.map((row) => String(row.serial_number || "").trim()));
       const found = serialNumbers.filter((serialNumber) => existing.has(serialNumber));
@@ -209,9 +217,7 @@ module.exports = (db, userDb = null) => {
 
       await connection.beginTransaction();
       transactionStarted = true;
-      if (hasOrderRemarkFields(req.body)) {
-        await lockOrderBySerial(connection, serial_number);
-      }
+      await assertOrderSerialAccess(connection, req.orderAccess, serial_number, { lock: true });
 
       const sql = `
         INSERT INTO customs_clearance_tracking (
@@ -285,7 +291,8 @@ module.exports = (db, userDb = null) => {
 
       await connection.beginTransaction();
       transactionStarted = true;
-      await lockOrderBySerial(connection, serial_number);
+      await assertOrderChildAccess(connection, req.orderAccess, "customs_clearance_tracking", req.params.id, { lock: true });
+      await assertOrderSerialAccess(connection, req.orderAccess, serial_number, { lock: true });
 
       const sql = `
         UPDATE customs_clearance_tracking SET
@@ -360,7 +367,7 @@ module.exports = (db, userDb = null) => {
 
       await connection.beginTransaction();
       transactionStarted = true;
-      await lockOrderBySerial(connection, serialNumber);
+      await assertOrderSerialAccess(connection, req.orderAccess, serialNumber, { lock: true });
 
       const sql = `
         UPDATE customs_clearance_tracking SET
@@ -412,8 +419,10 @@ module.exports = (db, userDb = null) => {
   router.delete("/:id", async (req, res) => {
     try {
       const [result] = await db.execute(
-        "DELETE FROM customs_clearance_tracking WHERE id = ?",
-        [req.params.id]
+        `DELETE FROM customs_clearance_tracking WHERE id = ? AND EXISTS (
+          SELECT 1 FROM orders o WHERE o.serial_number = customs_clearance_tracking.serial_number AND (${req.orderAccess.sql()})
+        )`,
+        [req.params.id, ...req.orderAccess.params]
       );
 
       if (result.affectedRows === 0) {

@@ -10,6 +10,7 @@ const { BATCH_DATE_FIELD_DEFINITIONS } = require("../backend/lib/batch_date");
 function createUserDb(role = "admin") {
   return {
     async execute(sql, params) {
+      if (sql.includes("FROM user_order_companies")) return [[{ company_name: "FixtureCo" }]];
       assert.strictEqual(sql, "SELECT id, role FROM users WHERE id = ? LIMIT 1");
       return params[0] === "1" ? [[{ id: 1, role }]] : [[]];
     },
@@ -36,6 +37,9 @@ function createStatefulDb(moduleName, options = {}) {
   }[moduleName];
 
   const execute = async (sql, params = []) => {
+    if (sql.startsWith("SELECT child.serial_number FROM")) {
+      return [[...state.values.keys()].filter((serialNumber) => params.includes(serialNumber)).map((serial_number) => ({ serial_number }))];
+    }
     if (sql.startsWith("SELECT serial_number FROM orders")) {
       return [[...state.values.keys()].filter((serialNumber) => params.includes(serialNumber)).map((serial_number) => ({ serial_number }))];
     }
@@ -154,6 +158,7 @@ async function run() {
   let customsRole = "admin";
   const customsUserDb = {
     async execute(sql, params) {
+      if (sql.includes("FROM user_order_companies")) return [[{ company_name: "FixtureCo" }]];
       assert.strictEqual(sql, "SELECT id, role FROM users WHERE id = ? LIMIT 1");
       return params[0] === "1" ? [[{ id: 1, role: customsRole }]] : [[]];
     },

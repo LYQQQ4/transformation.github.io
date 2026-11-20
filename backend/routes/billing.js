@@ -3,6 +3,7 @@ const billingTemplates = require("../../frontend/billing_templates");
 const billingFormula = require("../../frontend/billing_formula");
 const orderSummaryFields = require("../../frontend/order_summary_fields");
 const { requireUserAccess } = require("../lib/request_auth");
+const { loadOrderAccess, guardRelatedOrderWrites, assertOrderSerialAccess } = require("../lib/order_access");
 const { buildFilledStatusSql } = require("../lib/reporting");
 const multer = require("multer");
 const path = require("path");
@@ -248,9 +249,8 @@ function normalizeBillingRecord(row) {
 
 module.exports = (db, userDb = null) => {
   const router = express.Router();
+  router.use(loadOrderAccess(userDb), guardRelatedOrderWrites(db, "billing_info"));
   let activeImports = 0;
-  // The current application grants every logged-in user access to every order.
-  // Keep list/export/import on the same server-side access policy.
   const requireBillingAccess = (req) => requireUserAccess(userDb, req, "账单批量处理");
   const sendError = (res, error) => res.status(error.statusCode || 500).json({
     success: false,
@@ -269,8 +269,8 @@ module.exports = (db, userDb = null) => {
       }
       await ensureBillingSchema(db);
       const [rows] = await db.execute(buildBillingSummarySelect(
-        `WHERE o.serial_number IN (${serials.map(() => "?").join(",")})`
-      ), serials);
+        `WHERE o.serial_number IN (${serials.map(() => "?").join(",")}) AND (${req.orderAccess.sql()})`
+      ), [...serials, ...req.orderAccess.params]);
       const bySerial = new Map(rows.map((row) => [row.serial_number, row]));
       if (serials.some((serial) => !bySerial.has(serial))) throw badRequest("存在不存在或无权限的流水号，请刷新账单列表");
       const buffer = excel.exportWorkbook(serials.map((serial) => bySerial.get(serial)));
@@ -310,8 +310,9 @@ module.exports = (db, userDb = null) => {
         // Lock the parent rows in stable order, including bills absent at export time.
         if (serials.length) {
           await connection.execute(
-            `SELECT serial_number FROM orders WHERE serial_number IN (${serials.map(() => "?").join(",")}) ORDER BY serial_number FOR UPDATE`,
-            serials
+            `SELECT o.serial_number FROM orders o WHERE o.serial_number IN (${serials.map(() => "?").join(",")})
+             AND (${req.orderAccess.sql()}) ORDER BY o.serial_number FOR UPDATE`,
+            [...serials, ...req.orderAccess.params]
           );
           await connection.execute(
             `SELECT serial_number FROM billing_info WHERE serial_number IN (${serials.map(() => "?").join(",")}) ORDER BY serial_number FOR UPDATE`,
@@ -319,8 +320,8 @@ module.exports = (db, userDb = null) => {
           );
         }
         const [records] = serials.length ? await connection.execute(buildBillingSummarySelect(
-          `WHERE o.serial_number IN (${serials.map(() => "?").join(",")})`
-        ), serials) : [[]];
+          `WHERE o.serial_number IN (${serials.map(() => "?").join(",")}) AND (${req.orderAccess.sql()})`
+        ), [...serials, ...req.orderAccess.params]) : [[]];
         const bySerial = new Map(records.map((record) => [record.serial_number, record]));
         const counts = new Map();
         rows.forEach((row) => counts.set(row.serial, (counts.get(row.serial) || 0) + 1));
@@ -368,11 +369,11 @@ module.exports = (db, userDb = null) => {
           // Only persist changed sides; all business fields remain database-owned.
           const fields = [];
           const params = [];
-          if (prepared.changes[14] !== undefined) {
+          if (prepared.changes[15] !== undefined) {
             fields.push("cost_items = ?");
             params.push(JSON.stringify(prepared.cost));
           }
-          if (prepared.changes[15] !== undefined || prepared.changes[16] !== undefined) {
+          if (prepared.changes[16] !== undefined || prepared.changes[17] !== undefined) {
             fields.push("billing_items = ?");
             params.push(JSON.stringify(prepared.sales));
           }
@@ -381,8 +382,8 @@ module.exports = (db, userDb = null) => {
             await connection.execute(
               "INSERT INTO billing_info (serial_number, billing_template_key, cost_items, billing_items) VALUES (?, ?, ?, ?)",
               [row.serial, templateKey === billingTemplates.LEGACY_BILLING_TEMPLATE_KEY ? null : templateKey,
-                prepared.changes[14] !== undefined ? JSON.stringify(prepared.cost) : null,
-                prepared.changes[15] !== undefined || prepared.changes[16] !== undefined ? JSON.stringify(prepared.sales) : null]
+                prepared.changes[15] !== undefined ? JSON.stringify(prepared.cost) : null,
+                prepared.changes[16] !== undefined || prepared.changes[17] !== undefined ? JSON.stringify(prepared.sales) : null]
             );
           } else {
             await connection.execute(`UPDATE billing_info SET ${fields.join(", ")} WHERE serial_number = ?`, [...params, row.serial]);
@@ -427,8 +428,8 @@ module.exports = (db, userDb = null) => {
     try {
       if (userDb) await requireBillingAccess(req);
       await ensureBillingSchema(db);
-      const conditions = ["o.serial_number IS NOT NULL"];
-      const params = [];
+      const conditions = ["o.serial_number IS NOT NULL", req.orderAccess.sql()];
+      const params = [...req.orderAccess.params];
       const companyName = String(req.query.company_name || "").trim();
       if (companyName) {
         conditions.push("o.company_name LIKE ?");
@@ -481,8 +482,8 @@ module.exports = (db, userDb = null) => {
       }
 
       const [rows] = await db.execute(
-        buildBillingSummarySelect("WHERE o.serial_number = ?"),
-        [serialNumber]
+        buildBillingSummarySelect(`WHERE o.serial_number = ? AND (${req.orderAccess.sql()})`),
+        [serialNumber, ...req.orderAccess.params]
       );
 
       if (rows.length === 0) {
@@ -506,6 +507,8 @@ module.exports = (db, userDb = null) => {
   });
 
   router.put("/serial/:serial_number", async (req, res) => {
+    let connection;
+    let started = false;
     try {
       if (userDb) await requireBillingAccess(req);
       await ensureBillingSchema(db);
@@ -514,21 +517,18 @@ module.exports = (db, userDb = null) => {
         return res.status(400).json({ error: "serial_number is required" });
       }
 
-      const [orders] = await db.execute(
-        "SELECT serial_number FROM orders WHERE serial_number = ? LIMIT 1",
-        [serialNumber]
-      );
-      if (orders.length === 0) {
-        return res.status(404).json({ error: "Order not found" });
-      }
+      connection = await db.getConnection();
+      await connection.beginTransaction();
+      started = true;
+      await assertOrderSerialAccess(connection, req.orderAccess, serialNumber, { lock: true });
 
-      const [existingRows] = await db.execute(
+      const [existingRows] = await connection.execute(
         "SELECT billing_template_key, billing_completed_time, cost_items, billing_items FROM billing_info WHERE serial_number = ? LIMIT 1",
         [serialNumber]
       );
-      const [summaryRows] = await db.execute(
-        buildBillingSummarySelect("WHERE o.serial_number = ?"),
-        [serialNumber]
+      const [summaryRows] = await connection.execute(
+        buildBillingSummarySelect(`WHERE o.serial_number = ? AND (${req.orderAccess.sql()})`),
+        [serialNumber, ...req.orderAccess.params]
       );
 
       const existing = existingRows[0] || {};
@@ -558,7 +558,7 @@ module.exports = (db, userDb = null) => {
         ? null
         : templateKey;
 
-      await db.execute(
+      await connection.execute(
         `INSERT INTO billing_info (serial_number, billing_template_key, billing_completed_time, cost_items, billing_items)
          VALUES (?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
@@ -569,17 +569,22 @@ module.exports = (db, userDb = null) => {
         [serialNumber, billingTemplateKey, billingCompletedTime, costItems, billingItems]
       );
 
-      const [rows] = await db.execute(
-        buildBillingSummarySelect("WHERE o.serial_number = ?"),
-        [serialNumber]
+      const [rows] = await connection.execute(
+        buildBillingSummarySelect(`WHERE o.serial_number = ? AND (${req.orderAccess.sql()})`),
+        [serialNumber, ...req.orderAccess.params]
       );
+      await connection.commit();
+      started = false;
 
       res.json({
         message: "Billing record updated successfully",
         record: normalizeBillingRecord(rows[0]),
       });
     } catch (err) {
+      if (connection && started) await connection.rollback();
       res.status(err.statusCode || 500).json({ error: err.message });
+    } finally {
+      if (connection) connection.release();
     }
   });
 

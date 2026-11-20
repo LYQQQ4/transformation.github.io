@@ -1,6 +1,8 @@
 const express = require("express");
 const multer = require("multer");
 const XLSX = require("xlsx");
+const { hydrateOrderCompanyFields } = require("../lib/order_company_fields");
+const { loadOrderAccess, guardRelatedOrderWrites, assertOrderSerialAccess } = require("../lib/order_access");
 
 const router = express.Router();
 
@@ -478,6 +480,17 @@ function buildPackageResponseRows(rows = [], boxTypeMap = new Map()) {
     const normalized = normalizePackageRow(row, row.package_order || 1, boxTypeMap);
     return {
       ...row,
+      company_name: row.company_name ?? row.order_company_name ?? "",
+      sender_company: row.sender_company ?? row.order_sender_company ?? "",
+      receiver_company: row.receiver_company ?? row.order_receiver_company ?? "",
+      orderer: row.order_orderer ?? row.orderer ?? "",
+      business_type: row.order_business_type ?? row.business_type ?? "",
+      sender_id: row.order_sender_id ?? row.sender_id ?? "",
+      customer_id: row.order_customer_id ?? row.customer_id ?? "",
+      receive_date: row.order_receive_date ?? row.receive_date ?? "",
+      origin: row.order_origin ?? row.origin ?? "",
+      destination: row.order_destination ?? row.destination ?? "",
+      trade_term: row.order_trade_term ?? row.trade_term ?? "",
       package_label: normalized.package_label,
       package_order: normalized.package_order,
       box_type_id: normalized.box_type_id,
@@ -570,7 +583,8 @@ function validatePackageExcelData(data, boxTypeMap = new Map()) {
   return result;
 }
 
-const createPackagesRouter = (db) => {
+const createPackagesRouter = (db, userDb = null) => {
+  router.use(loadOrderAccess(userDb), guardRelatedOrderWrites(db, "package"));
   router.get("/box-types", async (req, res) => {
     try {
       await ensurePackageSchema(db);
@@ -761,17 +775,17 @@ const createPackagesRouter = (db) => {
       const [rows] = await db.execute(`
         SELECT
           p.*,
-          o.company_name,
-          o.sender_company,
-          o.receiver_company,
-          o.orderer,
-          o.business_type,
-          o.sender_id,
-          o.customer_id,
-          o.receive_date,
-          o.origin,
-          o.destination,
-          o.trade_term,
+          o.company_name AS order_company_name,
+          o.sender_company AS order_sender_company,
+          o.receiver_company AS order_receiver_company,
+          o.orderer AS order_orderer,
+          o.business_type AS order_business_type,
+          o.sender_id AS order_sender_id,
+          o.customer_id AS order_customer_id,
+          o.receive_date AS order_receive_date,
+          o.origin AS order_origin,
+          o.destination AS order_destination,
+          o.trade_term AS order_trade_term,
           o.product_name AS order_product_name,
           COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
           t.tracking_number AS tracking_number
@@ -779,9 +793,15 @@ const createPackagesRouter = (db) => {
         LEFT JOIN orders o ON p.serial_number = o.serial_number
         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = p.serial_number
         LEFT JOIN transfer t ON t.serial_number = p.serial_number
+        WHERE (${req.orderAccess.sql()})
         ORDER BY p.updated_at DESC, COALESCE(p.package_order, 1) ASC, p.id ASC
-      `);
-      res.json({ packages: buildPackageResponseRows(rows, boxTypeMap) });
+      `, req.orderAccess.params);
+      const hydratedRows = await hydrateOrderCompanyFields(rows.map((row) => ({
+        ...row,
+        sender_id: row.order_sender_id ?? row.sender_id,
+        customer_id: row.order_customer_id ?? row.customer_id,
+      })), userDb);
+      res.json({ packages: buildPackageResponseRows(hydratedRows, boxTypeMap) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -794,17 +814,17 @@ const createPackagesRouter = (db) => {
       const [rows] = await db.execute(`
         SELECT
           p.*,
-          o.company_name,
-          o.sender_company,
-          o.receiver_company,
-          o.orderer,
-          o.business_type,
-          o.sender_id,
-          o.customer_id,
-          o.receive_date,
-          o.origin,
-          o.destination,
-          o.trade_term,
+          o.company_name AS order_company_name,
+          o.sender_company AS order_sender_company,
+          o.receiver_company AS order_receiver_company,
+          o.orderer AS order_orderer,
+          o.business_type AS order_business_type,
+          o.sender_id AS order_sender_id,
+          o.customer_id AS order_customer_id,
+          o.receive_date AS order_receive_date,
+          o.origin AS order_origin,
+          o.destination AS order_destination,
+          o.trade_term AS order_trade_term,
           o.product_name AS order_product_name,
           COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
           t.tracking_number AS tracking_number
@@ -812,12 +832,17 @@ const createPackagesRouter = (db) => {
         LEFT JOIN orders o ON p.serial_number = o.serial_number
         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = p.serial_number
         LEFT JOIN transfer t ON t.serial_number = p.serial_number
-        WHERE p.id = ?
-      `, [req.params.id]);
+        WHERE p.id = ? AND (${req.orderAccess.sql()})
+      `, [req.params.id, ...req.orderAccess.params]);
       if (!rows.length) {
         return res.status(404).json({ error: "Package not found" });
       }
-      const normalizedRows = buildPackageResponseRows(rows, boxTypeMap);
+      const hydratedRows = await hydrateOrderCompanyFields(rows.map((row) => ({
+        ...row,
+        sender_id: row.order_sender_id ?? row.sender_id,
+        customer_id: row.order_customer_id ?? row.customer_id,
+      })), userDb);
+      const normalizedRows = buildPackageResponseRows(hydratedRows, boxTypeMap);
       return res.json({ package: normalizedRows[0] });
     } catch (error) {
       return res.status(500).json({ error: error.message });
@@ -831,17 +856,17 @@ const createPackagesRouter = (db) => {
       const [rows] = await db.execute(`
         SELECT
           p.*,
-          o.company_name,
-          o.sender_company,
-          o.receiver_company,
-          o.orderer,
-          o.business_type,
-          o.sender_id,
-          o.customer_id,
-          o.receive_date,
-          o.origin,
-          o.destination,
-          o.trade_term,
+          o.company_name AS order_company_name,
+          o.sender_company AS order_sender_company,
+          o.receiver_company AS order_receiver_company,
+          o.orderer AS order_orderer,
+          o.business_type AS order_business_type,
+          o.sender_id AS order_sender_id,
+          o.customer_id AS order_customer_id,
+          o.receive_date AS order_receive_date,
+          o.origin AS order_origin,
+          o.destination AS order_destination,
+          o.trade_term AS order_trade_term,
           o.product_name AS order_product_name,
           COALESCE(pt.transport_mode, t.transport_mode) AS transport_mode,
           t.tracking_number AS tracking_number
@@ -849,13 +874,18 @@ const createPackagesRouter = (db) => {
         LEFT JOIN orders o ON p.serial_number = o.serial_number
         LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = p.serial_number
         LEFT JOIN transfer t ON t.serial_number = p.serial_number
-        WHERE p.serial_number = ?
+        WHERE p.serial_number = ? AND (${req.orderAccess.sql()})
         ORDER BY COALESCE(p.package_order, 1) ASC, p.id ASC
-      `, [req.params.serial_number]);
+      `, [req.params.serial_number, ...req.orderAccess.params]);
       if (!rows.length) {
         return res.status(404).json({ error: "Package not found" });
       }
-      const normalizedRows = buildPackageResponseRows(rows, boxTypeMap);
+      const hydratedRows = await hydrateOrderCompanyFields(rows.map((row) => ({
+        ...row,
+        sender_id: row.order_sender_id ?? row.sender_id,
+        customer_id: row.order_customer_id ?? row.customer_id,
+      })), userDb);
+      const normalizedRows = buildPackageResponseRows(hydratedRows, boxTypeMap);
       return res.json({ package: normalizedRows[0], packages: normalizedRows });
     } catch (err) {
       return res.status(500).json({ error: err.message });
@@ -870,7 +900,10 @@ const createPackagesRouter = (db) => {
       const [result] = await db.execute(
         `UPDATE \`package\`
          SET package_label = ?, package_order = ?, box_type_id = ?, product_name = ?, product_code = ?, pieces = ?, single_weight = ?, length = ?, width = ?, height = ?, volume = ?, charge_weight = ?, package_type = ?, customs_port = ?, customs_title = ?, regulatory_conditions = ?, remark1 = ?, remark2 = ?
-         WHERE id = ?`,
+         WHERE id = ? AND EXISTS (
+           SELECT 1 FROM orders o WHERE o.serial_number = \`package\`.serial_number
+           AND (${req.orderAccess.sql()})
+         )`,
         [
           toNull(normalized.package_label),
           toNull(normalized.package_order),
@@ -891,6 +924,7 @@ const createPackagesRouter = (db) => {
           toNull(normalized.remark1),
           toNull(normalized.remark2),
           req.params.id,
+          ...req.orderAccess.params,
         ]
       );
       if (!result.affectedRows) {
@@ -919,6 +953,7 @@ const createPackagesRouter = (db) => {
 
       connection = await db.getConnection();
       await connection.beginTransaction();
+      await assertOrderSerialAccess(connection, req.orderAccess, serialNumber, { lock: true });
 
       const [existingRows] = await connection.execute("SELECT id FROM `package` WHERE serial_number = ?", [serialNumber]);
       if (existingRows.length === 0) {
@@ -982,7 +1017,7 @@ const createPackagesRouter = (db) => {
       if (connection) {
         await connection.rollback();
       }
-      return res.status(500).json({ error: err.message });
+      return res.status(err.statusCode || 500).json({ error: err.message });
     } finally {
       if (connection) {
         connection.release();
@@ -1081,10 +1116,14 @@ const createPackagesRouter = (db) => {
             remark2,
           } = validationResult.data;
 
+          await assertOrderSerialAccess(db, req.orderAccess, serial_number);
           const [updateResult] = await db.execute(
             `UPDATE \`package\`
              SET product_name = ?, product_code = ?, pieces = ?, single_weight = ?, length = ?, width = ?, height = ?, volume = ?, charge_weight = ?, package_type = ?, box_type_id = ?, customs_port = ?, customs_title = ?, regulatory_conditions = ?, remark1 = ?, remark2 = ?
-             WHERE serial_number = ?`,
+             WHERE serial_number = ? AND EXISTS (
+               SELECT 1 FROM orders o WHERE o.serial_number = \`package\`.serial_number
+               AND (${req.orderAccess.sql()})
+             )`,
             [
               toNull(product_name),
               toNull(product_code),
@@ -1103,6 +1142,7 @@ const createPackagesRouter = (db) => {
               toNull(remark1),
               toNull(remark2),
               toNull(serial_number),
+              ...req.orderAccess.params,
             ]
           );
 

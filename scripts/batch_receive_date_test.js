@@ -19,7 +19,7 @@ function createStatefulDb(state) {
         async execute(sql, params = []) {
           state.executions.push({ sql, params });
 
-          if (sql.startsWith("SELECT serial_number FROM orders")) {
+          if (sql.startsWith("SELECT o.serial_number FROM orders o")) {
             return [[...state.orders]
               .filter(([serialNumber]) => params.includes(serialNumber))
               .map(([serial_number]) => ({ serial_number }))];
@@ -48,6 +48,7 @@ function createStatefulDb(state) {
 function createUserDb(state) {
   return {
     async execute(sql, params) {
+      if (sql.includes("FROM user_order_companies")) return [[{ company_name: "FixtureCo" }]];
       assert.strictEqual(sql, "SELECT id, role FROM users WHERE id = ? LIMIT 1");
       if (params[0] !== "1" || !state.role) {
         return [[]];
@@ -80,6 +81,10 @@ async function request(app, payload, headers = {}) {
 function createTestApp(state) {
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    if (req.headers["x-user-id"] === "1" && state.role) req.user = { id: 1, role: state.role };
+    next();
+  });
   app.use("/api/orders", createOrdersRouter(createStatefulDb(state), createUserDb(state)));
   return app;
 }

@@ -617,6 +617,7 @@
                                 <tr>
                                     <th><input type="checkbox" data-order-select-all onchange="toggleAllOrderSelection(this)" aria-label="全选订单流水号"></th>
                                     <th>流水号</th>
+                                    <th>公司名称</th>
                                     <th>发件人公司</th>
                                     <th>收件人公司</th>
                                     <th>指令人</th>
@@ -661,6 +662,7 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
+                                    <th>公司名称</th>
                                     <th>发件人公司</th>
                                     <th>收件人公司</th>
                                     <th>指令人</th>
@@ -824,6 +826,7 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
+                                    <th>公司名称</th>
                                     <th>发件人公司</th>
                                     <th>收件人公司</th>
                                     <th>指令人</th>
@@ -867,6 +870,7 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
+                                    <th>公司名称</th>
                                     <th>发件人公司</th>
                                     <th>收件人公司</th>
                                     <th>指令人</th>
@@ -922,6 +926,7 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
+                                    <th>公司名称</th>
                                     <th>发件人公司</th>
                                     <th>收件人公司</th>
                                     <th>指令人</th>
@@ -963,6 +968,7 @@
                             <thead>
                                 <tr>
                                     <th>流水号</th>
+                                    <th>公司名称</th>
                                     <th>发件人公司</th>
                                     <th>收件人公司</th>
                                     <th>指令人</th>
@@ -1292,6 +1298,17 @@
                                 </div>
                             </form>
                         </div>
+                        <section id="orderCompanyPermissions" style="display:none; margin:16px 0; border-top:1px solid #E5E7EB; padding-top:16px;" aria-labelledby="orderCompanyPermissionsTitle">
+                            <h3 id="orderCompanyPermissionsTitle" style="font-size:16px;">订单公司权限</h3>
+                            <p id="orderCompanyPermissionsStatus" role="status" aria-live="polite"></p>
+                            <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+                                <button type="button" data-company-permission-control onclick="selectOrderCompanies(true)">全选</button>
+                                <button type="button" data-company-permission-control onclick="selectOrderCompanies(false)">取消全选</button>
+                                <button type="button" data-company-permission-control onclick="saveOrderCompanyPermissions()">保存</button>
+                                <button type="button" onclick="closeOrderCompanyPermissions()">关闭</button>
+                            </div>
+                            <div id="orderCompanyPermissionsOptions" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr)); gap:10px; max-height:320px; overflow:auto;"></div>
+                        </section>
                         <table id="usersTable">
                             <thead>
                                 <tr>

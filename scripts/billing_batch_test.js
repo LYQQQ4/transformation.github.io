@@ -26,7 +26,7 @@ function workbook(rows, headers = excel.HEADERS) {
 }
 
 function row(serial = "0001", cost = "", sales = "", period = "") {
-  return [serial, "", "", "", "", "", "", "", "", "", "", "", "", "", cost, sales, period];
+  return [serial, "", "", "", "", "", "", "", "", "", "", "", "", "", "", cost, sales, period];
 }
 
 function editExport(buffer, changes) {
@@ -97,6 +97,10 @@ async function runApiTests() {
   const { db, users, state } = fakeDb();
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    if (req.headers["x-user-id"] === "1") req.user = { id: 1, role: "admin" };
+    next();
+  });
   app.use("/api/billing", createRouter(db, users));
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, "127.0.0.1", () => resolve(instance));
@@ -120,11 +124,11 @@ async function runApiTests() {
     const sheet = book.Sheets["账单"];
     assert.deepEqual(XLSX.utils.sheet_to_json(sheet, { header: 1 })[0], excel.HEADERS);
     assert.equal(sheet.A2.v, "0001");
-    assert.equal(sheet.F2.v, "00001234567890123456");
+    assert.equal(sheet.G2.v, "00001234567890123456");
     assert.equal(sheet.B2.v, "=1+1");
     assert.equal(sheet.B2.f, undefined);
-    assert.equal(sheet.O2.t, "n");
-    assert.equal(sheet.H2.v, "2026-10-27");
+    assert.equal(sheet.P2.t, "n");
+    assert.equal(sheet.I2.v, "2026-10-27");
     assert.equal((await postExport([])).status, 400);
     assert.equal((await postExport(["0001"], "")).status, 401);
     assert.equal((await postExport(["0001"], "999")).status, 401);
@@ -135,7 +139,7 @@ async function runApiTests() {
     assert.equal((await postImport(workbook([row()]), "a.xlsx", "")).status, 401);
     assert.equal((await postImport(workbook([row()]), "a.xlsx", "999")).status, 401);
 
-    let result = await postImport(editExport(bytes, { O2: 22.75, P2: 35.25, Q2: "2026-10", B2: "Do not save" }));
+    let result = await postImport(editExport(bytes, { P2: 22.75, Q2: 35.25, R2: "2026-10", B2: "Do not save" }));
     assert.equal(result.status, 200, JSON.stringify(result.data));
     assert.deepEqual(result.data.summary, { total: 2, updated: 1, failed: 0, skipped: 1, duplicated: 0 });
     assert.equal(fields.sumFeeItemAmounts(state.records.get("0001").cost_items), "22.75");
@@ -201,17 +205,17 @@ async function runApiTests() {
     state.failAfter = 0;
 
     // A stale, unchanged value from the export must never overwrite a newer value.
-    result = await postImport(editExport(bytes, { Q2: "2026-11" }));
+    result = await postImport(editExport(bytes, { R2: "2026-11" }));
     assert.equal(result.data.summary.failed, 1); // period changed since export
     assert.equal(fields.sumFeeItemAmounts(state.records.get("0001").cost_items), "23");
-    result = await postImport(editExport(bytes, { O2: 24 }));
+    result = await postImport(editExport(bytes, { P2: 24 }));
     assert.equal(result.data.summary.failed, 1); // explicitly edited stale cost
     result = await postImport(bytes);
     assert.equal(result.data.summary.updated, 0);
     assert.equal(fields.sumFeeItemAmounts(state.records.get("0001").cost_items), "23");
     const freshExport = Buffer.from(await (await postExport(["0001"])).arrayBuffer());
     await postImport(workbook([row("0001", 27)]));
-    result = await postImport(editExport(freshExport, { P2: 40 }));
+    result = await postImport(editExport(freshExport, { Q2: 40 }));
     assert.equal(result.data.summary.updated, 1);
     assert.equal(fields.sumFeeItemAmounts(state.records.get("0001").cost_items), "27");
     assert.equal(fields.sumFeeItemAmounts(state.records.get("0001").billing_items), "40");
@@ -242,13 +246,13 @@ async function runApiTests() {
     assert.equal((await postImport(Buffer.alloc(excel.MAX_BYTES + 1))).status, 400);
     assert.equal((await postImport(workbook(Array.from({ length: 501 }, (_, index) => row(String(index)))))).status, 400);
     const formulaBook = XLSX.read(workbook([row("0001", 3)]), { type: "buffer" });
-    formulaBook.Sheets["账单"].O2 = { t: "n", v: 3, f: "1+2" };
+    formulaBook.Sheets["账单"].P2 = { t: "n", v: 3, f: "1+2" };
     result = await postImport(XLSX.write(formulaBook, { type: "buffer", bookType: "xlsx" }));
     assert.equal(result.data.summary.failed, 1);
     assert.match(result.data.errors[0].message, /公式/);
     const formulaReport = XLSX.read(Buffer.from(result.data.errorReport.base64, "base64"), { type: "buffer" });
-    assert.equal(formulaReport.Sheets["账单"].O2.f, undefined);
-    assert.equal(formulaReport.Sheets["账单"].O2.v, "=1+2");
+    assert.equal(formulaReport.Sheets["账单"].P2.f, undefined);
+    assert.equal(formulaReport.Sheets["账单"].P2.v, "=1+2");
 
     for (const serial of ["unbilled", "blank", "invalid", "zero", "period", "duplicate", "rollback-new"]) {
       state.records.set(serial, {
@@ -266,7 +270,7 @@ async function runApiTests() {
     assert.equal(result.data.summary.duplicated, 2);
     assert.equal(state.records.get("duplicate").billing_id, null);
     const unbilledExport = Buffer.from(await (await postExport(["unbilled"])).arrayBuffer());
-    result = await postImport(editExport(unbilledExport, { O2: 10.25, P2: 20.5, Q2: "2026-11" }));
+    result = await postImport(editExport(unbilledExport, { P2: 10.25, Q2: 20.5, R2: "2026-11" }));
     assert.equal(result.data.summary.updated, 1);
     assert.deepEqual(result.data.notFoundSerialNumbers, []);
     assert.ok(state.records.get("unbilled").billing_id);
@@ -327,7 +331,7 @@ async function runFrontendTests() {
     escapeHtml: (value) => String(value).replace(/</g, "&lt;"),
     showMessage: (message, type) => state.messages.push({ message, type }),
     loadBillingRecords: async () => { state.refreshed += 1; },
-    fetch: async (url, options) => {
+    apiFetch: async (url, options) => {
       state.requests.push({ url, options });
       return state.response || { ok: true, blob: async () => new Blob(["excel"]) };
     },

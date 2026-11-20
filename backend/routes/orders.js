@@ -16,12 +16,14 @@ const {
   ensureBillingInfoSchema,
 } = require("../lib/reporting");
 const { createHttpError, requireAdminAccess, requireUserAccess } = require("../lib/request_auth");
+const { loadOrderAccess } = require("../lib/order_access");
 const { hasOrderRemarkFields, normalizeOrderRemarkPatch, syncOrderRemarksBySerial } = require("../lib/order_remarks");
 const { validateUserProfileId } = require("../lib/user_profiles");
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
 const {
   validateUnifiedBatchDateRequest,
 } = require("../lib/batch_date");
+const { hydrateOrderCompanyFields } = require("../lib/order_company_fields");
 const {
   buildBasicInfoWorkbook,
   buildPreviewResult,
@@ -290,12 +292,20 @@ async function fetchOrderUserProfiles(userDb, customerId, senderId) {
 
   const placeholders = ids.map(() => "?").join(", ");
   const [rows] = await userDb.execute(
-    `SELECT id, company_name, address, contact_name, phone FROM user_profiles WHERE id IN (${placeholders})`,
-    ids
+    `SELECT id, legacy_sender_id, legacy_customer_id, company_name, address, contact_name, phone
+     FROM user_profiles
+     WHERE id IN (${placeholders})
+        OR legacy_sender_id IN (${placeholders})
+        OR legacy_customer_id IN (${placeholders})`,
+    [...ids, ...ids, ...ids]
   );
 
   return rows.reduce((accumulator, row) => {
-    accumulator[row.id] = row;
+    [row.id, row.legacy_sender_id, row.legacy_customer_id]
+      .filter(Boolean)
+      .forEach((id) => {
+        accumulator[String(id)] = row;
+      });
     return accumulator;
   }, {});
 }
@@ -319,9 +329,9 @@ async function enrichOrderPayloadFromProfiles(userDb, payload) {
     throw error;
   }
   normalizedPayload.company_name =
+    normalizeOrderImportValue(normalizedPayload.company_name) ||
     normalizedPayload.sender_company ||
-    normalizedPayload.receiver_company ||
-    normalizeOrderImportValue(normalizedPayload.company_name);
+    normalizedPayload.receiver_company;
 
   if (customerProfile) {
     normalizedPayload.delivery_address = normalizedPayload.delivery_address || customerProfile.address || "";
@@ -543,19 +553,26 @@ async function ensureBasicInfoImportAuditSchema(db) {
   `);
 }
 
-async function validateBasicInfoRows(db, userDb, rows) {
+async function validateBasicInfoRows(db, userDb, rows, access) {
   const serialNumbers = [...new Set(rows.map((row) => row.serial_number).filter(Boolean))];
   const existingOrders = new Map();
   if (serialNumbers.length) {
     const placeholders = serialNumbers.map(() => "?").join(", ");
     const [orderRows] = await db.execute(
-      `SELECT serial_number FROM orders WHERE serial_number IN (${placeholders})`,
-      serialNumbers
+      `SELECT o.serial_number FROM orders o WHERE o.serial_number IN (${placeholders}) AND (${access.sql()})`,
+      [...serialNumbers, ...access.params]
     );
     orderRows.forEach((order) => existingOrders.set(String(order.serial_number), order));
   }
 
   for (const row of rows) {
+    if (hasOwnValue(row.values, "company_name")) {
+      try {
+        row.values.company_name = access.assertCompany(row.values.company_name);
+      } catch (error) {
+        row.errors.push(error.message);
+      }
+    }
     if (row.serial_number && !existingOrders.has(row.serial_number)) {
       row.errors.push("\u6d41\u6c34\u53f7\u4e0d\u5b58\u5728\uff0c\u53ea\u80fd\u66f4\u65b0\u5df2\u6709\u8ba2\u5355");
     }
@@ -589,7 +606,7 @@ function assertBasicInfoSnapshot(row, currentOrder) {
   }
 }
 
-async function updateBasicInfoRow(connection, row) {
+async function updateBasicInfoRow(connection, row, access) {
   const [orderRows] = await connection.execute(
     `SELECT
        o.id,
@@ -602,9 +619,9 @@ async function updateBasicInfoRow(connection, row) {
      LEFT JOIN pickup_transport_tracking pt ON pt.serial_number = o.serial_number
      LEFT JOIN transfer t ON t.serial_number = o.serial_number
      LEFT JOIN customs_clearance_tracking c ON c.serial_number = o.serial_number
-     WHERE o.serial_number = ?
+     WHERE o.serial_number = ? AND (${access.sql()})
      LIMIT 1 FOR UPDATE`,
-    [row.serial_number]
+    [row.serial_number, ...access.params]
   );
   if (!orderRows.length) {
     throw new Error("\u6d41\u6c34\u53f7\u4e0d\u5b58\u5728\uff0c\u4e0d\u5141\u8bb8\u521b\u5efa\u65b0\u8ba2\u5355");
@@ -687,6 +704,7 @@ async function writeBasicInfoImportAudit(db, userId, fileName, results) {
 }
 
 module.exports = (db, userDb = null) => {
+  router.use(loadOrderAccess(userDb));
   router.get("/bulk-basic-info-template", async (req, res) => {
     try {
       await requireUserAccess(userDb, req, "\u8ba2\u5355\u57fa\u7840\u4fe1\u606f\u6a21\u677f\u5bfc\u51fa");
@@ -696,7 +714,10 @@ module.exports = (db, userDb = null) => {
       }
 
       const placeholders = serialNumbers.map(() => "?").join(", ");
-      const [rows] = await db.execute(buildBasicInfoExportSql(placeholders), serialNumbers);
+      const [rows] = await db.execute(
+        `${buildBasicInfoExportSql(placeholders)} AND (${req.orderAccess.sql()})`,
+        [...serialNumbers, ...req.orderAccess.params]
+      );
       const rowsBySerial = new Map(rows.map((row) => [String(row.serial_number), row]));
       const notFound = serialNumbers.filter((serialNumber) => !rowsBySerial.has(serialNumber));
       if (notFound.length) {
@@ -726,7 +747,7 @@ module.exports = (db, userDb = null) => {
       if (parsed.fatalErrors?.length) {
         return res.status(400).json({ error: "Excel \u683c\u5f0f\u9519\u8bef", details: parsed.fatalErrors });
       }
-      await validateBasicInfoRows(db, userDb, parsed.rows);
+      await validateBasicInfoRows(db, userDb, parsed.rows, req.orderAccess);
       const preview = buildPreviewResult(parsed.rows);
       return res.json({ success: preview.invalid === 0, preview });
     } catch (error) {
@@ -743,7 +764,7 @@ module.exports = (db, userDb = null) => {
       if (parsed.fatalErrors?.length) {
         return res.status(400).json({ error: "Excel \u683c\u5f0f\u9519\u8bef", details: parsed.fatalErrors });
       }
-      await validateBasicInfoRows(db, userDb, parsed.rows);
+      await validateBasicInfoRows(db, userDb, parsed.rows, req.orderAccess);
 
       const results = {
         total: parsed.rows.length,
@@ -765,7 +786,7 @@ module.exports = (db, userDb = null) => {
         try {
           await connection.beginTransaction();
           transactionStarted = true;
-          await updateBasicInfoRow(connection, row);
+          await updateBasicInfoRow(connection, row, req.orderAccess);
           await connection.commit();
           transactionStarted = false;
           results.success += 1;
@@ -837,8 +858,8 @@ module.exports = (db, userDb = null) => {
       await ensureOrderPhoneSchema(db);
       await ensureOrderCompanySchema(db);
       await ensureBillingInfoSchema(db);
-      const conditions = [];
-      const params = [];
+      const conditions = [req.orderAccess.sql()];
+      const params = [...req.orderAccess.params];
 
       const appendLikeCondition = (fieldName, columnName = fieldName) => {
         const value = String(req.query[fieldName] || "").trim();
@@ -884,7 +905,8 @@ module.exports = (db, userDb = null) => {
 
       const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       const [rows] = await db.execute(`${buildOrderSelectSql(whereClause, { includeTrackingNumber: true })} ORDER BY o.serial_number DESC`, params);
-      res.json({ orders: rows.map((row) => enrichOrderBillingFields(row)) });
+      const hydratedRows = await hydrateOrderCompanyFields(rows, userDb);
+      res.json({ orders: hydratedRows.map((row) => enrichOrderBillingFields(row)) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -896,15 +918,16 @@ module.exports = (db, userDb = null) => {
       await ensureOrderPhoneSchema(db);
       await ensureBillingInfoSchema(db);
       const [rows] = await db.execute(
-        `${buildOrderSelectSql("WHERE o.serial_number = ?")}
+        `${buildOrderSelectSql(`WHERE o.serial_number = ? AND (${req.orderAccess.sql()})`)}
          LIMIT 1`,
-        [req.params.serial_number]
+        [req.params.serial_number, ...req.orderAccess.params]
       );
       if (rows.length === 0) {
         res.status(404).json({ error: "Order not found" });
         return;
       }
-      res.json({ order: enrichOrderBillingFields(rows[0]) });
+      const [order] = await hydrateOrderCompanyFields(rows, userDb);
+      res.json({ order: enrichOrderBillingFields(order) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -916,15 +939,16 @@ module.exports = (db, userDb = null) => {
       await ensureOrderPhoneSchema(db);
       await ensureBillingInfoSchema(db);
       const [rows] = await db.execute(
-        `${buildOrderSelectSql("WHERE o.id = ?")}
+        `${buildOrderSelectSql(`WHERE o.id = ? AND (${req.orderAccess.sql()})`)}
          LIMIT 1`,
-        [req.params.id]
+        [req.params.id, ...req.orderAccess.params]
       );
       if (rows.length === 0) {
         res.status(404).json({ error: "Order not found" });
         return;
       }
-      res.json({ order: enrichOrderBillingFields(rows[0]) });
+      const [order] = await hydrateOrderCompanyFields(rows, userDb);
+      res.json({ order: enrichOrderBillingFields(order) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -953,8 +977,10 @@ module.exports = (db, userDb = null) => {
       const placeholders = serialNumbers.map(() => "?").join(", ");
       const lookupTable = definition.moduleName === "billing" ? "orders" : definition.tableName;
       const [existingRows] = await connection.execute(
-        `SELECT serial_number FROM ${lookupTable} WHERE serial_number IN (${placeholders})`,
-        serialNumbers
+        `SELECT child.serial_number FROM \`${lookupTable}\` child
+         INNER JOIN orders o ON o.serial_number = child.serial_number
+         WHERE child.serial_number IN (${placeholders}) AND (${req.orderAccess.sql()}) FOR UPDATE`,
+        [...serialNumbers, ...req.orderAccess.params]
       );
       const existingSerialNumbers = new Set(
         existingRows.map((row) => String(row.serial_number || "").trim())
@@ -1059,8 +1085,9 @@ module.exports = (db, userDb = null) => {
 
       const placeholders = serialNumbers.map(() => "?").join(", ");
       const [existingRows] = await connection.execute(
-        `SELECT serial_number FROM orders WHERE serial_number IN (${placeholders})`,
-        serialNumbers
+        `SELECT o.serial_number FROM orders o WHERE o.serial_number IN (${placeholders})
+         AND (${req.orderAccess.sql()}) FOR UPDATE`,
+        [...serialNumbers, ...req.orderAccess.params]
       );
       const existingSerialNumbers = new Set(
         existingRows.map((row) => String(row.serial_number || "").trim())
@@ -1107,6 +1134,7 @@ module.exports = (db, userDb = null) => {
       await ensureOrderPhoneSchema(db);
       await ensureOrderCompanySchema(db);
       const company_name = String(req.body?.company_name ?? "").trim();
+      if (!req.orderAccess.isAdmin) req.orderAccess.assertCompany(req.body?.company_name);
       await connection.beginTransaction();
 
       const orderer = req.body.orderer;
@@ -1147,6 +1175,7 @@ module.exports = (db, userDb = null) => {
         remark1,
         remark2,
       });
+      enrichedOrderData.company_name = req.orderAccess.assertCompany(enrichedOrderData.company_name);
       const normalizedReceiveDate = normalizeOptionalDateValue(enrichedOrderData.receive_date) || null;
 
       // 生成serial_number：当年+当月+001，最后三位递增，每月重置
@@ -1221,7 +1250,7 @@ module.exports = (db, userDb = null) => {
 
     } catch (err) {
       await connection.rollback();
-      res.status(500).json({ error: err.message });
+      res.status(err.statusCode || 500).json({ error: err.message });
     } finally {
       connection.release();
     }
@@ -1238,6 +1267,7 @@ module.exports = (db, userDb = null) => {
       await ensureOrderPhoneSchema(db);
       await ensureOrderCompanySchema(db);
       const company_name = String(req.body?.company_name ?? "").trim();
+      if (!req.orderAccess.isAdmin) req.orderAccess.assertCompany(req.body?.company_name);
       const orderer = req.body.orderer;
       const receive_date = req.body.receive_date;
       const business_type = req.body.business_type;
@@ -1277,12 +1307,14 @@ module.exports = (db, userDb = null) => {
         remark2,
       });
       const normalizedReceiveDate = normalizeOptionalDateValue(enrichedOrderData.receive_date) || null;
+      enrichedOrderData.company_name = req.orderAccess.assertCompany(enrichedOrderData.company_name);
 
       await connection.beginTransaction();
       transactionStarted = true;
       const [orderRows] = await connection.execute(
-        "SELECT id, serial_number FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
-        [req.params.id]
+        `SELECT o.id, o.serial_number FROM orders o
+         WHERE o.id = ? AND (${req.orderAccess.sql()}) LIMIT 1 FOR UPDATE`,
+        [req.params.id, ...req.orderAccess.params]
       );
       if (!orderRows.length) {
         await connection.rollback();
@@ -1380,6 +1412,7 @@ module.exports = (db, userDb = null) => {
       // 只取第一行数据进行验证
       const excelData = jsonData[0];
       const validationResult = validateExcelData(excelData);
+      if (!req.orderAccess.isAdmin) req.orderAccess.assertCompany(validationResult.data.company_name);
 
       if (!validationResult.isValid) {
         return res.status(400).json({
@@ -1406,6 +1439,7 @@ module.exports = (db, userDb = null) => {
       }
 
       validationResult.data = await enrichOrderPayloadFromProfiles(userDb, validationResult.data);
+      validationResult.data.company_name = req.orderAccess.assertCompany(validationResult.data.company_name);
       const postEnrichErrors = validateRequiredFields(
         validationResult.data,
         getPostEnrichRequiredOrderImportFields(),
@@ -1426,7 +1460,7 @@ module.exports = (db, userDb = null) => {
 
     } catch (error) {
       console.error("Excel解析错误:", error);
-      res.status(500).json({ error: "Excel文件解析失败: " + error.message });
+      res.status(error.statusCode || 500).json({ error: "Excel文件解析失败: " + error.message });
     }
   });
 
@@ -1469,6 +1503,7 @@ module.exports = (db, userDb = null) => {
 
           // 验证数据
           const validationResult = validateExcelData(rowData);
+          if (!req.orderAccess.isAdmin) req.orderAccess.assertCompany(validationResult.data.company_name);
 
           if (!validationResult.isValid) {
             results.failed++;
@@ -1501,6 +1536,7 @@ module.exports = (db, userDb = null) => {
           }
 
           const enrichedOrderData = await enrichOrderPayloadFromProfiles(userDb, validationResult.data);
+          enrichedOrderData.company_name = req.orderAccess.assertCompany(enrichedOrderData.company_name);
           const postEnrichErrors = validateRequiredFields(
             enrichedOrderData,
             getPostEnrichRequiredOrderImportFields(),

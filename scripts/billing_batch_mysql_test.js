@@ -41,6 +41,10 @@ async function run() {
     await excel.ensureImportAuditSchema(db);
     const app = express();
     app.use(express.json());
+    app.use((req, _res, next) => {
+      if (req.headers["x-user-id"] === "1") req.user = { id: 1, role: "admin" };
+      next();
+    });
     const users = { execute: async () => [[{ id: 1, role: "user" }]] };
     app.use("/api/billing", createRouter(db, users));
     server = await new Promise((resolve) => {
@@ -74,7 +78,7 @@ async function run() {
       return records[0];
     }
     const firstExport = await exportFile(serials.slice(0, 2));
-    const filled = editFile(firstExport, { O2: 50.25, Q2: "2026-10" });
+    const filled = editFile(firstExport, { P2: 50.25, R2: "2026-10" });
     let result = await importFile(filled);
     assert.equal(result.status, 200, JSON.stringify(result));
     assert.equal(result.data.summary.updated, 1);
@@ -84,8 +88,8 @@ async function run() {
     // Two concurrent imports from the same snapshot must not both overwrite the row.
     const baseline = await exportFile([serials[0]]);
     const concurrent = await Promise.all([
-      importFile(editFile(baseline, { O2: 61 })),
-      importFile(editFile(baseline, { O2: 62 })),
+      importFile(editFile(baseline, { P2: 61 })),
+      importFile(editFile(baseline, { P2: 62 })),
     ]);
     assert.equal(concurrent.reduce((total, response) => total + response.data.summary.updated, 0), 1, JSON.stringify(concurrent));
     assert.equal(concurrent.reduce((total, response) => total + response.data.summary.failed, 0), 1);
@@ -96,13 +100,13 @@ async function run() {
     const originalCost = (await getRecord(serials[0])).cost_items;
     await db.query(`CREATE TRIGGER test_import_failure BEFORE UPDATE ON billing_info FOR EACH ROW
       BEGIN IF NEW.serial_number = 'TEST0001' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Injected test failure'; END IF; END`);
-    result = await importFile(editFile(rollbackBaseline, { O2: 91, O3: 92 }));
+    result = await importFile(editFile(rollbackBaseline, { P2: 91, P3: 92 }));
     assert.equal(result.status, 500, JSON.stringify(result));
     assert.equal((await getRecord(serials[0])).cost_items, originalCost);
     await db.query("DROP TRIGGER test_import_failure");
 
     const all = await exportFile(serials);
-    const updates = Object.fromEntries(serials.map((serial, index) => [`O${index + 2}`, 88.88]));
+    const updates = Object.fromEntries(serials.map((serial, index) => [`P${index + 2}`, 88.88]));
     const start = Date.now();
     result = await importFile(editFile(all, updates));
     assert.equal(result.status, 200, JSON.stringify(result));
@@ -132,8 +136,8 @@ async function run() {
     await db.execute("UPDATE orders SET business_type = ? WHERE serial_number = ?", ["空运", serials[2]]);
     const unbilled = await exportFile(serials.slice(2, 8));
     result = await importFile(editFile(unbilled, {
-      O2: 15.5, P2: 25.75, Q2: "2026-11",
-      O4: "bad", O5: 0, Q6: "月结30天",
+      P2: 15.5, Q2: 25.75, R2: "2026-11",
+      P4: "bad", P5: 0, R6: "月结30天",
     }));
     assert.equal(result.status, 200, JSON.stringify(result));
     assert.deepEqual(result.data.summary, { total: 6, updated: 3, failed: 1, skipped: 2, duplicated: 0 });
@@ -157,8 +161,8 @@ async function run() {
     // Serialize concurrent first saves: one INSERT, then a stale-value failure.
     const firstSaveBaseline = await exportFile([serials[9]]);
     const firstSaves = await Promise.all([
-      importFile(editFile(firstSaveBaseline, { O2: 31 })),
-      importFile(editFile(firstSaveBaseline, { O2: 32 })),
+      importFile(editFile(firstSaveBaseline, { P2: 31 })),
+      importFile(editFile(firstSaveBaseline, { P2: 32 })),
     ]);
     assert.ok(firstSaves.every((response) => response.status === 200), JSON.stringify(firstSaves));
     assert.equal(firstSaves.reduce((sum, response) => sum + response.data.summary.updated, 0), 1);
@@ -171,7 +175,7 @@ async function run() {
     const [auditsBeforeRollback] = await db.execute("SELECT COUNT(*) AS total FROM billing_import_log");
     await db.query(`CREATE TRIGGER test_import_failure BEFORE UPDATE ON billing_info FOR EACH ROW
       BEGIN IF NEW.serial_number = 'TEST0001' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Injected test failure'; END IF; END`);
-    result = await importFile(editFile(newBillRollback, { O2: 19, O3: 29 }));
+    result = await importFile(editFile(newBillRollback, { P2: 19, P3: 29 }));
     assert.equal(result.status, 500);
     assert.equal(await getRecord(serials[8]), undefined);
     assert.equal((await getRecord(serials[1])).cost_items, existingBeforeRollback);
@@ -179,7 +183,7 @@ async function run() {
     assert.equal(Number(auditsAfterRollback[0].total), Number(auditsBeforeRollback[0].total));
     await db.query("DROP TRIGGER test_import_failure");
     const missingOrder = await exportFile([serials[7]]);
-    result = await importFile(editFile(missingOrder, { A2: "NONEXISTENT_ORDER", O2: 10 }));
+    result = await importFile(editFile(missingOrder, { A2: "NONEXISTENT_ORDER", P2: 10 }));
     assert.equal(result.data.summary.failed, 1);
     assert.deepEqual(result.data.notFoundSerialNumbers, ["NONEXISTENT_ORDER"]);
     assert.equal(await getRecord("NONEXISTENT_ORDER"), undefined);

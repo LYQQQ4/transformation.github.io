@@ -16,6 +16,7 @@ const { buildReportFilter } = require("../backend/routes/reports");
 
 const EXPECTED_FIELD_KEYS = [
   "serial_number",
+  "company_name",
   "sender_company",
   "receiver_company",
   "orderer",
@@ -53,7 +54,7 @@ const EXPECTED_FIELD_KEYS = [
 ];
 
 const EXPECTED_FIELD_LABELS = [
-  "流水号", "发件人公司", "收件人公司", "指令人", "业务类型", "发件人ID", "客户ID",
+  "流水号", "公司名称", "发件人公司", "收件人公司", "指令人", "业务类型", "发件人ID", "客户ID",
   "接收指令日期", "起始地", "目的地", "贸易术语", "货物品名", "运输方式",
   "运单号", "提货时间", "货物流转信息", "运输供应商", "增值服务备注",
   "备注1", "备注2", "到货时间", "报关口岸", "开始报关时间", "付税时间",
@@ -163,7 +164,7 @@ function testFieldMappingsAndFormatting() {
     ]),
   };
   const expected = [
-    "202609007", "发件公司", "收件公司", "Operator", "Import", "S001", "C001", "2026/09/01",
+    "202609007", "A公司", "发件公司", "收件公司", "Operator", "Import", "S001", "C001", "2026/09/01",
     "Origin", "Destination", "DDP", "Product", "Air", "TN001", "2026/09/02",
     "In transit", "Carrier", "Insurance", "Unified remark",
     "提货备注：Pickup remark\n送货备注：Transfer remark", "2026/09/03",
@@ -222,7 +223,7 @@ function testFrontendUsesSharedDefinition() {
       Array.from(thead.innerHTML.matchAll(/<th>(.*?)<\/th>/g), (match) => match[1]),
       EXPECTED_FIELD_LABELS
     );
-    assert.strictEqual((tbody.innerHTML.match(/<td>/g) || []).length, rows.length * 35);
+    assert.strictEqual((tbody.innerHTML.match(/<td>/g) || []).length, rows.length * 36);
     assert.ok(!tbody.innerHTML.includes("<script>"));
   }
   assert.deepStrictEqual(paginated, Array(3).fill("reportManagementTable"));
@@ -264,8 +265,9 @@ function createReportDb(rows, keyword = "202609") {
             assert.ok(sql.includes("GROUP_CONCAT(NULLIF(TRIM(customs_supplier)"));
             assert.ok(sql.includes("LEFT JOIN billing_info"));
             assert.ok(sql.includes("ORDER BY o.serial_number DESC"));
-            assert.strictEqual(sql.includes("WHERE o.serial_number LIKE ?"), Boolean(keyword));
-            assert.deepStrictEqual(params, keyword ? [`%${keyword}%`] : []);
+            assert.strictEqual(sql.includes("o.serial_number LIKE ?"), Boolean(keyword));
+            const scopeParams = sql.includes("CAST(? AS BINARY)") ? ["FixtureCo"] : [];
+            assert.deepStrictEqual(params, [...scopeParams, ...(keyword ? [`%${keyword}%`] : [])]);
             return [keyword ? rows.filter((row) => String(row.serial_number || "").includes(keyword)) : rows];
           }
 
@@ -295,6 +297,7 @@ function testCompanyFilters() {
 function createUserDb(role) {
   return {
     async execute(sql, params) {
+      if (sql.includes("FROM user_order_companies")) return [[{ company_name: "FixtureCo" }]];
       assert.strictEqual(sql, "SELECT id, role FROM users WHERE id = ? LIMIT 1");
       return params[0] === "1" ? [[{ id: 1, role }]] : [[]];
     },

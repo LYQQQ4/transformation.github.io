@@ -2,6 +2,7 @@ const express = require("express");
 const XLSX = require("xlsx");
 
 const { requireUserAccess } = require("../lib/request_auth");
+const { loadOrderAccess } = require("../lib/order_access");
 const {
   buildTotalReportSummaryRows,
   ensureBillingInfoSchema,
@@ -186,8 +187,8 @@ function buildReportFilter(req) {
   const senderCompany = normalizeCompanyKeyword(req.query.sender_company);
   const receiverCompany = normalizeCompanyKeyword(req.query.receiver_company);
   const dateFilter = buildReportDateFilter(req);
-  const conditions = [];
-  const params = [...dateFilter.params];
+  const conditions = req.orderAccess ? [req.orderAccess.sql()] : [];
+  const params = [...(req.orderAccess?.params || []), ...dateFilter.params];
 
   if (serialNumber) {
     conditions.push("o.serial_number LIKE ?");
@@ -201,7 +202,7 @@ function buildReportFilter(req) {
     conditions.push("o.receiver_company LIKE ?");
     params.push(`%${receiverCompany}%`);
   }
-  conditions.unshift(...dateFilter.conditions);
+  conditions.splice(req.orderAccess ? 1 : 0, 0, ...dateFilter.conditions);
 
   return {
     serialNumber,
@@ -239,6 +240,7 @@ async function loadReportSummary(db, reportType, filter) {
 
 function createReportsRouter(db, userDb) {
   const router = express.Router();
+  router.use(loadOrderAccess(userDb));
 
   router.get("/summary", async (req, res) => {
     try {

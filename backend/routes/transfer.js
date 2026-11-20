@@ -9,7 +9,9 @@ const {
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
 const { hasOrderRemarkFields, lockOrderBySerial, syncOrderRemarksBySerial } = require("../lib/order_remarks");
 const { requireUserAccess } = require("../lib/request_auth");
+const { loadOrderAccess, guardRelatedOrderWrites, assertOrderSerialAccess, assertOrderChildAccess } = require("../lib/order_access");
 const { validateBatchDateRequest } = require("../lib/batch_date");
+const { hydrateOrderCompanyFields } = require("../lib/order_company_fields");
 
 // 配置multer用于文件上传
 const upload = multer({
@@ -243,6 +245,7 @@ const TRANSFER_SELECT_COLUMNS = `
 `;
 
 module.exports = (db, userDb = null) => {
+  router.use(loadOrderAccess(userDb), guardRelatedOrderWrites(db, "transfer"));
   // GET all transfers
   router.get("/", async (req, res) => {
     try {
@@ -257,9 +260,10 @@ module.exports = (db, userDb = null) => {
 ${TRANSFER_SELECT_COLUMNS}
         FROM transfer t
         LEFT JOIN orders o ON t.serial_number = o.serial_number
+        WHERE (${req.orderAccess.sql()})
         ORDER BY t.create_time DESC
-      `);
-      res.json({ transfers: rows });
+      `, req.orderAccess.params);
+      res.json({ transfers: await hydrateOrderCompanyFields(rows, userDb) });
     } catch (err) {
       logTransferRouteError("list", null, err);
       res.status(500).json({ error: err.message });
@@ -279,14 +283,15 @@ ${TRANSFER_SELECT_COLUMNS}
 ${TRANSFER_SELECT_COLUMNS}
          FROM transfer t
          LEFT JOIN orders o ON t.serial_number = o.serial_number
-         WHERE t.serial_number = ?`,
-        [serialNumber]
+         WHERE t.serial_number = ? AND (${req.orderAccess.sql()})`,
+        [serialNumber, ...req.orderAccess.params]
       );
       if (rows.length === 0) {
         res.status(404).json({ error: "Transfer not found" });
         return;
       }
-      res.json({ transfer: rows[0] });
+      const [transfer] = await hydrateOrderCompanyFields(rows, userDb);
+      res.json({ transfer });
     } catch (err) {
       logTransferRouteError("getBySerial", { serial_number: req.params.serial_number }, err);
       res.status(500).json({ error: err.message });
@@ -301,14 +306,15 @@ ${TRANSFER_SELECT_COLUMNS}
 ${TRANSFER_SELECT_COLUMNS}
          FROM transfer t
          LEFT JOIN orders o ON t.serial_number = o.serial_number
-         WHERE t.id = ?`,
-        [req.params.id]
+         WHERE t.id = ? AND (${req.orderAccess.sql()})`,
+        [req.params.id, ...req.orderAccess.params]
       );
       if (rows.length === 0) {
         res.status(404).json({ error: "Transfer not found" });
         return;
       }
-      res.json({ transfer: rows[0] });
+      const [transfer] = await hydrateOrderCompanyFields(rows, userDb);
+      res.json({ transfer });
     } catch (err) {
       logTransferRouteError("getById", { id: req.params.id }, err);
       res.status(500).json({ error: err.message });
@@ -333,8 +339,10 @@ ${TRANSFER_SELECT_COLUMNS}
 
       const placeholders = serialNumbers.map(() => "?").join(", ");
       const [rows] = await connection.execute(
-        `SELECT serial_number FROM ${definition.tableName} WHERE serial_number IN (${placeholders})`,
-        serialNumbers
+        `SELECT child.serial_number FROM ${definition.tableName} child
+         INNER JOIN orders o ON o.serial_number = child.serial_number
+         WHERE child.serial_number IN (${placeholders}) AND (${req.orderAccess.sql()}) FOR UPDATE`,
+        [...serialNumbers, ...req.orderAccess.params]
       );
       const existing = new Set(rows.map((row) => String(row.serial_number || "").trim()));
       const found = serialNumbers.filter((serialNumber) => existing.has(serialNumber));
@@ -432,6 +440,7 @@ ${TRANSFER_SELECT_COLUMNS}
       if (hasOrderRemarkFields(req.body)) {
         await lockOrderBySerial(connection, serialNumber);
       }
+      await assertOrderSerialAccess(connection, req.orderAccess, serialNumber, { lock: true });
 
       const [result] = await connection.execute(sql, params);
 
@@ -519,7 +528,7 @@ ${TRANSFER_SELECT_COLUMNS}
 
       await connection.beginTransaction();
       transactionStarted = true;
-      await lockOrderBySerial(connection, serialNumber);
+      await assertOrderSerialAccess(connection, req.orderAccess, serialNumber, { lock: true });
 
       const [result] = await connection.execute(sql, params);
 
@@ -603,7 +612,8 @@ ${TRANSFER_SELECT_COLUMNS}
 
       await connection.beginTransaction();
       transactionStarted = true;
-      await lockOrderBySerial(connection, sanitizeTransferValue(serial_number));
+      await assertOrderChildAccess(connection, req.orderAccess, "transfer", req.params.id, { lock: true });
+      await assertOrderSerialAccess(connection, req.orderAccess, sanitizeTransferValue(serial_number), { lock: true });
 
       const [result] = await connection.execute(sql, params);
 
@@ -641,7 +651,11 @@ ${TRANSFER_SELECT_COLUMNS}
   // DELETE transfer
   router.delete("/:id", async (req, res) => {
     try {
-      const [result] = await db.execute("DELETE FROM transfer WHERE id = ?", [req.params.id]);
+      const [result] = await db.execute(
+        `DELETE FROM transfer WHERE id = ? AND EXISTS (
+          SELECT 1 FROM orders o WHERE o.serial_number = transfer.serial_number AND (${req.orderAccess.sql()})
+        )`, [req.params.id, ...req.orderAccess.params]
+      );
       if (result.affectedRows === 0) {
         res.status(404).json({ error: "Transfer not found" });
         return;
@@ -788,6 +802,7 @@ ${TRANSFER_SELECT_COLUMNS}
           try {
             await rowConnection.beginTransaction();
             rowTransactionStarted = true;
+            await assertOrderSerialAccess(rowConnection, req.orderAccess, serialNumber, { lock: true });
             if (hasOrderRemarkFields(validationResult.data)) {
               await lockOrderBySerial(rowConnection, serialNumber);
             }

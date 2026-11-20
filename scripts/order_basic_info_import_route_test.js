@@ -70,6 +70,7 @@ function createUserDb(role = "admin") {
   const userDb = {
     role,
     async execute(sql) {
+      if (sql.includes("FROM user_order_companies")) return [[{ company_name: "Acme" }]];
       if (sql.includes("FROM users")) return [[{ id: 7, role: userDb.role }]];
       if (sql.includes("FROM user_profiles")) return [[{ id: "ch001" }, { id: "ch002" }]];
       throw new Error(`Unexpected SQL in user route test: ${sql}`);
@@ -149,7 +150,7 @@ async function run() {
     );
     const ordinaryImport = await fetch(`${base}/bulk-basic-info`, {
       method: "POST",
-      headers,
+      headers: { ...headers, "x-user-role": "user" },
       body: deniedForm,
     });
     assert.equal(ordinaryImport.status, 200);

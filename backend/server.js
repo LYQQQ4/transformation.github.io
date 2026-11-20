@@ -4,6 +4,7 @@ const cors = require("cors");
 const mysql = require("mysql2/promise");
 const path = require("path");
 const { migrateAuthSchema } = require("../scripts/migrate_auth_sessions");
+const { migrateOrderCompanyAccess } = require("../scripts/migrate_order_company_access");
 const { loadSession, requireSession, sendError } = require("./lib/request_auth");
 
 const app = express();
@@ -105,11 +106,12 @@ app.get("/api/test", (_req, res) => {
   res.json({ message: "API is working", timestamp: new Date().toISOString() });
 });
 app.use("/api/auth", require("./routes/auth")(userPool));
+app.use("/api/users", require("./routes/order_company_access")(userPool, pool));
 app.use("/api/users", require("./routes/users")(userPool));
 
 const protectedRoutes = [
   ["/api/orders", require("./routes/orders")(pool, userPool)],
-  ["/api/packages", require("./routes/packages")(pool)],
+  ["/api/packages", require("./routes/packages")(pool, userPool)],
   ["/api/pickup-trackings", require("./routes/pickup_trackings")(pool, userPool)],
   ["/api/transfers", require("./routes/transfer")(pool, userPool)],
   ["/api/guests", require("./routes/guests")(userPool)],
@@ -150,6 +152,7 @@ async function start() {
   const migrationConnection = await mysql.createConnection(userDbConfig);
   try {
     await migrateAuthSchema(migrationConnection, userDbConfig.database);
+    await migrateOrderCompanyAccess(migrationConnection);
   } finally {
     await migrationConnection.end();
   }

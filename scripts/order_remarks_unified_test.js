@@ -117,7 +117,7 @@ async function run() {
       return params[0] === "1" ? [[{ id: 1, role: "user" }]] : [[]];
     },
   };
-  await requireUserAccess(userDb, { headers: { "x-user-id": "1" } }, "order remark update");
+  await requireUserAccess(userDb, { user: { id: 1, role: "user" } }, "order remark update");
   await assert.rejects(
     () => requireUserAccess(userDb, { headers: { "x-user-id": "2" } }, "order remark update"),
     (error) => error.statusCode === 401

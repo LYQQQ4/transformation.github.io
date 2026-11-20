@@ -1,4 +1,5 @@
 const express = require("express");
+const { loadOrderAccess } = require("../lib/order_access");
 
 const router = express.Router();
 
@@ -78,12 +79,12 @@ function mergeSuggestionRows(targetMap, rows, sourceName) {
   });
 }
 
-async function queryGroupedSuggestions(db, sql) {
+async function queryGroupedSuggestions(db, sql, params = []) {
   if (!db) {
     return [];
   }
 
-  const [rows] = await db.query(sql);
+  const [rows] = await db.query(sql, params);
   return rows.map((row) => ({
     value: row.value,
     frequency: Number(row.frequency || 0),
@@ -91,7 +92,7 @@ async function queryGroupedSuggestions(db, sql) {
   }));
 }
 
-async function buildOrderFormSuggestions(orderDb, userDb) {
+async function buildOrderFormSuggestions(orderDb, userDb, access) {
   const [
     orderCompanies,
     profileCompanies,
@@ -111,10 +112,11 @@ async function buildOrderFormSuggestions(orderDb, userDb) {
           MAX(updated_at) AS last_used_at
         FROM orders
         WHERE company_name IS NOT NULL AND TRIM(company_name) <> ''
+          AND (${access.sql("orders.company_name")})
         GROUP BY TRIM(company_name)
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
-      `
+      `, access.params
     ),
     queryGroupedSuggestions(
       userDb,
@@ -139,10 +141,11 @@ async function buildOrderFormSuggestions(orderDb, userDb) {
           MAX(updated_at) AS last_used_at
         FROM orders
         WHERE business_type IS NOT NULL AND TRIM(business_type) <> ''
+          AND (${access.sql("orders.company_name")})
         GROUP BY TRIM(business_type)
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
-      `
+      `, access.params
     ),
     queryGroupedSuggestions(
       orderDb,
@@ -153,10 +156,11 @@ async function buildOrderFormSuggestions(orderDb, userDb) {
           MAX(updated_at) AS last_used_at
         FROM orders
         WHERE origin IS NOT NULL AND TRIM(origin) <> ''
+          AND (${access.sql("orders.company_name")})
         GROUP BY TRIM(origin)
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
-      `
+      `, access.params
     ),
     queryGroupedSuggestions(
       orderDb,
@@ -167,10 +171,11 @@ async function buildOrderFormSuggestions(orderDb, userDb) {
           MAX(updated_at) AS last_used_at
         FROM orders
         WHERE destination IS NOT NULL AND TRIM(destination) <> ''
+          AND (${access.sql("orders.company_name")})
         GROUP BY TRIM(destination)
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
-      `
+      `, access.params
     ),
     queryGroupedSuggestions(
       orderDb,
@@ -181,10 +186,11 @@ async function buildOrderFormSuggestions(orderDb, userDb) {
           MAX(updated_at) AS last_used_at
         FROM orders
         WHERE trade_term IS NOT NULL AND TRIM(trade_term) <> ''
+          AND (${access.sql("orders.company_name")})
         GROUP BY TRIM(trade_term)
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
-      `
+      `, access.params
     ),
     queryGroupedSuggestions(
       orderDb,
@@ -195,10 +201,11 @@ async function buildOrderFormSuggestions(orderDb, userDb) {
           MAX(updated_at) AS last_used_at
         FROM orders
         WHERE product_name IS NOT NULL AND TRIM(product_name) <> ''
+          AND (${access.sql("orders.company_name")})
         GROUP BY TRIM(product_name)
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
-      `
+      `, access.params
     ),
     queryGroupedSuggestions(
       orderDb,
@@ -238,7 +245,7 @@ async function buildOrderFormSuggestions(orderDb, userDb) {
   };
 }
 
-async function buildTrackingFieldSuggestions(orderDb) {
+async function buildTrackingFieldSuggestions(orderDb, access) {
   const [
     pickupTransportModes,
     pickupCustomsPorts,
@@ -255,10 +262,11 @@ async function buildTrackingFieldSuggestions(orderDb) {
           MAX(updated_at) AS last_used_at
         FROM pickup_transport_tracking
         WHERE transport_mode IS NOT NULL AND TRIM(transport_mode) <> ''
+          AND EXISTS (SELECT 1 FROM orders o WHERE o.serial_number = pickup_transport_tracking.serial_number AND (${access.sql()}))
         GROUP BY TRIM(transport_mode)
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
-      `
+      `, access.params
     ),
     queryGroupedSuggestions(
       orderDb,
@@ -269,10 +277,11 @@ async function buildTrackingFieldSuggestions(orderDb) {
           MAX(updated_at) AS last_used_at
         FROM pickup_transport_tracking
         WHERE customs_port IS NOT NULL AND TRIM(customs_port) <> ''
+          AND EXISTS (SELECT 1 FROM orders o WHERE o.serial_number = pickup_transport_tracking.serial_number AND (${access.sql()}))
         GROUP BY TRIM(customs_port)
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
-      `
+      `, access.params
     ),
     queryGroupedSuggestions(
       orderDb,
@@ -283,10 +292,11 @@ async function buildTrackingFieldSuggestions(orderDb) {
           MAX(updated_at) AS last_used_at
         FROM pickup_transport_tracking
         WHERE transport_supplier IS NOT NULL AND TRIM(transport_supplier) <> ''
+          AND EXISTS (SELECT 1 FROM orders o WHERE o.serial_number = pickup_transport_tracking.serial_number AND (${access.sql()}))
         GROUP BY TRIM(transport_supplier)
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
-      `
+      `, access.params
     ),
     queryGroupedSuggestions(
       orderDb,
@@ -297,10 +307,11 @@ async function buildTrackingFieldSuggestions(orderDb) {
           MAX(updated_at) AS last_used_at
         FROM pickup_transport_tracking
         WHERE transport_mode IS NOT NULL AND TRIM(transport_mode) <> ''
+          AND EXISTS (SELECT 1 FROM orders o WHERE o.serial_number = pickup_transport_tracking.serial_number AND (${access.sql()}))
         GROUP BY TRIM(transport_mode)
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
-      `
+      `, access.params
     ),
     queryGroupedSuggestions(
       orderDb,
@@ -311,10 +322,11 @@ async function buildTrackingFieldSuggestions(orderDb) {
           MAX(updated_at) AS last_used_at
         FROM customs_clearance_tracking
         WHERE customs_supplier IS NOT NULL AND TRIM(customs_supplier) <> ''
+          AND EXISTS (SELECT 1 FROM orders o WHERE o.serial_number = customs_clearance_tracking.serial_number AND (${access.sql()}))
         GROUP BY TRIM(customs_supplier)
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
-      `
+      `, access.params
     ),
   ]);
 
@@ -327,11 +339,11 @@ async function buildTrackingFieldSuggestions(orderDb) {
   };
 }
 
-async function buildScopePayload(scope, orderDb, userDb) {
+async function buildScopePayload(scope, orderDb, userDb, access) {
   if (scope === SCOPE_ORDER_FORM) {
     const [orderFormSuggestions, trackingFieldSuggestions] = await Promise.all([
-      buildOrderFormSuggestions(orderDb, userDb),
-      buildTrackingFieldSuggestions(orderDb),
+      buildOrderFormSuggestions(orderDb, userDb, access),
+      buildTrackingFieldSuggestions(orderDb, access),
     ]);
 
     return {
@@ -348,13 +360,14 @@ async function buildScopePayload(scope, orderDb, userDb) {
   throw error;
 }
 
-async function getCachedScopePayload(scope, orderDb, userDb) {
+async function getCachedScopePayload(scope, orderDb, userDb, access) {
+  if (!access.isAdmin) return buildScopePayload(scope, orderDb, userDb, access);
   const cached = scopeCache.get(scope);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.payload;
   }
 
-  const payload = await buildScopePayload(scope, orderDb, userDb);
+  const payload = await buildScopePayload(scope, orderDb, userDb, access);
   scopeCache.set(scope, {
     payload,
     expiresAt: Date.now() + CACHE_TTL_MS,
@@ -363,11 +376,12 @@ async function getCachedScopePayload(scope, orderDb, userDb) {
 }
 
 module.exports = (orderDb, userDb = null) => {
+  router.use(loadOrderAccess(userDb));
   router.get("/suggestions", async (req, res) => {
     const scope = normalizeSuggestionValue(req.query.scope || SCOPE_ORDER_FORM);
 
     try {
-      const payload = await getCachedScopePayload(scope || SCOPE_ORDER_FORM, orderDb, userDb);
+      const payload = await getCachedScopePayload(scope || SCOPE_ORDER_FORM, orderDb, userDb, req.orderAccess);
       res.json(payload);
     } catch (error) {
       res.status(error.statusCode || 500).json({ error: error.message });

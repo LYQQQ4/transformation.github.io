@@ -5,9 +5,11 @@ const {
   sanitizeNullableString,
 } = require("../lib/tracking_fields");
 const { syncTrackingFieldsBySerial } = require("../lib/tracking_sync");
-const { hasOrderRemarkFields, lockOrderBySerial, syncOrderRemarksBySerial } = require("../lib/order_remarks");
+const { hasOrderRemarkFields, syncOrderRemarksBySerial } = require("../lib/order_remarks");
 const { requireUserAccess } = require("../lib/request_auth");
+const { loadOrderAccess, guardRelatedOrderWrites, assertOrderSerialAccess } = require("../lib/order_access");
 const { validateBatchDateRequest } = require("../lib/batch_date");
+const { hydrateOrderCompanyFields } = require("../lib/order_company_fields");
 
 function normalizeOptionalTrackingValue(value) {
   if (value === undefined || value === null) {
@@ -125,6 +127,7 @@ const PICKUP_SELECT_COLUMNS = `
 `;
 
 module.exports = (db, userDb = null) => {
+  router.use(loadOrderAccess(userDb), guardRelatedOrderWrites(db, "pickup_transport_tracking"));
   router.get("/", async (req, res) => {
     try {
       const [tableCheck] = await db.execute("SHOW TABLES LIKE 'pickup_transport_tracking'");
@@ -138,9 +141,10 @@ ${PICKUP_SELECT_COLUMNS}
         FROM pickup_transport_tracking t
         LEFT JOIN transfer tr ON tr.serial_number = t.serial_number
         LEFT JOIN orders o ON t.serial_number = o.serial_number
+        WHERE (${req.orderAccess.sql()})
         ORDER BY t.created_at DESC
-      `);
-      res.json({ pickupTrackings: rows });
+      `, req.orderAccess.params);
+      res.json({ pickupTrackings: await hydrateOrderCompanyFields(rows, userDb) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -154,14 +158,15 @@ ${PICKUP_SELECT_COLUMNS}
         FROM pickup_transport_tracking t
         LEFT JOIN transfer tr ON tr.serial_number = t.serial_number
         LEFT JOIN orders o ON t.serial_number = o.serial_number
-        WHERE t.serial_number = ?
-      `, [req.params.serial_number]);
+        WHERE t.serial_number = ? AND (${req.orderAccess.sql()})
+      `, [req.params.serial_number, ...req.orderAccess.params]);
 
       if (rows.length === 0) {
         return res.status(404).json({ error: "Pickup transport tracking not found" });
       }
 
-      res.json({ pickupTracking: rows[0] });
+      const [pickupTracking] = await hydrateOrderCompanyFields(rows, userDb);
+      res.json({ pickupTracking });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -185,8 +190,10 @@ ${PICKUP_SELECT_COLUMNS}
 
       const placeholders = serialNumbers.map(() => "?").join(", ");
       const [rows] = await connection.execute(
-        `SELECT serial_number FROM ${definition.tableName} WHERE serial_number IN (${placeholders})`,
-        serialNumbers
+        `SELECT child.serial_number FROM ${definition.tableName} child
+         INNER JOIN orders o ON o.serial_number = child.serial_number
+         WHERE child.serial_number IN (${placeholders}) AND (${req.orderAccess.sql()}) FOR UPDATE`,
+        [...serialNumbers, ...req.orderAccess.params]
       );
       const existing = new Set(rows.map((row) => String(row.serial_number || "").trim()));
       const found = serialNumbers.filter((serialNumber) => existing.has(serialNumber));
@@ -267,7 +274,7 @@ ${PICKUP_SELECT_COLUMNS}
       const serialNumber = sanitizeNullableString(req.params.serial_number);
       await connection.beginTransaction();
       transactionStarted = true;
-      await lockOrderBySerial(connection, serialNumber);
+      await assertOrderSerialAccess(connection, req.orderAccess, serialNumber, { lock: true });
 
       const [transferResult] = await connection.execute(
         "UPDATE transfer SET tracking_number = ? WHERE serial_number = ?",

@@ -1305,6 +1305,9 @@ function getAuthHeaders(extraHeaders = {}) {
 }
 
 function updateDeleteOrdersMenuVisibility() {
+    const userManagementLink = document.getElementById("userManagementLink");
+    if (userManagementLink) userManagementLink.style.display = isAdminUser() ? "block" : "none";
+    if (!isAdminUser()) closeOrderCompanyPermissions();
     const deleteOrdersLink = document.getElementById("deleteOrdersLink");
     if (deleteOrdersLink) {
         deleteOrdersLink.style.display = isAdminUser() ? "block" : "none";
@@ -1634,6 +1637,7 @@ function ensureOrderIndexStructure(pageName = activeOrderPageContext) {
         tableHead.innerHTML = `
             <tr>
                 <th>流水号</th>
+                <th>公司名称</th>
                 <th>发件人公司</th>
                 <th>收件人公司</th>
                 <th>指令人</th>
@@ -1733,6 +1737,7 @@ async function loadOrders(pageName = ORDER_PAGE_VIEW) {
         const query = buildOrderFilterQuery(pageName);
         const response = await apiFetch(query ? `${API_BASE}/orders?${query}` : `${API_BASE}/orders`);
         const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "加载订单失败");
         displayOrders(data.orders, pageName);
     } catch (error) {
         showMessage("加载订单失败: " + error.message, "error");
@@ -1797,7 +1802,8 @@ function displayOrders(orders, pageName = activeOrderPageContext) {
         row.innerHTML = `
             ${selectionCell}
             <td><button class="link-button" onclick="showOrderDetails(${order.id})">${order.serial_number || order.id}</button></td>
-            <td>${order.sender_company || order.company_name || ""}</td>
+            <td>${order.company_name || ""}</td>
+            <td>${order.sender_company || ""}</td>
             <td>${order.receiver_company || ""}</td>
             <td>${order.orderer}</td>
             <td>${order.business_type}</td>
@@ -1821,6 +1827,13 @@ function displayOrders(orders, pageName = activeOrderPageContext) {
         `;
     });
     applyRenderedTablePagination(state.tableId);
+    if (!orders.length) {
+        const row = tbody.insertRow();
+        const cell = row.insertCell();
+        cell.colSpan = document.querySelector(`#${state.tableId} thead tr`)?.children.length || 1;
+        cell.textContent = "暂无可查看的订单";
+        cell.style.textAlign = "center";
+    }
 }
 
 function renderOrderDetailView(order) {
@@ -3737,7 +3750,8 @@ function getOrderRemarkValue(record, fieldName) {
 function buildCommonOrderFieldItems(record, serialNumber = "") {
     return [
         ["流水号", serialNumber || record?.serial_number || record?.id || ""],
-        ["发件人公司", record?.sender_company || record?.company_name || ""],
+        ["公司名称", record?.company_name || ""],
+        ["发件人公司", record?.sender_company || ""],
         ["收件人公司", record?.receiver_company || ""],
         ["指令人", record?.orderer || ""],
         ["业务类型", record?.business_type || ""],
@@ -4097,6 +4111,8 @@ function groupPackagesBySerial(packages) {
             grouped.set(serialNumber, {
                 serial_number: serialNumber,
                 company_name: pkg.company_name || "",
+                sender_company: pkg.sender_company || "",
+                receiver_company: pkg.receiver_company || "",
                 orderer: pkg.orderer || "",
                 business_type: pkg.business_type || "",
                 sender_id: pkg.sender_id || "",
@@ -4499,7 +4515,7 @@ function showOrderForm(order = null) {
     if (order) {
         modalTitle.textContent = "编辑订单";
         if (form) {
-            form.querySelector("#companyName").value = order.company_name || order.sender_company || order.receiver_company || "";
+            form.querySelector("#companyName").value = order.company_name || "";
             form.querySelector("#senderCompany").value = order.sender_company || "";
             form.querySelector("#receiverCompany").value = order.receiver_company || "";
             form.querySelector("#orderer").value = order.orderer || "";
@@ -4576,7 +4592,9 @@ function handleCustomerIdChange(event) {
             form.querySelector("#receiverName").value = customer.contact_name || "";
             form.querySelector("#receiverPhone").value = customer.phone || "";
             form.querySelector("#receiverCompany").value = customer.company_name || "";
-            form.querySelector("#companyName").value = form.querySelector("#senderCompany").value || customer.company_name || "";
+            if (!form.querySelector("#companyName").value.trim()) {
+                form.querySelector("#companyName").value = customer.company_name || "";
+            }
         }
     }
 }
@@ -4587,7 +4605,9 @@ function handleSenderIdChange(event) {
         const form = event.target.closest("#orderFormData");
         if (form) {
             form.querySelector("#senderCompany").value = "";
-            form.querySelector("#companyName").value = form.querySelector("#receiverCompany").value || "";
+            if (!form.querySelector("#companyName").value.trim()) {
+                form.querySelector("#companyName").value = form.querySelector("#receiverCompany").value || "";
+            }
         }
         return;
     }
@@ -4601,7 +4621,9 @@ function handleSenderIdChange(event) {
             form.querySelector("#senderName").value = sender.contact_name || "";
             form.querySelector("#senderPhone").value = sender.phone || "";
             form.querySelector("#senderCompany").value = sender.company_name || "";
-            form.querySelector("#companyName").value = sender.company_name || form.querySelector("#receiverCompany").value || "";
+            if (!form.querySelector("#companyName").value.trim()) {
+                form.querySelector("#companyName").value = sender.company_name || "";
+            }
         }
     }
 }
@@ -4737,6 +4759,7 @@ function displayImportResults(result) {
 
 function fillFormWithData(data) {
     const fieldMapping = {
+        company_name: "companyName",
         sender_company: "senderCompany",
         receiver_company: "receiverCompany",
         orderer: "orderer",
@@ -4816,7 +4839,7 @@ async function saveOrder() {
         return;
     }
     const orderData = {
-        company_name: senderCompany || receiverCompany,
+        company_name: getOrderFormElement("companyName", form).value.trim(),
         sender_company: senderCompany,
         receiver_company: receiverCompany,
         orderer: getOrderFormElement("orderer", form).value,
@@ -5054,9 +5077,11 @@ async function loadDeleteOrders() {
 
 // User functions
 async function loadUsers() {
+    if (!isAdminUser()) return;
     try {
         const response = await apiFetch(`${API_BASE}/users`);
         const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "加载用户失败");
         displayUsers(data.users);
     } catch (error) {
         showMessage("加载用户失败: " + error.message, "error");
@@ -5070,16 +5095,121 @@ function displayUsers(users) {
         const row = tbody.insertRow();
         row.innerHTML = `
             <td>${user.id}</td>
-            <td>${user.username}</td>
-            <td>${user.role}</td>
+            <td>${escapeHtml(user.username)}</td>
+            <td>${escapeHtml(user.role)}</td>
             <td>${new Date(user.created_at).toLocaleString()}</td>
             <td>
                 <button onclick="editUser(${user.id})">编辑</button>
                 <button onclick="deleteUser(${user.id})">删除</button>
+                ${isAdminUser() ? `<button type="button" onclick="openOrderCompanyPermissions('${escapeHtml(user.id)}')">订单权限</button>` : ""}
             </td>
         `;
     });
     applyRenderedTablePagination("usersTable");
+}
+
+let orderCompanyPermissionsTarget = "";
+let orderCompanyPermissionsRequest = 0;
+let orderCompanyPermissionsBusy = false;
+
+function setOrderCompanyPermissionsBusy(busy) {
+    orderCompanyPermissionsBusy = busy;
+    document.querySelectorAll("[data-company-permission-control], #orderCompanyPermissionsOptions input").forEach((node) => {
+        node.disabled = busy;
+    });
+}
+
+function closeOrderCompanyPermissions() {
+    orderCompanyPermissionsRequest += 1;
+    orderCompanyPermissionsTarget = "";
+    const panel = document.getElementById("orderCompanyPermissions");
+    if (panel) panel.style.display = "none";
+}
+
+function renderOrderCompanyPermissions(companies, selected) {
+    const options = document.getElementById("orderCompanyPermissionsOptions");
+    options.replaceChildren();
+    [...new Set([...companies, ...selected].map((name) => String(name).trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, "zh-CN")).forEach((name) => {
+            const label = document.createElement("label");
+            label.style.cssText = "display:flex; align-items:flex-start; gap:8px; overflow-wrap:anywhere; min-width:0;";
+            const input = document.createElement("input");
+            input.type = "checkbox";
+            input.value = name;
+            input.checked = selected.includes(name);
+            input.style.cssText = "width:auto; flex:0 0 auto; margin-top:3px;";
+            label.append(input, document.createTextNode(name));
+            options.appendChild(label);
+        });
+    if (!options.children.length) options.textContent = "暂无可授权的公司";
+}
+
+async function openOrderCompanyPermissions(id) {
+    if (!isAdminUser()) return;
+    const request = ++orderCompanyPermissionsRequest;
+    orderCompanyPermissionsTarget = "";
+    document.getElementById("orderCompanyPermissions").style.display = "block";
+    document.getElementById("orderCompanyPermissionsOptions").replaceChildren();
+    const status = document.getElementById("orderCompanyPermissionsStatus");
+    status.textContent = "正在加载...";
+    setOrderCompanyPermissionsBusy(true);
+    try {
+        const results = await Promise.all([
+            apiFetch(`${API_BASE}/users/order-companies`),
+            apiFetch(`${API_BASE}/users/${encodeURIComponent(id)}/order-companies`)
+        ]);
+        const bodies = await Promise.all(results.map((response) => response.json()));
+        results.forEach((response, index) => {
+            if (!response.ok) throw new Error(bodies[index].error || "加载订单权限失败");
+        });
+        if (request !== orderCompanyPermissionsRequest) return;
+        orderCompanyPermissionsTarget = String(id);
+        document.getElementById("orderCompanyPermissionsTitle").textContent = `订单公司权限 · 用户 ${id}`;
+        renderOrderCompanyPermissions(bodies[0].companies, bodies[1].companies);
+        status.textContent = `已授权 ${bodies[1].companies.length} 家公司`;
+    } catch (error) {
+        if (request === orderCompanyPermissionsRequest) {
+            status.textContent = error.message;
+            showMessage(error.message, "error");
+        }
+    } finally {
+        if (request === orderCompanyPermissionsRequest) setOrderCompanyPermissionsBusy(false);
+    }
+}
+
+function selectOrderCompanies(checked) {
+    if (orderCompanyPermissionsBusy || !orderCompanyPermissionsTarget || !isAdminUser()) return;
+    document.querySelectorAll("#orderCompanyPermissionsOptions input").forEach((node) => { node.checked = checked; });
+}
+
+async function saveOrderCompanyPermissions() {
+    if (orderCompanyPermissionsBusy || !orderCompanyPermissionsTarget || !isAdminUser()) return;
+    const target = orderCompanyPermissionsTarget;
+    const request = orderCompanyPermissionsRequest;
+    const companies = Array.from(document.querySelectorAll("#orderCompanyPermissionsOptions input:checked"), (node) => node.value);
+    const status = document.getElementById("orderCompanyPermissionsStatus");
+    setOrderCompanyPermissionsBusy(true);
+    try {
+        const response = await apiFetch(`${API_BASE}/users/${encodeURIComponent(target)}/order-companies`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ companies })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "保存订单权限失败");
+        if (request !== orderCompanyPermissionsRequest) return;
+        const options = Array.from(document.querySelectorAll("#orderCompanyPermissionsOptions input"), (node) => node.value);
+        renderOrderCompanyPermissions(options, result.companies);
+        status.textContent = `已授权 ${result.companies.length} 家公司`;
+        showMessage("订单权限保存成功");
+    } catch (error) {
+        if (request === orderCompanyPermissionsRequest) {
+            status.textContent = error.message;
+            showMessage(error.message, "error");
+        }
+    } finally {
+        if (request === orderCompanyPermissionsRequest) setOrderCompanyPermissionsBusy(false);
+    }
 }
 
 function showUserForm(user = null) {
@@ -6076,6 +6206,7 @@ function ensurePackagingPageStructure() {
             <thead>
                 <tr>
                     <th>流水号</th>
+                    <th>公司名称</th>
                     <th>发件人公司</th>
                     <th>收件人公司</th>
                     <th>指令人</th>
@@ -6544,7 +6675,8 @@ function displayPackages(packages) {
         const row = tbody.insertRow();
         row.innerHTML = `
             <td>${escapeHtml(group.serial_number || "")}</td>
-            <td>${escapeHtml(group.sender_company || group.company_name || "")}</td>
+            <td>${escapeHtml(group.company_name || "")}</td>
+            <td>${escapeHtml(group.sender_company || "")}</td>
             <td>${escapeHtml(group.receiver_company || "")}</td>
             <td>${escapeHtml(group.orderer || "")}</td>
             <td>${escapeHtml(group.business_type || "")}</td>
@@ -6583,7 +6715,8 @@ async function loadPackages() {
             const searchLower = currentPackageSearchTerm.toLowerCase();
             groupedPackages = groupedPackages.filter(group =>
                 (group.serial_number && group.serial_number.toLowerCase().includes(searchLower)) ||
-                ((group.sender_company || group.company_name) && (group.sender_company || group.company_name).toLowerCase().includes(searchLower)) ||
+                (group.company_name && group.company_name.toLowerCase().includes(searchLower)) ||
+                (group.sender_company && group.sender_company.toLowerCase().includes(searchLower)) ||
                 (group.receiver_company && group.receiver_company.toLowerCase().includes(searchLower)) ||
                 (group.orderer && group.orderer.toLowerCase().includes(searchLower)) ||
                 (group.business_type && group.business_type.toLowerCase().includes(searchLower)) ||
@@ -7233,7 +7366,8 @@ function displayPickupTrackings(trackings) {
         const serialNumber = String(item.serial_number || "").trim();
         row.innerHTML = `
             <td>${escapeHtml(serialNumber)}</td>
-            <td>${item.sender_company || item.company_name || ""}</td>
+            <td>${item.company_name || ""}</td>
+            <td>${item.sender_company || ""}</td>
             <td>${item.receiver_company || ""}</td>
             <td>${item.orderer || ""}</td>
             <td>${item.business_type || ""}</td>
@@ -7530,7 +7664,8 @@ async function loadAndFilterPickupTrackings() {
             const searchLower = currentPickupTrackingSearchTerm.toLowerCase();
             filtered = filtered.filter(item => (
                 (item.serial_number && item.serial_number.toLowerCase().includes(searchLower)) ||
-                ((item.sender_company || item.company_name) && (item.sender_company || item.company_name).toLowerCase().includes(searchLower)) ||
+                (item.company_name && item.company_name.toLowerCase().includes(searchLower)) ||
+                (item.sender_company && item.sender_company.toLowerCase().includes(searchLower)) ||
                 (item.receiver_company && item.receiver_company.toLowerCase().includes(searchLower)) ||
                 (item.orderer && item.orderer.toLowerCase().includes(searchLower)) ||
                 (item.business_type && item.business_type.toLowerCase().includes(searchLower)) ||
@@ -7581,7 +7716,8 @@ function displayTransfers(transfers) {
 
         row.innerHTML = `
             <td>${escapeHtml(serialNumber)}</td>
-            <td>${transfer.sender_company || transfer.company_name || ""}</td>
+            <td>${transfer.company_name || ""}</td>
+            <td>${transfer.sender_company || ""}</td>
             <td>${transfer.receiver_company || ""}</td>
             <td>${transfer.orderer || ""}</td>
             <td>${transfer.business_type || ""}</td>
@@ -7881,7 +8017,8 @@ async function loadAndFilterTransfers() {
                 const searchLower = currentTransferSearchTerm.toLowerCase();
                 return (
                     transfer.serial_number.toLowerCase().includes(searchLower) ||
-                    ((transfer.sender_company || transfer.company_name) && (transfer.sender_company || transfer.company_name).toLowerCase().includes(searchLower)) ||
+                    (transfer.company_name && transfer.company_name.toLowerCase().includes(searchLower)) ||
+                    (transfer.sender_company && transfer.sender_company.toLowerCase().includes(searchLower)) ||
                     (transfer.receiver_company && transfer.receiver_company.toLowerCase().includes(searchLower)) ||
                     (transfer.orderer && transfer.orderer.toLowerCase().includes(searchLower)) ||
                     (transfer.business_type && transfer.business_type.toLowerCase().includes(searchLower)) ||
@@ -9255,7 +9392,8 @@ function displayCustomsClearance(records) {
 
         row.innerHTML = `
             <td>${escapeHtml(serialNumber)}</td>
-            <td>${record.sender_company || record.company_name || ""}</td>
+            <td>${record.company_name || ""}</td>
+            <td>${record.sender_company || ""}</td>
             <td>${record.receiver_company || ""}</td>
             <td>${record.orderer || ""}</td>
             <td>${record.business_type || ""}</td>
@@ -9583,7 +9721,8 @@ async function loadAndFilterCustomsClearance() {
             const searchLower = currentCustomsSearchTerm.toLowerCase();
             filteredRecords = filteredRecords.filter(record => {
                 return (record.serial_number && record.serial_number.toLowerCase().includes(searchLower)) ||
-                       ((record.sender_company || record.company_name) && (record.sender_company || record.company_name).toLowerCase().includes(searchLower)) ||
+                       (record.company_name && record.company_name.toLowerCase().includes(searchLower)) ||
+                       (record.sender_company && record.sender_company.toLowerCase().includes(searchLower)) ||
                        (record.receiver_company && record.receiver_company.toLowerCase().includes(searchLower)) ||
                        (record.orderer && record.orderer.toLowerCase().includes(searchLower)) ||
                        (record.business_type && record.business_type.toLowerCase().includes(searchLower)) ||
