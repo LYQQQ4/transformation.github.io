@@ -1,6 +1,54 @@
 # Order Company Access
 
-## 本次交接（2026-11-17）
+## 本次检查与调整（2026-11-20）
+
+- 权限范围确认：只按订单的“公司名称” (`orders.company_name`) 授权，
+  不按发件人公司、收件人公司或用户资料公司授权。收发件人资料功能保留。
+- 原权限选项查询和 SQL 过滤已仅使用 `orders.company_name`，本次没有扩大或缩小
+  关联模块的权限边界。即使收发件人公司与已授权名称相同，也不能访问其他公司的订单。
+- 找到实际字段混用：订单表单隐藏了 `companyName`；
+  `app.js` 及后加载的 `user_profiles.js` 会用收发件人公司填充或覆盖它；
+  后端资料补全有同样的兜底；输入建议合并了所有用户资料公司的名称。
+- 已将“公司名称”恢复为独立可填写的必填字段，移除上述前后端代填和建议合并；
+  Excel 导入字段及模板的必填标记同步调整。收发件人公司仍从对应资料独立补全。
+  权限入口改名为“公司名称权限”，并修复该面板和订单弹窗的窄屏遮挡、溢出。
+- 没有改写历史订单、现有用户角色或授权记录。若历史订单的“公司名称”已经是某个
+  收发件人公司名，该名称仍属于真实订单归属，不能因名称重合就从权限选项中删除。
+- 管理员仍保留全量访问；白名单仅限制普通用户。本地只读检查时，普通用户授权数均为 0。
+  用管理员账号验证白名单限制会得到“仍可查看全部”的结果，这是现有角色规则。
+
+### 入口问题与验证
+
+- 当前 3000 服务的前端与工作区一致，权限接口在未登录时返回 401；
+  不能据此确认已登录管理员曾遇到的 `User not found` 根因。
+- 隔离数据库测试已覆盖：从用户列表取得 ID，再逐个加载权限成功；
+  不存在用户仍返回 404，普通用户仍返回 403。未删除目标用户校验或放宽鉴权。
+- 页面错误现在区分“加载公司名称失败”和“加载用户 ID 的公司权限失败”，
+  便于再次出现问题时定位具体请求。原环境的已登录入口错误尚未复现，不能宣称根因已修复。
+- `npm.cmd run test:order-company-access` 通过 122 项 HTTP 检查及 SQL/事务/导入断言，
+  包括仅授权收发件人公司不能访问订单、仅授权订单公司可编辑关联记录、
+  资料公司不进入权限选项/输入建议、公司名为空不能用资料公司兜底。
+- 交接中原有十组回归命令本次均通过，含此前未完成复测的并发写入调整。
+- 新增 `scripts/order_company_access_browser_test.js`，通过桌面 1440x1000、
+  手机 390x844 的真实 Edge 页面检查和截图：加载全部页面脚本，覆盖权限加载/保存/错误、
+  长公司名换行、页面/弹窗边界及切换收发件人不会覆盖公司名称。
+  浏览器 API 使用模拟数据；真实 Session/MySQL 行为由上述隔离集成测试覆盖。
+- 浏览器测试命令：`node scripts/order_company_access_browser_test.js`。
+  需要可解析的 Playwright 和已安装的 Edge；本机复用了 `logs/browser-tools/node_modules`。
+  截图在 `logs/order_company_access_{desktop,mobile}.png` 和
+  `logs/order_company_form_{desktop,mobile}.png`。
+- 修改的 JS 文件语法检查、`git diff --check` 通过。
+  全仓 `npm.cmd run check` 仍因既有重复声明、引号等问题失败，未作无关 lint 清理。
+
+### 当前服务
+
+- 保留原 3000 服务（检查时 PID 5940），没有停止或重启它。
+- 新版本地测试服务：`http://127.0.0.1:3105`，启动 PID 14252，development 模式。
+  启动执行了项目原有的幂等鉴权/权限表迁移检查，未手动执行数据迁移。
+- 本次未创建 Git 提交。仍需用实际管理员和普通用户账号完成人工验收；
+  若旧入口报错再次出现，按下方历史交接记录中的请求/ID/数据库顺序继续排查。
+
+## 历史交接（2026-11-17，以下为当时状态）
 
 ### 当前状态
 
@@ -98,6 +146,10 @@ significant. There is no fuzzy matching or Unicode compatibility folding.
 Legacy surrounding spaces, tabs, and full-width spaces do not change ownership.
 NULL, empty, and whitespace-only order companies are visible only to admins.
 Sender and receiver company fields are never authorization substitutes.
+The order company is now an explicit form/import field. Neither selecting a
+profile nor server-side profile enrichment fills or replaces it. Company-name
+suggestions come only from scoped orders, not the profile catalog. Historical
+order ownership is not rewritten, even when it happens to match a profile name.
 
 The user and business databases may be hosted separately. The user database
 supplies names; the business database applies parameterized `IN` predicates in
@@ -210,11 +262,10 @@ npm.cmd run test:batch-receive-date
 npm.cmd run test:order-remarks
 ```
 
-All commands above passed locally before the final concurrency refinements.
-The final working tree has not passed a complete rerun; see the dated handoff
-above for the known UI failure and outstanding verification.
-The previously passing feature suite included 103 HTTP checks plus direct
-database and frontend state assertions.
+All commands above passed again on November 20, 2026, including the concurrency
+refinements. The feature suite now includes 122 HTTP checks plus direct database
+and frontend state assertions. The original environment's authenticated
+`User not found` report still needs reproduction; see the current dated section.
 It uses real sessions, separate temporary user/business schemas, and cloned
 empty business table definitions. It does not copy production order data,
 modify existing accounts, or leave test schemas behind. The database account
@@ -230,8 +281,8 @@ permission service failures, immediate revocation, and frontend error states.
 `npm.cmd run check` still fails on pre-existing repository-wide lint issues,
 including duplicate declarations in frontend/app.js and quote-style violations
 in unrelated files. No unrelated lint cleanup was applied.
-Node syntax checks and `git diff --check` passed in the earlier verification
-round; they do not replace final-code regression testing.
+Node syntax checks and `git diff --check` also passed in the current verification
+round; they do not replace the real-account acceptance still outstanding.
 
 ## Changed Files
 
@@ -263,7 +314,8 @@ Authentication helpers, users CRUD, and user-profile behavior were not changed.
 
 - Use two browser sessions to confirm grant/revoke takes effect on refresh.
 - Inspect the permissions section at desktop/mobile widths and with very long
-  company names. Automated frontend checks use DOM stubs, not browser screenshots.
+  company names. DOM checks and mocked-API browser screenshots now cover this,
+  but real-account acceptance remains necessary.
 - Check real administrator and ordinary-user workflows with representative
   legacy NULL/blank company data and Excel files.
 - Confirm ordinary-user pagination totals and downloads match their scoped list.

@@ -4592,9 +4592,6 @@ function handleCustomerIdChange(event) {
             form.querySelector("#receiverName").value = customer.contact_name || "";
             form.querySelector("#receiverPhone").value = customer.phone || "";
             form.querySelector("#receiverCompany").value = customer.company_name || "";
-            if (!form.querySelector("#companyName").value.trim()) {
-                form.querySelector("#companyName").value = customer.company_name || "";
-            }
         }
     }
 }
@@ -4605,9 +4602,6 @@ function handleSenderIdChange(event) {
         const form = event.target.closest("#orderFormData");
         if (form) {
             form.querySelector("#senderCompany").value = "";
-            if (!form.querySelector("#companyName").value.trim()) {
-                form.querySelector("#companyName").value = form.querySelector("#receiverCompany").value || "";
-            }
         }
         return;
     }
@@ -4621,9 +4615,6 @@ function handleSenderIdChange(event) {
             form.querySelector("#senderName").value = sender.contact_name || "";
             form.querySelector("#senderPhone").value = sender.phone || "";
             form.querySelector("#senderCompany").value = sender.company_name || "";
-            if (!form.querySelector("#companyName").value.trim()) {
-                form.querySelector("#companyName").value = sender.company_name || "";
-            }
         }
     }
 }
@@ -4831,6 +4822,12 @@ async function saveOrder() {
         showMessage("未找到订单表单", "error");
         return;
     }
+    const companyName = getOrderFormElement("companyName", form).value.trim();
+    if (!companyName) {
+        showMessage("请填写公司名称", "error");
+        getOrderFormElement("companyName", form).focus();
+        return;
+    }
     const senderCompany = form.querySelector("#senderCompany")?.value.trim() || "";
     const receiverCompany = form.querySelector("#receiverCompany")?.value.trim() || "";
     if (!receiverCompany) {
@@ -4839,7 +4836,7 @@ async function saveOrder() {
         return;
     }
     const orderData = {
-        company_name: getOrderFormElement("companyName", form).value.trim(),
+        company_name: companyName,
         sender_company: senderCompany,
         receiver_company: receiverCompany,
         orderer: getOrderFormElement("orderer", form).value,
@@ -5101,7 +5098,7 @@ function displayUsers(users) {
             <td>
                 <button onclick="editUser(${user.id})">编辑</button>
                 <button onclick="deleteUser(${user.id})">删除</button>
-                ${isAdminUser() ? `<button type="button" onclick="openOrderCompanyPermissions('${escapeHtml(user.id)}')">订单权限</button>` : ""}
+                ${isAdminUser() ? `<button type="button" onclick="openOrderCompanyPermissions('${escapeHtml(user.id)}')">公司名称权限</button>` : ""}
             </td>
         `;
     });
@@ -5132,7 +5129,7 @@ function renderOrderCompanyPermissions(companies, selected) {
     [...new Set([...companies, ...selected].map((name) => String(name).trim()).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, "zh-CN")).forEach((name) => {
             const label = document.createElement("label");
-            label.style.cssText = "display:flex; align-items:flex-start; gap:8px; overflow-wrap:anywhere; min-width:0;";
+            label.style.cssText = "display:flex; align-items:flex-start; gap:8px; overflow-wrap:anywhere; min-width:0; width:auto; margin-right:0;";
             const input = document.createElement("input");
             input.type = "checkbox";
             input.value = name;
@@ -5149,6 +5146,7 @@ async function openOrderCompanyPermissions(id) {
     const request = ++orderCompanyPermissionsRequest;
     orderCompanyPermissionsTarget = "";
     document.getElementById("orderCompanyPermissions").style.display = "block";
+    document.getElementById("orderCompanyPermissionsTitle").textContent = `公司名称权限 · 用户 ${id}`;
     document.getElementById("orderCompanyPermissionsOptions").replaceChildren();
     const status = document.getElementById("orderCompanyPermissionsStatus");
     status.textContent = "正在加载...";
@@ -5160,11 +5158,13 @@ async function openOrderCompanyPermissions(id) {
         ]);
         const bodies = await Promise.all(results.map((response) => response.json()));
         results.forEach((response, index) => {
-            if (!response.ok) throw new Error(bodies[index].error || "加载订单权限失败");
+            if (!response.ok) {
+                const source = index === 0 ? "加载公司名称" : `加载用户 ${id} 的公司权限`;
+                throw new Error(`${source}失败: ${bodies[index].error || response.status}`);
+            }
         });
         if (request !== orderCompanyPermissionsRequest) return;
         orderCompanyPermissionsTarget = String(id);
-        document.getElementById("orderCompanyPermissionsTitle").textContent = `订单公司权限 · 用户 ${id}`;
         renderOrderCompanyPermissions(bodies[0].companies, bodies[1].companies);
         status.textContent = `已授权 ${bodies[1].companies.length} 家公司`;
     } catch (error) {

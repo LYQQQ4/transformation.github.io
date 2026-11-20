@@ -4,7 +4,7 @@ const ORDER_IMPORT_FIELDS = [
     label: "公司名称",
     aliases: ["公司名称", "company_name", "公司抬头"],
     formId: "companyName",
-    required: false,
+    required: true,
   },
   {
     key: "sender_company",

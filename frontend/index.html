@@ -501,6 +501,82 @@
             margin: 4px 0;
             color: #7F1D1D;
         }
+        #userManagementPage .users-table-scroll {
+            overflow-x: auto;
+        }
+
+        #usersTable td:last-child {
+            min-width: 200px;
+        }
+
+        @media (max-width: 760px) {
+            #mainApp:has(#userManagementPage[style*="display: block"]) .app-container {
+                display: block;
+            }
+            #mainApp:has(#userManagementPage[style*="display: block"]) .sidebar {
+                position: relative;
+                width: auto;
+                height: auto;
+                padding: 12px 0;
+            }
+            #mainApp:has(#userManagementPage[style*="display: block"]) .sidebar h2 {
+                display: none;
+            }
+            #mainApp:has(#userManagementPage[style*="display: block"]) .sidebar ul {
+                display: flex;
+                overflow-x: auto;
+            }
+            #mainApp:has(#userManagementPage[style*="display: block"]) .sidebar li {
+                flex-shrink: 0;
+            }
+            #mainApp:has(#userManagementPage[style*="display: block"]) .sidebar a {
+                white-space: nowrap;
+                padding: 8px 12px;
+            }
+            #mainApp:has(#userManagementPage[style*="display: block"]) .sidebar-footer {
+                padding: 0;
+            }
+            #mainApp:has(#userManagementPage[style*="display: block"]) .main-content {
+                margin-left: 0;
+                min-width: 0;
+                padding: 12px;
+            }
+            #userManagementPage > .section {
+                padding: 16px;
+            }
+            #usersTable {
+                min-width: 620px;
+            }
+            #orderModal .modal-content {
+                box-sizing: border-box;
+                width: calc(100% - 24px);
+                max-height: calc(100dvh - 24px);
+                margin: 12px auto;
+                padding: 16px;
+            }
+            #orderModal .form-group {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            #orderModal label {
+                width: auto;
+                margin: 0 0 6px;
+            }
+            #orderModal input, #orderModal textarea {
+                box-sizing: border-box;
+                width: 100%;
+                min-width: 0;
+            }
+            #orderModal .date-input-group {
+                min-width: 0;
+            }
+            #orderModal .date-picker-trigger {
+                flex: 0 0 44px;
+            }
+            #orderModal #senderIdHint, #orderModal #customerIdHint {
+                margin-left: 0 !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1299,7 +1375,7 @@
                             </form>
                         </div>
                         <section id="orderCompanyPermissions" style="display:none; margin:16px 0; border-top:1px solid #E5E7EB; padding-top:16px;" aria-labelledby="orderCompanyPermissionsTitle">
-                            <h3 id="orderCompanyPermissionsTitle" style="font-size:16px;">订单公司权限</h3>
+                            <h3 id="orderCompanyPermissionsTitle" style="font-size:16px;">公司名称权限</h3>
                             <p id="orderCompanyPermissionsStatus" role="status" aria-live="polite"></p>
                             <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
                                 <button type="button" data-company-permission-control onclick="selectOrderCompanies(true)">全选</button>
@@ -1309,6 +1385,7 @@
                             </div>
                             <div id="orderCompanyPermissionsOptions" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr)); gap:10px; max-height:320px; overflow:auto;"></div>
                         </section>
+                        <div class="users-table-scroll">
                         <table id="usersTable">
                             <thead>
                                 <tr>
@@ -1321,6 +1398,7 @@
                             </thead>
                             <tbody></tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
 
@@ -1446,7 +1524,10 @@
                 <button class="modal-close" onclick="hideOrderForm()">&times;</button>
             </div>
             <form id="orderFormData">
-                <input type="hidden" id="companyName">
+                <div class="form-group">
+                    <label for="companyName">公司名称:</label>
+                    <input type="text" id="companyName" maxlength="200" required>
+                </div>
                 <div class="form-group">
                     <label>发件人公司:</label>
                     <input type="text" id="senderCompany" readonly>

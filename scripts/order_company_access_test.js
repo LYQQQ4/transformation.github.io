@@ -108,6 +108,7 @@ async function run() {
     ];
     const ids = {};
     for (const [serial, company] of fixtures) ids[serial] = await insertOrder(serial, company);
+    await orderDb.execute("UPDATE orders SET sender_company = 'Acme', receiver_company = 'Acme' WHERE serial_number = 'S002'");
     const [normalization] = await orderDb.execute(
       `SELECT ${normalizedCompanySql("company_name")} AS name FROM orders ORDER BY id`
     );
@@ -168,6 +169,17 @@ async function run() {
       await request(path, null, { method, body, status: 401 });
     }
     assert.deepEqual((await json("/users/order-companies", admin)).companies, ["Acme", "Acmé", "Beta", "acme"]);
+    const listedUsers = (await json("/users", admin)).users;
+    for (const user of listedUsers) {
+      const permissions = await json(`/users/${user.id}/order-companies`, admin);
+      assert.equal(String(permissions.user_id), String(user.id), "permission entry must use the listed login user ID");
+    }
+    await request("/users/999999/order-companies", admin, { status: 404 });
+    await json("/users/2/order-companies", admin, {
+      method: "PUT", body: { companies: ["SenderRegistry", "ReceiverRegistry"] },
+    });
+    assert.equal((await json("/orders", operator)).orders.length, 0, "sender/receiver grants do not grant order access");
+    await request("/orders/serial/S001", operator, { status: 404 });
     await json("/users/2/order-companies", admin, { method: "PUT", body: { companies: [" Acme ", "Acme"] } });
     assert.deepEqual((await json("/users/2/order-companies", admin)).companies, ["Acme"]);
     await json("/users/2/order-companies", admin, { method: "POST", body: { company_name: "Acme" } });
@@ -201,6 +213,20 @@ async function run() {
       assert.equal((await json(`/${module}`, empty))[key].length, 0);
     }
     const [transferRows] = await orderDb.execute("SELECT id FROM transfer WHERE serial_number = 'S001'");
+    for (const [module, table] of [
+      ["packages", "package"], ["transfers", "transfer"], ["customs-clearance", "customs_clearance_tracking"],
+    ]) {
+      const [rows] = await orderDb.execute(`SELECT id FROM \`${table}\` WHERE serial_number = 'S001'`);
+      const body = module === "packages"
+        ? { serial_number: "S001", package_label: "Authorized", pieces: 2 }
+        : module === "transfers"
+          ? { serial_number: "S001", tracking_number: "AUTHORIZED-TN" }
+          : { serial_number: "S001", customs_supplier: "Authorized Supplier" };
+      await json(`/${module}/${rows[0].id}`, operator, { method: "PUT", body });
+      await json(`/${module}/serial/S001`, operator, {
+        method: "PUT", body: module === "packages" ? { packages: [body] } : body,
+      });
+    }
     await request(`/transfers/${transferRows[0].id}`, operator, {
       method: "PUT", body: { serial_number: "S002" }, status: 404,
     });
@@ -271,6 +297,13 @@ async function run() {
         id, company_name: company, address: "Address", contact_name: "Contact", phone: "123",
       } });
     }
+    assert.deepEqual((await json("/users/order-companies", admin)).companies, ["Acme", "Acmé", "Beta", "acme"],
+      "profile companies must not enter the permission options");
+    for (const cookie of [admin, operator, empty]) {
+      const names = (await json("/input-memory/suggestions", cookie)).fields.company_name.map((item) => item.value);
+      assert.ok(!names.includes("SenderRegistry") && !names.includes("ReceiverRegistry"),
+        "company-name suggestions must not merge sender/receiver profiles");
+    }
     const payload = {
       company_name: "Acme", orderer: "Tester", customer_id: "ch002", sender_id: "ch001",
       origin: "Shanghai", destination: "Tokyo", business_type: "Air",
@@ -279,6 +312,7 @@ async function run() {
     };
     await request("/orders", operator, { method: "POST", body: { ...payload, company_name: "Beta" }, status: 403 });
     await request("/orders", operator, { method: "POST", body: { ...payload, company_name: "" }, status: 400 });
+    await request("/orders", admin, { method: "POST", body: { ...payload, company_name: "" }, status: 400 });
     const createdOrder = await json("/orders", operator, { method: "POST", body: payload });
     await request(`/orders/${createdOrder.id}`, operator, {
       method: "PUT", body: { ...payload, company_name: "Beta" }, status: 403,

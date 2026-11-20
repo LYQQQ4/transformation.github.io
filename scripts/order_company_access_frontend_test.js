@@ -5,6 +5,7 @@ const vm = require("node:vm");
 async function run() {
   const source = fs.readFileSync("frontend/app.js", "utf8");
   const html = fs.readFileSync("frontend/index.html", "utf8");
+  assert.match(html, /<input type="text" id="companyName" maxlength="200" required>/);
   const nodes = new Map();
   function element() {
     return {
@@ -62,6 +63,7 @@ async function run() {
   vm.runInContext(source.slice(start, end), context);
   await context.openOrderCompanyPermissions("2");
   assert.equal(inputs().length, 4);
+  assert.equal(nodes.get("orderCompanyPermissionsTitle").textContent, "公司名称权限 · 用户 2");
   assert.deepEqual(inputs().filter((input) => input.checked).map((input) => input.value).sort(), ["Acme", "Legacy"]);
   assert.ok(nodes.get("orderCompanyPermissionsOptions").children.some((label) =>
     label.children.some((child) => child.textContent === "<b>literal</b>")
@@ -87,7 +89,7 @@ async function run() {
   const callsBeforeSave = calls.length;
   await context.saveOrderCompanyPermissions();
   assert.equal(calls.length, callsBeforeSave, "failed load must never enable a destructive empty save");
-  assert.equal(nodes.get("orderCompanyPermissionsStatus").textContent, "Load failed");
+  assert.equal(nodes.get("orderCompanyPermissionsStatus").textContent, "加载公司名称失败: Load failed");
   failLoad = false;
   const pending = context.openOrderCompanyPermissions("2");
   context.closeOrderCompanyPermissions();
@@ -100,6 +102,38 @@ async function run() {
   assert.equal(calls.length, before);
   assert.ok(source.includes('userManagementLink.style.display = isAdminUser() ? "block" : "none"'));
   assert.ok(source.includes('cell.textContent = "暂无可查看的订单"'));
+  const fields = new Map();
+  for (const id of ["companyName", "senderCompany", "receiverCompany", "deliveryAddress", "receiverName",
+    "receiverPhone", "shippingAddress", "senderName", "senderPhone"]) {
+    fields.set(`#${id}`, { value: "" });
+  }
+  const form = { querySelector: (selector) => fields.get(selector) };
+  const profileContext = vm.createContext({
+    userProfilesData: [{ id: "receiver", company_name: "Receiver Co", address: "R", contact_name: "Receiver" }],
+    sendersData: [{ sender_id: "sender", company_name: "Sender Co", address: "S", contact_name: "Sender" }],
+  });
+  vm.runInContext(source.slice(source.indexOf("function handleCustomerIdChange("),
+    source.indexOf("function hideOrderForm(")), profileContext);
+  const profilesSource = fs.readFileSync("frontend/user_profiles.js", "utf8");
+  vm.runInContext(profilesSource.slice(profilesSource.indexOf("  function applyCustomerProfileToOrder("),
+    profilesSource.indexOf("  function handleOrderProfileInput(")), profileContext);
+  const event = (value) => ({ target: { value, closest: () => form } });
+  for (const company of ["", "Order Owner"]) {
+    fields.get("#companyName").value = company;
+    profileContext.handleCustomerIdChange(event("receiver"));
+    assert.equal(fields.get("#receiverCompany").value, "Receiver Co");
+    profileContext.handleSenderIdChange(event("sender"));
+    assert.equal(fields.get("#senderCompany").value, "Sender Co");
+    profileContext.handleSenderIdChange(event(""));
+    assert.equal(fields.get("#senderCompany").value, "");
+    profileContext.handleCustomerIdChange(event(""));
+    assert.equal(fields.get("#receiverCompany").value, "");
+    profileContext.applyCustomerProfileToOrder(form, { company_name: "Receiver Co" });
+    assert.equal(fields.get("#receiverCompany").value, "Receiver Co");
+    profileContext.applySenderProfileToOrder(form, { company_name: "Sender Co" });
+    assert.equal(fields.get("#senderCompany").value, "Sender Co");
+    assert.equal(fields.get("#companyName").value, company, "profile changes must not set order ownership");
+  }
   console.log("order_company_access_frontend_test: passed selection, loading, save, error, stale request and role states");
 }
 

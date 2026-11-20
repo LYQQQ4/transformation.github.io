@@ -92,10 +92,9 @@ async function queryGroupedSuggestions(db, sql, params = []) {
   }));
 }
 
-async function buildOrderFormSuggestions(orderDb, userDb, access) {
+async function buildOrderFormSuggestions(orderDb, access) {
   const [
     orderCompanies,
-    profileCompanies,
     orderBusinessTypes,
     orderOrigins,
     orderDestinations,
@@ -117,20 +116,6 @@ async function buildOrderFormSuggestions(orderDb, userDb, access) {
         ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
         LIMIT ${DEFAULT_LIMIT}
       `, access.params
-    ),
-    queryGroupedSuggestions(
-      userDb,
-      `
-        SELECT
-          TRIM(company_name) AS value,
-          COUNT(*) AS frequency,
-          MAX(updated_at) AS last_used_at
-        FROM user_profiles
-        WHERE company_name IS NOT NULL AND TRIM(company_name) <> ''
-        GROUP BY TRIM(company_name)
-        ORDER BY COUNT(*) DESC, MAX(updated_at) DESC
-        LIMIT ${DEFAULT_LIMIT}
-      `
     ),
     queryGroupedSuggestions(
       orderDb,
@@ -225,7 +210,6 @@ async function buildOrderFormSuggestions(orderDb, userDb, access) {
 
   const companyNameMap = new Map();
   mergeSuggestionRows(companyNameMap, orderCompanies, "orders");
-  mergeSuggestionRows(companyNameMap, profileCompanies, "user_profiles");
 
   const productNameMap = new Map();
   mergeSuggestionRows(productNameMap, orderProductNames, "orders");
@@ -339,10 +323,10 @@ async function buildTrackingFieldSuggestions(orderDb, access) {
   };
 }
 
-async function buildScopePayload(scope, orderDb, userDb, access) {
+async function buildScopePayload(scope, orderDb, access) {
   if (scope === SCOPE_ORDER_FORM) {
     const [orderFormSuggestions, trackingFieldSuggestions] = await Promise.all([
-      buildOrderFormSuggestions(orderDb, userDb, access),
+      buildOrderFormSuggestions(orderDb, access),
       buildTrackingFieldSuggestions(orderDb, access),
     ]);
 
@@ -360,14 +344,14 @@ async function buildScopePayload(scope, orderDb, userDb, access) {
   throw error;
 }
 
-async function getCachedScopePayload(scope, orderDb, userDb, access) {
-  if (!access.isAdmin) return buildScopePayload(scope, orderDb, userDb, access);
+async function getCachedScopePayload(scope, orderDb, access) {
+  if (!access.isAdmin) return buildScopePayload(scope, orderDb, access);
   const cached = scopeCache.get(scope);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.payload;
   }
 
-  const payload = await buildScopePayload(scope, orderDb, userDb, access);
+  const payload = await buildScopePayload(scope, orderDb, access);
   scopeCache.set(scope, {
     payload,
     expiresAt: Date.now() + CACHE_TTL_MS,
@@ -381,7 +365,7 @@ module.exports = (orderDb, userDb = null) => {
     const scope = normalizeSuggestionValue(req.query.scope || SCOPE_ORDER_FORM);
 
     try {
-      const payload = await getCachedScopePayload(scope || SCOPE_ORDER_FORM, orderDb, userDb, req.orderAccess);
+      const payload = await getCachedScopePayload(scope || SCOPE_ORDER_FORM, orderDb, req.orderAccess);
       res.json(payload);
     } catch (error) {
       res.status(error.statusCode || 500).json({ error: error.message });

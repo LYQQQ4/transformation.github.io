@@ -328,10 +328,7 @@ async function enrichOrderPayloadFromProfiles(userDb, payload) {
     error.statusCode = 400;
     throw error;
   }
-  normalizedPayload.company_name =
-    normalizeOrderImportValue(normalizedPayload.company_name) ||
-    normalizedPayload.sender_company ||
-    normalizedPayload.receiver_company;
+  normalizedPayload.company_name = normalizeOrderImportValue(normalizedPayload.company_name);
 
   if (customerProfile) {
     normalizedPayload.delivery_address = normalizedPayload.delivery_address || customerProfile.address || "";
