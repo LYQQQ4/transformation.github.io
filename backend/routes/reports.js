@@ -184,6 +184,7 @@ function buildReportBaseSql(whereClause = "") {
 
 function buildReportFilter(req) {
   const serialNumber = normalizeSerialNumberKeyword(req.query.serial_number);
+  const companyName = normalizeCompanyKeyword(req.query.company_name);
   const senderCompany = normalizeCompanyKeyword(req.query.sender_company);
   const receiverCompany = normalizeCompanyKeyword(req.query.receiver_company);
   const dateFilter = buildReportDateFilter(req);
@@ -193,6 +194,10 @@ function buildReportFilter(req) {
   if (serialNumber) {
     conditions.push("o.serial_number LIKE ?");
     params.push(`%${serialNumber}%`);
+  }
+  if (companyName) {
+    conditions.push("o.company_name LIKE ?");
+    params.push(`%${companyName}%`);
   }
   if (senderCompany) {
     conditions.push("o.sender_company LIKE ?");
@@ -206,6 +211,7 @@ function buildReportFilter(req) {
 
   return {
     serialNumber,
+    companyName,
     senderCompany,
     receiverCompany,
     dateField: dateFilter.dateField,

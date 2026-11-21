@@ -187,11 +187,18 @@ function testFrontendUsesSharedDefinition() {
   const appJs = read("frontend/app.js");
 
   assert.ok(html.includes('src="order_summary_fields.js"'));
+  assert.ok(html.includes('id="reportCompanyNameInput"'));
+  assert.ok(html.includes('placeholder="支持模糊查询公司名称"'));
   assert.ok(html.includes('id="reportSenderCompanyInput"'));
   assert.ok(html.includes('id="reportReceiverCompanyInput"'));
   assert.ok(appJs.includes("ORDER_SUMMARY_FIELD_API"));
+  assert.ok(appJs.includes('params.set("company_name", companyName)'));
   assert.ok(appJs.includes('params.set("sender_company", senderCompany)'));
   assert.ok(appJs.includes('params.set("receiver_company", receiverCompany)'));
+  assert.strictEqual(
+    (appJs.match(/document\.getElementById\("reportCompanyNameInput"\)\?\.value\.trim\(\) \|\| ""/g) || []).length,
+    4
+  );
   assert.ok(appJs.includes("getOrderSummaryFieldDefinitions"));
   assert.ok(appJs.includes("buildOrderSummaryDetailItems"));
   assert.ok(appJs.includes("syncBillingTableColumns"));
@@ -227,9 +234,40 @@ function testFrontendUsesSharedDefinition() {
     assert.ok(!tbody.innerHTML.includes("<script>"));
   }
   assert.deepStrictEqual(paginated, Array(3).fill("reportManagementTable"));
+
+  const urlContext = vm.createContext({
+    API_BASE: "/api",
+    REPORT_TYPE_TOTAL: "total",
+    URLSearchParams,
+    document: {
+      getElementById: () => ({ value: "" }),
+    },
+  });
+  const urlStart = appJs.indexOf("function getReportDateFilter(");
+  const urlEnd = appJs.indexOf("function clearReportDateFilter(", urlStart);
+  vm.runInContext(appJs.slice(urlStart, urlEnd), urlContext);
+  const summaryUrl = new URL(
+    urlContext.getReportRequestUrl("total", "202609", "ACompany", "SenderCo", "ReceiverCo"),
+    "http://localhost"
+  );
+  const exportUrl = new URL(
+    urlContext.getReportExportUrl("total", "202609", "ACompany", "SenderCo", "ReceiverCo"),
+    "http://localhost"
+  );
+  for (const url of [summaryUrl, exportUrl]) {
+    assert.strictEqual(url.searchParams.get("company_name"), "ACompany");
+    assert.strictEqual(url.searchParams.get("serial_number"), "202609");
+    assert.strictEqual(url.searchParams.get("sender_company"), "SenderCo");
+    assert.strictEqual(url.searchParams.get("receiver_company"), "ReceiverCo");
+  }
+  const emptyCompanyUrl = new URL(
+    urlContext.getReportRequestUrl("total", "202609", "", "", ""),
+    "http://localhost"
+  );
+  assert.strictEqual(emptyCompanyUrl.searchParams.has("company_name"), false);
 }
 
-function createReportDb(rows, keyword = "202609") {
+function createReportDb(rows, keyword = "202609", companyName = "") {
   const state = { queryCount: 0, connectionCount: 0, releaseCount: 0 };
   return {
     state,
@@ -266,8 +304,13 @@ function createReportDb(rows, keyword = "202609") {
             assert.ok(sql.includes("LEFT JOIN billing_info"));
             assert.ok(sql.includes("ORDER BY o.serial_number DESC"));
             assert.strictEqual(sql.includes("o.serial_number LIKE ?"), Boolean(keyword));
+            assert.strictEqual(sql.includes("o.company_name LIKE ?"), Boolean(companyName));
             const scopeParams = sql.includes("CAST(? AS BINARY)") ? ["FixtureCo"] : [];
-            assert.deepStrictEqual(params, [...scopeParams, ...(keyword ? [`%${keyword}%`] : [])]);
+            assert.deepStrictEqual(params, [
+              ...scopeParams,
+              ...(keyword ? [`%${keyword}%`] : []),
+              ...(companyName ? [`%${companyName}%`] : []),
+            ]);
             return [keyword ? rows.filter((row) => String(row.serial_number || "").includes(keyword)) : rows];
           }
 
@@ -292,6 +335,59 @@ function testCompanyFilters() {
     "WHERE o.serial_number LIKE ? AND o.sender_company LIKE ? AND o.receiver_company LIKE ?"
   );
   assert.deepStrictEqual(filter.params, ["%202609%", "%发件%", "%收件%"]);
+}
+
+function testCompanyNameFilter() {
+  const filter = buildReportFilter({
+    query: {
+      serial_number: "202609",
+      company_name: "  MainCo  ",
+      sender_company: "Sender",
+      receiver_company: "Receiver",
+    },
+  });
+  assert.strictEqual(
+    filter.whereClause,
+    "WHERE o.serial_number LIKE ? AND o.company_name LIKE ? AND o.sender_company LIKE ? AND o.receiver_company LIKE ?"
+  );
+  assert.strictEqual(filter.companyName, "MainCo");
+  assert.deepStrictEqual(filter.params, ["%202609%", "%MainCo%", "%Sender%", "%Receiver%"]);
+
+  const emptyCompanyFilter = buildReportFilter({
+    query: { company_name: "   " },
+  });
+  assert.strictEqual(emptyCompanyFilter.companyName, "");
+  assert.strictEqual(emptyCompanyFilter.whereClause, "");
+  assert.deepStrictEqual(emptyCompanyFilter.params, []);
+
+  const combinedFilter = buildReportFilter({
+    query: {
+      serial_number: "202609",
+      company_name: "MainCo",
+      sender_company: "Sender",
+      receiver_company: "Receiver",
+      date_field: "receive_date",
+      date_from: "2026-09-01",
+      date_to: "2026-09-30",
+    },
+    orderAccess: {
+      sql: () => "o.company_name IN (?)",
+      params: ["AllowedCo"],
+    },
+  });
+  assert.strictEqual(
+    combinedFilter.whereClause,
+    "WHERE o.company_name IN (?) AND o.receive_date >= CONCAT(?, ' 00:00:00') AND o.receive_date < DATE_ADD(?, INTERVAL 1 DAY) AND o.serial_number LIKE ? AND o.company_name LIKE ? AND o.sender_company LIKE ? AND o.receiver_company LIKE ?"
+  );
+  assert.deepStrictEqual(combinedFilter.params, [
+    "AllowedCo",
+    "2026-09-01",
+    "2026-09-30",
+    "%202609%",
+    "%MainCo%",
+    "%Sender%",
+    "%Receiver%",
+  ]);
 }
 
 function createUserDb(role) {
@@ -539,15 +635,32 @@ async function testReportQueryErrorsReleaseConnection() {
   assert.strictEqual(db.state.releaseCount, 2);
 }
 
+async function testCompanyNameFilterOnBothEndpoints() {
+  const db = createReportDb([], "202609", "ACompany");
+  const router = createReportsRouter(db, createUserDb("user"));
+  for (const endpoint of ["summary", "export"]) {
+    const response = await requestReport(
+      router,
+      `/api/reports/${endpoint}?serial_number=202609&company_name=%20ACompany%20`,
+      { "x-user-id": "1" }
+    );
+    assert.strictEqual(response.status, 200);
+  }
+  assert.strictEqual(db.state.connectionCount, 2);
+  assert.strictEqual(db.state.releaseCount, 2);
+}
+
 async function run() {
   testUnifiedReportFieldDefinitions();
   testCompanyFilters();
+  testCompanyNameFilter();
   testFrontendUsesSharedDefinition();
   await testReportEndpointsAndExcelExport();
   await testEmptyReportsAndIgnoredLegacyParameters();
   await testCompleteExcelMapping();
   await testDateOnlyReportExport();
   await testReportQueryErrorsReleaseConnection();
+  await testCompanyNameFilterOnBothEndpoints();
   console.log("report_management_feature_test: ok");
 }
 
