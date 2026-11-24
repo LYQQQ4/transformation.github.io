@@ -30,6 +30,10 @@ desktop.ini
 uploads/
 backend/uploads/
 
+# Docker 镜像归档文件
+mysql-8.0.tar
+transport-order-management-app.tar
+
 # 数据库文件
 *.sql
 *.db
