@@ -390,10 +390,17 @@ function testCompanyNameFilter() {
   ]);
 }
 
-function createUserDb(role) {
+function createUserDb(role, profiles = []) {
   return {
     async execute(sql, params) {
       if (sql.includes("FROM user_order_companies")) return [[{ company_name: "FixtureCo" }]];
+      if (sql.includes("FROM user_profiles")) {
+        return [profiles.filter((profile) => [
+          profile.id,
+          profile.legacy_sender_id,
+          profile.legacy_customer_id,
+        ].some((id) => params.includes(id)))];
+      }
       assert.strictEqual(sql, "SELECT id, role FROM users WHERE id = ? LIMIT 1");
       return params[0] === "1" ? [[{ id: 1, role }]] : [[]];
     },
@@ -565,6 +572,47 @@ async function testCompleteExcelMapping() {
   assert.deepStrictEqual(sheetRows, [EXPECTED_FIELD_LABELS, expected]);
 }
 
+async function testReportCompanyFallbackFromUserProfiles() {
+  const profiles = [
+    { id: "sender-1", company_name: "发件公司资料名" },
+    { id: "customer-1", company_name: "收件公司资料名" },
+  ];
+  const order = {
+    serial_number: "202609099",
+    sender_id: "sender-1",
+    customer_id: "customer-1",
+    sender_company: null,
+    receiver_company: "",
+  };
+  const router = createReportsRouter(
+    createReportDb([order], ""),
+    createUserDb("admin", profiles)
+  );
+  const headers = { "x-user-id": "1" };
+
+  const summaryResponse = await requestReport(router, "/api/reports/summary", headers);
+  assert.strictEqual(summaryResponse.status, 200);
+  const summary = await summaryResponse.json();
+  assert.strictEqual(summary.rows[0].sender_company, "发件公司资料名");
+  assert.strictEqual(summary.rows[0].receiver_company, "收件公司资料名");
+
+  const exportResponse = await requestReport(router, "/api/reports/export", headers);
+  assert.strictEqual(exportResponse.status, 200);
+  const workbook = XLSX.read(Buffer.from(await exportResponse.arrayBuffer()), { type: "buffer" });
+  const exportedRows = XLSX.utils.sheet_to_json(
+    workbook.Sheets[workbook.SheetNames[0]],
+    { header: 1, raw: false }
+  );
+  assert.strictEqual(
+    exportedRows[1][EXPECTED_FIELD_KEYS.indexOf("sender_company")],
+    "发件公司资料名"
+  );
+  assert.strictEqual(
+    exportedRows[1][EXPECTED_FIELD_KEYS.indexOf("receiver_company")],
+    "收件公司资料名"
+  );
+}
+
 async function testDateOnlyReportExport() {
   const cases = [
     { value: new Date(2026, 9, 26, 0, 5, 6), expected: "2026/10/26" },
@@ -658,6 +706,7 @@ async function run() {
   await testReportEndpointsAndExcelExport();
   await testEmptyReportsAndIgnoredLegacyParameters();
   await testCompleteExcelMapping();
+  await testReportCompanyFallbackFromUserProfiles();
   await testDateOnlyReportExport();
   await testReportQueryErrorsReleaseConnection();
   await testCompanyNameFilterOnBothEndpoints();

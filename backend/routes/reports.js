@@ -3,6 +3,7 @@ const XLSX = require("xlsx");
 
 const { requireUserAccess } = require("../lib/request_auth");
 const { loadOrderAccess } = require("../lib/order_access");
+const { hydrateOrderCompanyFields } = require("../lib/order_company_fields");
 const {
   buildTotalReportSummaryRows,
   ensureBillingInfoSchema,
@@ -222,7 +223,7 @@ function buildReportFilter(req) {
   };
 }
 
-async function loadReportSummary(db, reportType, filter) {
+async function loadReportSummary(db, userDb, reportType, filter) {
   if (reportType !== "total") {
     const error = new Error("\u5f53\u524d\u4ec5\u652f\u6301\u603b\u62a5\u8868");
     error.statusCode = 400;
@@ -238,7 +239,8 @@ async function loadReportSummary(db, reportType, filter) {
       filter.params
     );
 
-    return buildTotalReportSummaryRows(rows);
+    const hydratedRows = await hydrateOrderCompanyFields(rows, userDb);
+    return buildTotalReportSummaryRows(hydratedRows);
   } finally {
     connection.release();
   }
@@ -255,7 +257,7 @@ function createReportsRouter(db, userDb) {
 
       const reportType = normalizeReportType(req.query.report_type);
       const filter = buildReportFilter(req);
-      const summary = await loadReportSummary(db, reportType, filter);
+      const summary = await loadReportSummary(db, userDb, reportType, filter);
 
       return res.json({
         report_type: "total",
@@ -280,7 +282,7 @@ function createReportsRouter(db, userDb) {
 
       const reportType = normalizeReportType(req.query.report_type);
       const filter = buildReportFilter(req);
-      const summary = await loadReportSummary(db, reportType, filter);
+      const summary = await loadReportSummary(db, userDb, reportType, filter);
       const headerRow = summary.columns.map((column) => column.label || column.key);
       const dataRows = summary.rows.map((row) =>
         summary.columns.map((column) => row[column.key] ?? summary.emptyValueText)
